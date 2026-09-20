@@ -1,4 +1,4 @@
-# oteny_odoo — working agreements
+# Otenydoo — working agreements
 
 `CLAUDE.md` at the root is a symlink to this file. Read this file, then
 [`.claude/skills/SKILL.MD`](.claude/skills/SKILL.MD), then the skill of the

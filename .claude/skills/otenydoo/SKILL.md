@@ -1,9 +1,9 @@
 ---
-name: oteny-odoo
+name: otenydoo
 description: The repository of Oteny's generic Odoo modules — the layering rule, the release order, and how a business module extends a generic one.
 ---
 
-# oteny_odoo
+# Otenydoo
 
 ## The rule
 

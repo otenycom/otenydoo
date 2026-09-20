@@ -1,9 +1,9 @@
-# The gates of oteny_odoo. Install once per clone: `pre-commit install --hook-type pre-commit --hook-type pre-push`.
+# The gates of Otenydoo. Install once per clone: `pre-commit install --hook-type pre-commit --hook-type pre-push`.
 repos:
   - repo: local
     hooks:
       - id: customer-template-gate
-        name: One business is never the template (oteny_odoo rule)
+        name: One business is never the template (Otenydoo rule)
         entry: .git_hooks/customer_template_gate.py
         language: system
         files: '^(oteny_shortcut|oteny_audit|oteny_backup_trigger|oteny_bot|riverflow|odoo_parallel_tests|oteny_knowledge_sync|talents)/'

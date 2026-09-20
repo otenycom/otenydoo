@@ -22,7 +22,7 @@ A CrewRadar article may still name a sibling skill (``riverflow/SKILL.md``,
 configured knowledge root. The rewrite looks up the path in every configured
 root, same knowledge root first, then the others. A truly missing target still
 warns. An author does not need to rewrite the href to
-``../../oteny_odoo/.claude/skills/…``.
+``../../otenydoo/.claude/skills/…``.
 """
 
 import base64
@@ -228,7 +228,7 @@ class KnowledgeSync(models.AbstractModel):
         as-is, then with a ``skills/`` prefix. ``link_map`` holds every configured
         knowledge root (same root last). A path that escapes this tree is tried as
         a ``skills/…`` tail against that map, so
-        ``../../oteny_odoo/.claude/skills/riverflow/SKILL.md`` can become a
+        ``../../otenydoo/.claude/skills/riverflow/SKILL.md`` can become a
         Knowledge link when that skill is published. An escape with no skill tail
         stays untouched. Returns ``(body, count)``.
         """

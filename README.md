@@ -1,4 +1,4 @@
-# oteny_odoo
+# Otenydoo
 
 Oteny's generic Odoo 19 modules, layered, and the Talents a bot reads to work
 them. Every business Odoo that Oteny serves depends on these modules. None of
@@ -14,7 +14,7 @@ in `.git_hooks/` holds it on every commit.
 | `oteny_audit` | `base`, `mail` | The audit trail: who changed which field when, on any model. |
 | `oteny_backup_trigger` | `base` | Trigger an Odoo.sh backup from a button or a cron. |
 | `oteny_bot` | `base`, `mail`, `web` | The bridge between an Oteny business bot and this Odoo: the Discuss channel, the activity log, the form session, and the work contract the platform calls. |
-| `oteny_knowledge_sync` | `base`, `mail`, `knowledge` | Publish every configured repository's `.claude/skills` as locked Knowledge articles, one tree per root. A markdown skill path is resolved across every configured root, so a CrewRadar article can name an Oteny Odoo skill. |
+| `oteny_knowledge_sync` | `base`, `mail`, `knowledge` | Publish every configured repository's `.claude/skills` as locked Knowledge articles, one tree per root. A markdown skill path is resolved across every configured root, so a CrewRadar article can name an Otenydoo skill. |
 | `riverflow` | `base`, `mail`, `documents`, `oteny_shortcut` | The workflow engine: services, states, transitions, and the bot dispatch that hands work to a bot. |
 | `odoo_parallel_tests` | `base` | The parallel test runner: clones the test database and runs batches in worker processes. |
 
@@ -32,13 +32,13 @@ path before the business's repository, so a module here shadows nothing and is
 shadowed by nothing:
 
 ```zsh
-git clone git@github.com:otenycom/oteny_odoo.git ~/oteny/oteny_odoo
+git clone git@github.com:otenycom/otenydoo.git ~/oteny/otenydoo
 # addons path, in this order
-~/odoo/odoo19/addons,~/odoo/enterprise19,~/oteny/oteny_odoo,~/oteny/radar
+~/odoo/odoo19/addons,~/odoo/enterprise19,~/oteny/otenydoo,~/oteny/radar
 ```
 
 A business repository (radar is the first) carries this repository as a git
-submodule at `oteny_odoo/`, so its odoo.sh build sees the same commit its
+submodule at `otenydoo/`, so its odoo.sh build sees the same commit its
 developers do. Upgrade order after a pull: the modules here first, then the
 business's (`-u oteny_shortcut,oteny_audit,oteny_backup_trigger,oteny_bot,oteny_knowledge_sync,riverflow`).
 
@@ -49,7 +49,7 @@ parallel runner on a test database:
 
 ```zsh
 ~/odoo/venv/bin/python3 ~/odoo/odoo19/odoo-bin --stop-after-init --test-enable \
-  --addons-path=~/odoo/odoo19/addons,~/odoo/enterprise19,~/oteny/oteny_odoo \
+  --addons-path=~/odoo/odoo19/addons,~/odoo/enterprise19,~/oteny/otenydoo \
   -d cr-test -u oteny_shortcut,oteny_audit,oteny_bot,riverflow,oteny_knowledge_sync,odoo_parallel_tests \
   --test-tags=oteny_shortcut,oteny_audit,oteny_bot,riverflow,oteny_knowledge_sync,odoo_parallel_tests
 ```

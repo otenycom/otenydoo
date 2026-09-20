@@ -12,7 +12,7 @@ For crewradar, riverflow, and rivercreds tests:
 cd /Users/ries/oteny/radar && ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo-bin \
   --stop-after-init \
   -p 8068 \
-  --addons-path=../../odoo/odoo19/addons,/Users/ries/odoo/enterprise19,/Users/ries/oteny/oteny_odoo,/Users/ries/oteny/radar \
+  --addons-path=../../odoo/odoo19/addons,/Users/ries/odoo/enterprise19,/Users/ries/oteny/otenydoo,/Users/ries/oteny/radar \
   --without-demo=True \
   --http-interface 127.0.0.1 \
   --test-enable \
@@ -36,7 +36,7 @@ Manual equivalent on database `cr-test` (same addons path and credentials as abo
 cd /Users/ries/oteny/radar && ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo-bin \
   --stop-after-init \
   -p 8068 \
-  --addons-path=../../odoo/odoo19/addons,/Users/ries/odoo/enterprise19,/Users/ries/oteny/oteny_odoo,/Users/ries/oteny/radar \
+  --addons-path=../../odoo/odoo19/addons,/Users/ries/odoo/enterprise19,/Users/ries/oteny/otenydoo,/Users/ries/oteny/radar \
   --without-demo=True \
   --http-interface 127.0.0.1 \
   --test-enable \
@@ -63,7 +63,7 @@ For oteny_audit tests (not in use / disregard):
 cd /Users/ries/oteny/radar && ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo-bin \
   --stop-after-init \
   -p 8068 \
-  --addons-path=~/odoo/odoo19/addons,~/odoo/enterprise19,~/oteny/oteny_odoo,~/oteny/radar \
+  --addons-path=~/odoo/odoo19/addons,~/odoo/enterprise19,~/oteny/otenydoo,~/oteny/radar \
   --without-demo=True \
   --http-interface 127.0.0.1 \
   -i oteny_audit \
@@ -92,7 +92,7 @@ Add tags to new test classes:
 
 - For base `crewradar` module tests, use `crewradar` as the module tag.
 - CrewRadar-derived addons (`crewradar_wilma`, `crewradar_cuneus_sign`, `crewradar_creds`, `crewradar_sign`, `crewradar_marinetraffic`) and `rivercreds`: include `crewradar` in `@tagged(...)` alongside the module-specific tag so `--test-tags=crewradar` still runs that stack as a convenience.
-- Generic modules in `oteny_odoo` (`oteny_shortcut`, `oteny_knowledge_sync`, `riverflow`, `oteny_audit`, …) gate a deploy through their **own** addon tag. `odoo.testTags` equals `odoo.installModules`. Do not add a leftover `crewradar` tag on a generic module — that is how `oteny_shortcut` used to hide from the gate, and how a class tagged only `oteny_knowledge_sync` never ran.
+- Generic modules in `otenydoo` (`oteny_shortcut`, `oteny_knowledge_sync`, `riverflow`, `oteny_audit`, …) gate a deploy through their **own** addon tag. `odoo.testTags` equals `odoo.installModules`. Do not add a leftover `crewradar` tag on a generic module — that is how `oteny_shortcut` used to hide from the gate, and how a class tagged only `oteny_knowledge_sync` never ran.
 
 ```python
 from odoo.tests import tagged

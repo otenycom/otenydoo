@@ -98,7 +98,7 @@ class TestRoots(TransactionCase):
         """A healthy two-root upgrade: Alpha names Beta as a sibling, the old
         one-tree shape. That becomes a Knowledge link. No
         ``Could not resolve link`` WARNING. The
-        ``../../oteny_odoo/.claude/skills/…`` escape is not required.
+        ``../../otenydoo/.claude/skills/…`` escape is not required.
         """
         skill_md = self.root_a / ".claude" / "skills" / "alpha-skill" / "SKILL.md"
         skill_md.write_text(skill_md.read_text().rstrip() + "\n\nSee [beta](../beta-skill/SKILL.md).\n")

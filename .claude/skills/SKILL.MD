@@ -1,4 +1,4 @@
-# oteny_odoo skills
+# Otenydoo skills
 
 > The skills our developers and AI agents read to work on the generic Oteny
 > modules. `oteny_knowledge_sync` publishes this tree into the Knowledge app of
@@ -8,7 +8,7 @@
 
 | Skill | Description |
 |-------|-------------|
-| [oteny-odoo](oteny-odoo/SKILL.md) | The repository itself: the layering rule, the release order, how a business module extends a generic one. |
+| [otenydoo](otenydoo/SKILL.md) | The repository itself: the layering rule, the release order, how a business module extends a generic one. |
 | [odoo-development](odoo-development/SKILL.md) | The Odoo 19 craft: module structure, coding patterns, XML, SCSS, tests, migrations, the parallel test runner. |
 | [oteny-shortcut](oteny-shortcut/SKILL.md) | Shortcuts and filters on any model's views. |
 | [oteny-audit](oteny-audit/SKILL.md) | The audit trail model and mixin. |

@@ -320,9 +320,9 @@ Bodies rendered with **`engine='inline_template'`** (e.g. via `mail.render.mixin
 |--------|------|
 | crewradar | `~/oteny/radar/crewradar` |
 | rivercreds | `~/oteny/radar/rivercreds` |
-| riverflow | `~/oteny/oteny_odoo/riverflow` |
-| oteny_audit | `~/oteny/oteny_odoo/oteny_audit` |
-| oteny_knowledge_sync | `~/oteny/oteny_odoo/oteny_knowledge_sync` |
+| riverflow | `~/oteny/otenydoo/riverflow` |
+| oteny_audit | `~/oteny/otenydoo/oteny_audit` |
+| oteny_knowledge_sync | `~/oteny/otenydoo/oteny_knowledge_sync` |
 | Odoo core | `~/odoo/odoo19` |
 | Odoo enterprise | `~/odoo/enterprise19` |
 

@@ -1,4 +1,4 @@
-# Talents of oteny_odoo
+# Talents of Otenydoo
 
 The Talents a bot reads to work these modules. One folder per bundle, in the
 shape the Oteny Talent standard defines (`agent-profile.yaml`, `SKILL.md`,

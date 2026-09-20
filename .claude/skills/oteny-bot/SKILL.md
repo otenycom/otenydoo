@@ -15,8 +15,9 @@ machine. It talks to this Odoo over a scoped `/json/2/` uplink. Staff review
 exchanges on **Oteny Bots** without leaving Odoo.
 
 This skill is the operator surface. The one-live-slot **gate** stays in
-[riverflow](../riverflow/SKILL.md). Barney's MFNL workflow stays in
-[cuneus-barney](../cuneus-barney/SKILL.md). Do not fork occupancy here.
+[riverflow](../riverflow/SKILL.md). A consuming business's own
+bot-specific workflow — its scope-lock, harness, and consumption rules —
+stays in that business's own skill bundle. Do not fork occupancy here.
 
 ## When to Use This Skill
 
@@ -140,15 +141,10 @@ fault above; the migration closes it, or close it by hand with the sibling's
 outcome. No sibling and an empty `bot_run_started_at` on the origin record means
 the dispatch was never consumed: read `mail.message.author_id` on the flagged
 message. It must be OdooBot, never the bot's partner. Then check the bot's
-`uplink_ref` and the dispatch cron (a restored database severs both). Live case:
-test1 session 51, 2026-09-05. Production had the same shape once, session 11 on
-2026-09-04.
+`uplink_ref` and the dispatch cron (a restored database severs both).
 
-Proven live on test1 on 2026-09-06 (Path B, the stub meldloket): Barney handed
-33357 back through its own call, the belt dispatched 33007 as OdooBot, Barney
-consumed it in the same second, and 33007 closed as one OK row (session 55)
-after a 741 s draft. The inline drain itself lost a serialization race to
-Barney's narration in that run; the radar ledger holds that finding.
+The live proof of this mechanism, and its test-session history, is a
+consuming business's own record, kept in that business's own bot skill.
 
 ## Layer split
 
@@ -174,44 +170,135 @@ the Steel jar in, and a live Open must not be stolen.
 A second bot for a company inherits the gate by flagging its login-park states.
 It inherits this UI when a later bridge maps that bot to its workflow.
 
+## Host Talent Delivery
+
+`oteny_bot` and `riverflow` are standalone modules. Any Odoo project that
+installs either one is usable by a bot: the tooling the bot needs is a
+Talent that lives **inside the module itself**, at
+`oteny_bot/talents/oteny-odoo-access-talent/` and
+`riverflow/talents/riverflow-execute-talent/`. Delivery is a Talent git
+path — the platform pulls the folder from the module's own git ref onto
+the box. The bot never clones and never needs `terminal` or
+`execute_code`. `odoo_client` stays the RPC tool; it does not download
+the Talent from an Odoo HTTP API.
+
+**Pit of failure.** The bot-facing recipe sits only in `.claude/skills`.
+An operator reads it, the running bot never sees it — or a consuming
+Talent copies the host recipe, and the copy drifts from the addon.
+
+**Pit of success.** Configure a Talent git path at the module folder. The
+platform pulls that ref, so the addon and the skill the bot reads move
+together.
+
+A bot that must fill a standard form needs the `oteny_bot` bundle. A bot
+that must press a riverflow button needs both. A consuming business adds
+its own Talent as a third path, which **composes** the host bundles — it
+does not copy their recipe.
+
+**How a bot gets the path.** Each bundle is one `hh.talent.source` row:
+same git repo, a subdirectory (`repo_subpath`), and a ref matching the
+branch the addon is deployed from (`pin_mode: follow`). A second Odoo
+project that vendors either module uses *that* project's own git URL and
+the same `repo_subpath`. These folders are git content, not Odoo data —
+do not add them to `__manifest__.py`, and do not add a controller that
+serves the bundle over HTTP.
+
+**What lives where.** The Talent (runtime) holds numbered checklists,
+verb tables, worked examples, and the fail-closed rules — `odoo_client`
+only, no `terminal`, no `execute_code`, no client-app facts. This
+`.claude/skills` page covers how to change the addon itself; it points
+at the bundle rather than duplicating the bot's own recipe.
+
 ## Form session
 
-`oteny.form.session` is the list and form adapter. A bot opens the same
-act_window a person opens. It reads a list, opens a form, sets visible
-fields, and saves. `set` refuses a field the photo does not list as
-amendable. The session row holds `view_state` and `fields_spec`. Those
-values never go back to the model. The host does not import
-`odoo.tests.form.Form`. `open` also accepts a prepared
-`ir.actions.act_window` dict, so a wizard door can keep its context.
-Create-save keeps invisible defaults and x2many ids.
+`oteny.form.session` is the list and form adapter: a bot browses the
+views a person already has on a model, then uses list and form the way
+that person does. It does not invent a second write path. A bot opens
+the same `act_window` a person opens (an xmlid, or a prepared
+`ir.actions.act_window` dict, so a wizard door can keep its context). It
+reads a list, opens a form, sets visible fields, and saves. `set` refuses
+a field the photo does not list as amendable (invisible, readonly, or
+absent) — it never writes one silently. The session row holds
+`view_state` and `fields_spec`; those values never go back to the model,
+and the host does not import `odoo.tests.form.Form`
+(`Form._perform_onchange` calls `self._env.clear()`, which would wipe a
+live request cache). Create-save keeps invisible defaults and x2many ids.
+
+The session row is transient, so Odoo's vacuum can remove an old handle.
+A verb on a dead handle returns a clear handle-expired error, and the bot
+re-opens.
+
+**The `/json/2/` wire the bot sees:**
+
+| Verb | Job |
+| --- | --- |
+| `views` | Given a model, return the act_windows and list/form xmlids the bot user may open. Name, `view_mode`, xmlid. No arch. |
+| `list` | Open a list view. `web_search_read` with that view's `fields_spec`. Visible columns only. Domain and limit. |
+| `open` | Open a form. No `res_id` = first `onchange` (new). With `res_id` = `web_read` then a handle. |
+| `set` | Overlay visible fields. Run `onchange` on the stored snapshot. Return the visible photo. Surface `warning`. |
+| `save` | `web_save`. Create or write the business row. |
+| `discard` | Drop the handle. No `write`. |
+| `unlink` | Delete when the person could delete from that view. |
+
+`open` / `set` return a `handle` (opaque), `model`, `description` (plain
+help text when the action has it), the visible amendable `fields` (each
+with `name`, `type`, `required`, `readonly`, `value`, `help`, and
+`selection` when it has one), and `actions` (footer methods the view
+already shows). `actions` is a photo, not a verb — a generic `click`
+verb waits until a Talent needs one. The adapter never returns the view
+arch, `view_state`, or `fields_spec` to the model, and the agent never
+calls `fields_get` or reads `ir.ui.view` directly.
+
+`oteny_bot` depends on `base`, `mail`, and `web` (the live `onchange` and
+`web_save` live in `web/models/models.py`; `BaseModel.onchange` itself
+raises `NotImplementedError`). It does not depend on `riverflow`.
+
+**Proof.** `oteny_bot/tests/test_form_session_partner.py`
+(`test_form_session`, `post_install`, `-at_install`) drives the adapter
+against `res.partner`: open the views, list and search, create via an
+empty-`res_id` open + set + save, prove an onchange effect survives save
+(`is_company` from `company_type`), refuse a `set` on an injected
+readonly field or a field the photo does not list, edit, and delete.
+Odoo's own twin is `test_form_create.py`'s `test_create_res_partner` and
+`TestPartnerForm` in `test_res_partner.py`.
 
 The recipe the bot reads is the module Talent
 [`talents/oteny-odoo-access-talent/`](../../../talents/oteny-odoo-access-talent/SKILL.md).
-Delivery is a talent git path. See
-[host-module-talents.md](plans/host-module-talents.md).
-This skill is the operator surface. It is not the runtime copy.
+Delivery is a Talent git path — see [Host Talent Delivery](#host-talent-delivery)
+above. This skill is the operator surface. It is not the runtime copy.
 
 **Commissioning a pilot bot.** Fast checklist:
-[`pilot-bot-commissioning.md`](references/pilot-bot-commissioning.md).
-Worked example: [`betty-live-proof.md`](plans/betty-live-proof.md).
+[`pilot-bot-commissioning.md`](references/pilot-bot-commissioning.md),
+distilled from a live proof recorded in the pilot business's own skill
+bundle.
 
-**Path B author footguns (Betty live proof, 2026-09-03).**
+**Author footguns (found wiring up a first pilot bot).**
 
-- A pilot bot needs its **own** seam login before the first live turn.
-  `ensure_bot` rehomes the oldest `oteny.bot` for the calling user
-  ([host-module-talents.md](plans/host-module-talents.md) §7).
+- A pilot bot needs its **own** seam login before its first live turn.
+  `ensure_bot` calls `_canonical_same_user_bot()`, which assumes **one
+  bot per seam user**: it finds the oldest active `oteny.bot` row whose
+  `bot_user_id` matches the *calling* login, and a caller's harness
+  typically calls `ensure_bot(uplink_ref=ref, name=ref)` on every run,
+  not just on first contact. Two bots sharing one seam login means the
+  first live run of the newer one **rehomes the older bot's**
+  `uplink_ref` onto the newer box and deactivates the older one.
+  `oteny_bot/tests/test_oteny_bot.py`
+  `test_ensure_bot_rehomes_stale_same_user_uplink_ref` proves the exact
+  mechanism. Mint a pilot bot's own seam login and API key before its
+  first live turn; do not skip that step to save one.
 - On a locked database, `group_service_reader` alone may not create or
-  unlink `res.partner`. Betty also needs `base.group_partner_manager`
-  for the Contacts probe.
+  unlink `res.partner`; a pilot bot also needs
+  `base.group_partner_manager` for a Contacts-style probe.
 - `views()` reads the action/view catalog as **sudo**, then filters to
   what the user may open. Without that, a seam login hits 403 on
   `ir.actions.act_window`.
 - Isolated Discuss posts do **not** create `oteny.bot.session` rows.
-  Grade with `oteny traces --ref <box>` on channel traffic.
+  Grade with `oteny traces --ref <box>` on channel traffic instead.
 - `odoo_client` passes the host as its first positional arg
-  (`oteny.form.session`). Business model names belong in **kwargs** as
-  `model` or `res_model`. A name collision raises `TypeError` on the
-  box until `hh-odoo-client` renames that arg to `odoo_model`.
+  (`oteny.form.session`). A business model name belongs in **kwargs** as
+  `model` or `res_model` — a name collision on the positional arg raises
+  `TypeError` until the calling library renames that arg (e.g. to
+  `odoo_model`).
 
 Operator pointers:
 [talent-author-host.md](references/talent-author-host.md),
@@ -230,24 +317,12 @@ The riverflow door is
 
 Do not start Happypath. Do not use service `19319`.
 
-## crmain walk (neutralized)
-
-Leave the local Barney provisioner holding. Do not restore. Do not cancel
-`24836`. Do not start Happypath.
-
-Current dump (ids and state names only):
-
-| Item | State |
-|---|---|
-| Barney Slot | `idle`. Note names leftover *Needs Login*. Occupant empty. Queued count 0. Dance latch off. |
-| `29664` | *Draft ready for review* (fill ended; no longer occupant) |
-| Thinpath `33928` | *Not Started* |
-| Thinpeer `33945` | *Draft ready for review* |
-| Leftover `24836` | *Needs Login*. Does **not** occupy. |
-| `19319` | *Done*. Do not open. |
+## Idle-state visibility
 
 Open holding service and Open waiting services stay hidden while idle and
-while the queued count is 0.
+while the queued count is 0. A consuming business's own live test-session
+state (ids, holding status) is tracked in that business's own bot skill,
+not here.
 
 ## Key files
 
@@ -259,8 +334,9 @@ while the queued count is 0.
 - `crewradar_cuneus_sign/models/oteny_bot.py` — derived `live_slot_*`
 - `crewradar_cuneus_sign/views/oteny_bot_live_slot_views.xml` — Slot badge + form group
 - `riverflow/models/riverflow_state_bot_mixin.py` — occupy, drain, occupant-of-workflow, wizard `bot_claim`
-- Gate SoR: `cuneus_barney/plans/barney-one-live-run-queue.md`
-- UI history: `cuneus_barney/plans/barney-one-live-slot-ui.md`
-- Part 1 plan (built): [`plans/oteny-odoo-access.md`](plans/oteny-odoo-access.md) — the `oteny.form.session` form/list adapter; parts 2–3 are linked in its header
-- Host Talent delivery: [`plans/host-module-talents.md`](plans/host-module-talents.md)
-- Part 2 door: [`talents/riverflow-execute-talent/`](../../../talents/riverflow-execute-talent/SKILL.md)
+- The one-live-run queue gate and its UI history are a consuming
+  business's own record, kept in that business's own bot skill.
+- Standard Odoo access (the `oteny.form.session` form/list adapter): see
+  [Form session](#form-session) above.
+- Host Talent delivery: see [Host Talent Delivery](#host-talent-delivery) above.
+- Riverflow's execute door: [`talents/riverflow-execute-talent/`](../../../talents/riverflow-execute-talent/SKILL.md)

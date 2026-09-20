@@ -11,5 +11,5 @@ verbs.
 This page is for operators who change the `riverflow` addon. It
 is not the runtime copy.
 
-Delivery and composition:
-[host-module-talents.md](../../oteny-bot/plans/host-module-talents.md).
+Delivery and composition: [`oteny-bot` skill — Host Talent
+delivery](../../oteny-bot/SKILL.md#host-talent-delivery).

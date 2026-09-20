@@ -200,7 +200,7 @@ class IrModuleModule(models.Model):
 
 This follows the same pattern as Odoo's `account` module (`addons/account/models/ir_module.py`). Used in crewradar for automatic skill-to-Knowledge sync on every upgrade.
 
-The method must return a marshalable dict (`{"articles_synced": N}`), never `None`. Odoo 19 XML-RPC dumps with `allow_none=False`; `crewradar` **19.0.10.9** ships that contract. See [Knowledge Skill Sync — Manual admin call](../../../../../radar/.claude/skills/crewradar-development/references/knowledge-skill-sync.md#manual-admin-call-xml-rpc).
+The method must return a marshalable dict (`{"articles_synced": N}`), never `None` — Odoo 19 XML-RPC dumps with `allow_none=False`. Full history and the manual-call recipe: [oteny-knowledge-sync — Manual admin call](../../oteny-knowledge-sync/SKILL.md#manual-admin-call-xml-rpc).
 
 ### @api.depends Declaration
 
@@ -321,7 +321,7 @@ notification gap.
 `riverflow.service._mark_credential_search_term_mirrors()` in rivercreds,
 called from `rivercreds.credential` create/write/unlink. Cuneus extends
 that mark for `mfnl_search_terms`. Decision
-record: [Credential Search Terms](../../rivercreds/plans/credential-search-terms.md).
+record lives with the consuming business's own credential module.
 
 ### Disabling Group Aggregation
 
@@ -426,7 +426,7 @@ A `store=False` Boolean in a form (a filter toggle above a list) belongs to the 
 - A new Boolean column with a Python `default` needs **no migration** — Odoo's `_init_column` fills existing rows on `-u`.
 - **Pick a widget that runs the onchange.** `boolean_toggle` autosaves by default: it calls `record.update(changes, {save: true})`, which Odoo turns into `withoutOnchange: true` plus an immediate save, so the `@api.onchange` never runs and the preference is never stored (the list still refreshes, because the save re-reads the compute, which is why nobody noticed). `selection_badge` and `radio` call `record.update()` without save, so the onchange runs. Found on 2026-09-14 after the toggle version had been live for four days with nothing stored.
 
-Real example (historical, crewradar 19.0.10.67 to 19.0.10.68; the control was retired in 19.0.10.69 in favour of oteny_shortcut Forms shortcuts, which keep no per-user memory at all — the pattern below stays valid for a preference that must be remembered): the Services tab **Show** control (`crewradar.service.filter.mixin.service_filter`, a required non-stored Selection with the `selection_badge` widget; first shipped as a `boolean_toggle` in 19.0.10.57, where the memory never fired) — see [crewradar-hr](../../crewradar-hr/SKILL.md) § Services Tab Filters. Since 19.0.10.68 the control uses `crewradar_service_filter`, a subclass of the badge widget: `record.update()` also marks the record dirty, and a view preference must not show the save / discard buttons, so on a clean record the widget stores the choice with an ORM call (`set_service_filter`) and calls `record.load()`; the non-stored field re-reads its default, which reads the stored choice, and the record stays clean. On a dirty or new record it keeps `record.update()`, because a reload discards unsaved edits.
+Real example (historical, crewradar 19.0.10.67 to 19.0.10.68; the control was retired in 19.0.10.69 in favour of oteny_shortcut Forms shortcuts, which keep no per-user memory at all — the pattern below stays valid for a preference that must be remembered): the Services tab **Show** control (`crewradar.service.filter.mixin.service_filter`, a required non-stored Selection with the `selection_badge` widget; first shipped as a `boolean_toggle` in 19.0.10.57, where the memory never fired) — documented in full in the consuming business's own skill bundle, § Services Tab Filters. Since 19.0.10.68 the control uses `crewradar_service_filter`, a subclass of the badge widget: `record.update()` also marks the record dirty, and a view preference must not show the save / discard buttons, so on a clean record the widget stores the choice with an ORM call (`set_service_filter`) and calls `record.load()`; the non-stored field re-reads its default, which reads the stored choice, and the record stays clean. On a dirty or new record it keeps `record.update()`, because a reload discards unsaved edits.
 
 ### A dotted `@api.depends` cannot cross a non-stored, search-based One2many
 
@@ -435,7 +435,7 @@ Real example (historical, crewradar 19.0.10.67 to 19.0.10.68; the control was re
 - **Declare only the One2many itself** in that case, and say so in a comment beside the decorator. A non-stored compute is recomputed on every fresh read anyway, so the undeclared sub-fields only affect the same-transaction cache.
 - **If the dependency is really needed**, give the parent a stored One2many with a real `inverse_name` as the dependency handle (the pattern of `hr.employee.service_dependency_ids`), or add a `search=` method to the One2many.
 
-Real example (historical, crewradar 19.0.10.67 to 19.0.10.68; the mixin was removed in 19.0.10.69): `crewradar.service.filter.mixin._compute_filtered_service_ids` read `deadline` and `is_end_state` of each service but depended on `service_ids` only, because on `hr.employee` and `crewradar.site` that field is a non-stored One2many with neither `inverse_name` nor `search=` (crewradar 19.0.10.67, see [crewradar-hr](../../crewradar-hr/SKILL.md) § Services Tab Filters). On `crewradar.log.entry` the same field is stored with `inverse_name="log_entry_id"`, so the limit is per model, and a mixin shared by several models must follow the weakest one.
+Real example (historical, crewradar 19.0.10.67 to 19.0.10.68; the mixin was removed in 19.0.10.69): `crewradar.service.filter.mixin._compute_filtered_service_ids` read `deadline` and `is_end_state` of each service but depended on `service_ids` only, because on `hr.employee` and `crewradar.site` that field is a non-stored One2many with neither `inverse_name` nor `search=` (crewradar 19.0.10.67, documented in the consuming business's own skill bundle, § Services Tab Filters). On `crewradar.log.entry` the same field is stored with `inverse_name="log_entry_id"`, so the limit is per model, and a mixin shared by several models must follow the weakest one.
 
 ### Transient Binary Values Do Not Survive the Save Round-Trip
 
@@ -446,7 +446,7 @@ A value placed in a `fields.Binary` on a **transient/new** wizard record (e.g. s
 
 ### `ir.attachment` Re-encodes Images (checksum ≠ sha1 of the source)
 
-Odoo re-encodes image attachments on store (its image-processing path re-saves the bitmap), so an attachment's `checksum` is the sha1 of the **transformed** bytes, not of the bytes you passed in — a 271 KB PNG comes back ~290 KB with a different sha1. **Don't dedupe image attachments by comparing your own `sha1(file_bytes)` to `ir.attachment.checksum`** — it never matches, so you create a fresh attachment on every run. Key on a marker you control instead (e.g. store `sha1(source)` in `description` and search that), and `sudo()` the search so `res_id=0` / access-restricted attachments aren't hidden. Real example: the Knowledge skill-sync image embedding (`SkillSyncService._embed_body_images`) — see [Knowledge Skill Sync § Duplicate image attachments](../../../../../radar/.claude/skills/crewradar-development/references/knowledge-skill-sync.md#duplicate-image-attachments-on-every-sync).
+Odoo re-encodes image attachments on store (its image-processing path re-saves the bitmap), so an attachment's `checksum` is the sha1 of the **transformed** bytes, not of the bytes you passed in — a 271 KB PNG comes back ~290 KB with a different sha1. **Don't dedupe image attachments by comparing your own `sha1(file_bytes)` to `ir.attachment.checksum`** — it never matches, so you create a fresh attachment on every run. Key on a marker you control instead (e.g. store `sha1(source)` in `description` and search that), and `sudo()` the search so `res_id=0` / access-restricted attachments aren't hidden. Real example: the Knowledge skill-sync image embedding (`SkillSyncService._embed_body_images`, § Duplicate image attachments in that module's own skill bundle).
 
 ### One2many Line-to-Line Cascade (Onchange Gotcha)
 
@@ -937,7 +937,7 @@ creds = employee.with_context(active_test=False).credential_ids.filtered(
 )
 ```
 
-**Real-world example**: The A1 overlap detection in `_get_submitted_a1_credentials()` was bitten by this when a restarted service's own A1 Certificate appeared as a false overlap. The non-stored `a1_application_json` computed field ran in different ORM environments with different `active_test` flags (wizard `default_get` vs compute triggered by a state write), causing `c not in service.credential_ids` to behave differently. Fixed by replacing with `c.service_id != exclude_service`. See [A1 workflow — SVB Plus One Day Rule](../../crewradar-cuneus/references/a1-workflow.md#svb-plus-one-day-rule-overlap-auto-resolution).
+**Real-world example**: The A1 overlap detection in `_get_submitted_a1_credentials()` was bitten by this when a restarted service's own A1 Certificate appeared as a false overlap. The non-stored `a1_application_json` computed field ran in different ORM environments with different `active_test` flags (wizard `default_get` vs compute triggered by a state write), causing `c not in service.credential_ids` to behave differently. Fixed by replacing with `c.service_id != exclude_service`. Full case documented in the consuming business's own skill bundle.
 
 ## View Requirement Patterns
 
@@ -1161,7 +1161,7 @@ if float_compare(amount, threshold, precision_digits=2) > 0:
 - Match the precision at which the value is **displayed** to the user. A value that displays as `0.0 hours` (via `.1f`) must not fire a "non-zero" check at a stricter precision — it produces user-visible inconsistency.
 - For currency, prefer the currency's `decimal_places` (`precision_rounding=currency.rounding`) rather than a hardcoded `precision_digits`.
 
-**Crewradar example**: The `vacation_balance_at_contract_end` check on `hr.employee` originally used `vacation_balance != 0` and fired on residue like `1.4e-14` hours while displaying "0.0 hours" to the user. The fix uses `float_is_zero(vacation_balance, precision_digits=2)` — balances under 0.01 h (≈36 s) count as zero. See [Salary troubleshooting — Contract ends with vacation balance](../../crewradar-salary/references/troubleshooting.md#contract-ends-with-remainingnegative-vacation-balance-x-hours).
+**Crewradar example**: The `vacation_balance_at_contract_end` check on `hr.employee` originally used `vacation_balance != 0` and fired on residue like `1.4e-14` hours while displaying "0.0 hours" to the user. The fix uses `float_is_zero(vacation_balance, precision_digits=2)` — balances under 0.01 h (≈36 s) count as zero. Full case documented in the consuming business's own skill bundle.
 
 ## Invoice Line Rounding (price_subtotal vs amount_currency)
 
@@ -1209,7 +1209,7 @@ Odoo absorbs delta=-0.01 into the largest line:
   L10423: price_subtotal=6037.20, amount_currency=-6037.19
 ```
 
-**Crewradar example**: The DATEV export wizard (`crewradar/wizards/crewradar_datev_export_wizard.py`) was previously using `price_subtotal` and recalculating per line; switched to `-amount_currency` plus a per-invoice reconciliation pass. See [DATEV Export — Amount Calculation](../../crewradar-billing/references/datev-export.md#amount-calculation).
+**Crewradar example**: The DATEV export wizard (`crewradar/wizards/crewradar_datev_export_wizard.py`) was previously using `price_subtotal` and recalculating per line; switched to `-amount_currency` plus a per-invoice reconciliation pass. Full case documented in the consuming business's own skill bundle.
 
 ### This is Odoo's own pattern
 
@@ -1241,7 +1241,7 @@ When `mail.render.mixin._render_template()` (or equivalent) runs with **`engine=
 
 **Preview vs send dates**: Templates that reference `object.sent_date` (or similar) may show an **empty date** in wizard previews if that field is only set when the user clicks Generate. Prefer a value available in the rendering context at preview time (e.g. `datetime.date.today().strftime('%d.%m.%Y')` when the context exposes `datetime`), or another field that is always set before render.
 
-**Crewradar example**: A1 cover letter `mail.template` bodies in `crewradar_cuneus_sign/data/a1_cover_letter_template.xml` must follow these rules; see [A1 workflow — Cover letter for all SVB submissions](../../crewradar-cuneus/references/a1-workflow.md#cover-letter-for-all-svb-submissions).
+**Crewradar example**: A1 cover letter `mail.template` bodies in `crewradar_cuneus_sign/data/a1_cover_letter_template.xml` must follow these rules; full case documented in the consuming business's own skill bundle.
 
 **Calling a model method from a template**: a QWeb body (or an inline field such as `partner_to`) may call a **public** method on the record — `object.site_partner_ids_for('crew_hiring')`, `object.employee_id.next_placement_start_date()` — but the template safe-eval blocks underscore names, so a `_private` helper needs a public twin. Such a method **must accept an empty recordset**: `mail.template` renders the body at save time against a record whose relations are empty ("Error while checking if template can be rendered for field body_html"), and `ensure_one()` on `hr.employee()` raises where a plain field access would just be falsy. Return `False` for an empty `self` before `ensure_one()`. Seen 2026-09-09 on the passport reminder: the failure surfaced inside a `convert_file(mode="init")` migration, before any test ran.
 
@@ -1356,7 +1356,7 @@ def _compute_credential_auto_add_trigger(self):
 
 **Rule**: whenever a flow runs under such a suppression flag *and* mutates the compute's dependencies, it must **explicitly re-run the suppressed work at the end** of the flow (after its own state writes are flushed, so guards see the final state). Do not rely on "the trigger will fire" — it already did.
 
-**Reference case**: the Upload Permit close silently dropped employees off the work-permit radar until the wizard's `create_related_records` re-ran `auto_add_services` explicitly on every end-state close. Full incident record: [work-permit-golden-rules § Upload-close radar drop](../../rivercreds/references/work-permit-golden-rules.md#upload-close-radar-drop-found-live-via-r3-fixed).
+**Reference case**: the Upload Permit close silently dropped employees off the work-permit radar until the wizard's `create_related_records` re-ran `auto_add_services` explicitly on every end-state close. Full incident record in the consuming business's own skill bundle.
 
 **Corollary**: an invariant that matters ("always exactly one open service") needs an *enforcer* at every path that can break it. A check result that only detects the violation ("should self-heal; investigate if this persists") is a safety net, not a repair — its message must not promise healing that no code performs.
 
@@ -1421,9 +1421,9 @@ Two behaviours to know before you add a field:
 readonly=False`, the sync's `write()` marks it protected and removes it from
 `tocompute`, so a later `remove_to_compute` by another module's `create()`
 override is a no-op and the synced value survives. This is what makes the seam
-usable to restore an inheritance that a core compute no longer performs — see
-[VAT and Fiscal Position](../../crewradar-billing/references/vat-and-fiscal-position.md)
-for the `vies_valid` case.
+usable to restore an inheritance that a core compute no longer performs — a
+consuming business documents its own worked example of this (the `vies_valid`
+case) in its own skill bundle.
 
 ## Think Extendable
 

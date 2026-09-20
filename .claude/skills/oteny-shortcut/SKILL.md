@@ -168,7 +168,7 @@ To update a shortcut's layout, simply arrange the view as desired and click **St
 
 - List: `{"optional_columns": ["field_a", "field_b"], "column_widths": {"field_a": 0.30, "field_b": 0.70}}`
 - Calendar: `{"scale": "week", "show_weekends": true}`
-- Credential Planning timeline: `{"range_id": "monthly", "grouping_mode": "byEmployee"}` (a scale = its default window around today), `{"range_id": "custom", "start_date": "2026-10-01", "stop_date": "2026-12-31", "grouping_mode": "byShip"}` (fixed period), or `{"range_id": "custom", "relative_period": {"start_month_offset": -1, "months": 6}, "grouping_mode": "byShip"}` (relative period: whole months from the start of today's month; wins over fixed dates stored beside it). The conversions live in riverflow `components/timeline/layout_range.js`; see [credential-planning.md](../rivercreds/references/credential-planning.md#navigation-today-and-periods-stored-in-shortcuts).
+- Credential Planning timeline: `{"range_id": "monthly", "grouping_mode": "byEmployee"}` (a scale = its default window around today), `{"range_id": "custom", "start_date": "2026-10-01", "stop_date": "2026-12-31", "grouping_mode": "byShip"}` (fixed period), or `{"range_id": "custom", "relative_period": {"start_month_offset": -1, "months": 6}, "grouping_mode": "byShip"}` (relative period: whole months from the start of today's month; wins over fixed dates stored beside it). The conversions live in riverflow `components/timeline/layout_range.js`; a consuming business documents its own use of these keys in its own skill bundle.
 
 ## Decisions (2026-09-14, Thijs, built in oteny_shortcut 19.0.1.220)
 
@@ -324,7 +324,7 @@ This whitelist is per-**model**; actual view availability is per-**action**. So 
 ### Dependencies
 
 - Depends only on `web` (no Odoo app dependencies)
-- Consumer modules (riverflow, rivercreds, crewradar) add `oteny_shortcut` to their `depends`; they need no view changes for the banner. Crewradar ships two Forms shortcuts on `riverflow.service` (`crewradar/data/riverflow_service_shortcut_filters.xml`) — see [crewradar-hr](../crewradar-hr/SKILL.md#services-tab-filters-employee).
+- Consumer modules (riverflow, rivercreds, crewradar) add `oteny_shortcut` to their `depends`; they need no view changes for the banner. A business module can ship Forms shortcuts the same way; a consuming business documents its own worked example in its own skill bundle.
 
 ## References
 

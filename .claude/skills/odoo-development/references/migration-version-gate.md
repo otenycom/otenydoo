@@ -11,7 +11,7 @@ This reference covers:
 - A troubleshooting Q&A for the most common failure modes.
 - File-by-file reference (where each piece lives).
 
-**Related references:** [`migrations.md`](migrations.md) (how Odoo migrations work + module-boundary rules), [`deploy-tool.md`](../../../../../radar/.claude/skills/crewradar-development/references/deploy-tool.md) (the riverdeploy CLI this gate builds on), [`xml-data-noupdate.md`](xml-data-noupdate.md) (the noupdate=1 gotcha that motivates many of the gated migrations).
+**Related references:** [`migrations.md`](migrations.md) (how Odoo migrations work + module-boundary rules), a consuming business's own deploy-tool docs (the riverdeploy CLI this gate builds on), [`xml-data-noupdate.md`](xml-data-noupdate.md) (the noupdate=1 gotcha that motivates many of the gated migrations).
 
 ---
 
@@ -34,7 +34,7 @@ This is fine when migrations are written contemporaneously with the manifest bum
 
 The orphaned `crewradar_cuneus_sign/migrations/19.0.3.82/19.0.3.81/post-migrate.py` (a renumber-tool bug) was the immediate trigger, but the diagnostic work surfaced the deeper class of bug above. After the renumber tool was fixed (`riverdeploy/module/merge.py::_safe_rename_migration_dir` + `_assert_no_nested_version_dirs`, Session 60 item 1b), this gate was the architectural answer to "could this happen another way?" Answer: yes, any time a developer's local clone hadn't run `merge-branches` recently and the dev manifest had moved on.
 
-Full forensics in [`.claude/skills/rivercreds-docs/references/plan-live-restore-resilience.md §Q2`](../../rivercreds-docs/references/plan-live-restore-resilience.md).
+Full forensics live with the consuming business that hit this case, in its own skill bundle.
 
 ### What the gate guarantees
 
@@ -149,7 +149,7 @@ Every hook run tees its output to `.git/migration-gate.log` (newest run appended
 ### When you add a new migration
 
 1. Create the migration at the **next available version** above `dev`'s current manifest. Read the current dev version with `git show dev:<your_module>/__manifest__.py | grep version`. Add `+1` to the last segment.
-   - **On a long-lived feature branch, bump the MINOR segment instead** (dev at `19.0.4.26` → use `19.0.5.1`, `19.0.5.2`, …). The pipeline keeps auto-incrementing dev/main's *last* segment while your branch lives; once that ceiling catches up with your folder version, a **local prod restore + `-u` on the branch silently skips your migration** — and no gate layer fires on a local restore (the hook/CI only guard merges into dev/main). A higher minor stays above any last-segment bump for the branch's lifetime; on merge, the gate leaves folders above the ceiling untouched and dev continues from your minor. Case study: the Barney branch authored its MFNL activation migration as `19.0.4.26`; dev's auto-bumps independently reached `19.0.4.26`, so the 2026-07 prod restore skipped the activation (workflow never applied). Renumbering to `19.0.5.1–4` fixed it.
+   - **On a long-lived feature branch, bump the MINOR segment instead** (dev at `19.0.4.26` → use `19.0.5.1`, `19.0.5.2`, …). The pipeline keeps auto-incrementing dev/main's *last* segment while your branch lives; once that ceiling catches up with your folder version, a **local prod restore + `-u` on the branch silently skips your migration** — and no gate layer fires on a local restore (the hook/CI only guard merges into dev/main). A higher minor stays above any last-segment bump for the branch's lifetime; on merge, the gate leaves folders above the ceiling untouched and dev continues from your minor. Case study: a long-lived branch authored a migration at `19.0.4.26`; dev's auto-bumps independently reached `19.0.4.26`, so the 2026-07 prod restore skipped it (the migration never applied). Renumbering to `19.0.5.1–4` fixed it. Full incident documented in the consuming business's own skill bundle.
 2. Bump your feature branch's `__manifest__.py` to the same version. (Optional but recommended; the gate will bump it for you on merge if you forget.)
 3. Push, open a PR. The CI gate will verify on every push.
 4. When merging via `git merge` locally: the local hook does its work silently if you've kept `dev` reasonably up-to-date.
@@ -248,7 +248,7 @@ module's tests before you push.
 
 ```sh
 pip3 install pre-commit
-cd ~/oteny/radar
+cd <business-repo>
 pre-commit install --hook-type pre-commit --hook-type pre-merge-commit
 ```
 
@@ -325,7 +325,7 @@ The re-entry guard short-circuits the hook during `merge-branches`'s own merge �
 
 ### "Can I add a NEW data invariant to the auto-fix?"
 
-Not via this gate. The gate's job is purely structural: ensure migration folders have versions above the dev/main ceiling. The CONTENT of migrations (what they invariant they enforce) is up to the migration author. If you need a runtime data invariant that survives skipped migrations, that's a different design — the previous (rejected) "HEAD-version safety-net pattern" attempt is documented in [`../../rivercreds-docs/references/plan-live-restore-resilience.md §2`](../../rivercreds-docs/references/plan-live-restore-resilience.md). The current consensus is that the gate (preventive) is preferred over a safety-net (recovery), since the gate makes "skipped migration" structurally impossible rather than detectable-after-the-fact.
+Not via this gate. The gate's job is purely structural: ensure migration folders have versions above the dev/main ceiling. The CONTENT of migrations (what they invariant they enforce) is up to the migration author. If you need a runtime data invariant that survives skipped migrations, that's a different design — the previous (rejected) "HEAD-version safety-net pattern" attempt is documented with the consuming business that tried it, in its own skill bundle. The current consensus is that the gate (preventive) is preferred over a safety-net (recovery), since the gate makes "skipped migration" structurally impossible rather than detectable-after-the-fact.
 
 ### "Why does the hook tee to `.git/migration-gate.log`?"
 
@@ -379,7 +379,6 @@ Removed. `discover_migration_modules` replaced it. Old PRs that mention "added m
 - **`README.md` § Migration version gate** — onboarding-level overview.
 - **`CLAUDE.md` § Project guidelines** — one-line pointer for AI agents.
 - **[`migrations.md`](migrations.md)** — sibling reference: how Odoo migrations work in this workspace; module-boundary rules.
-- **[`deploy-tool.md`](../../../../../radar/.claude/skills/crewradar-development/references/deploy-tool.md)** — sibling reference: the riverdeploy CLI this gate builds on.
 - **[`xml-data-noupdate.md`](xml-data-noupdate.md)** — sibling reference: the `noupdate=1` gotcha that motivates many of the gated migrations.
 
 ---

@@ -20,8 +20,8 @@ Host: `riverflow.state.mixin` plus the same form session.
 ## Delivery
 
 Each Talent arrives by git path. Same git as the addon. A
-subdirectory. See
-[host-module-talents.md](../plans/host-module-talents.md).
+subdirectory. See [`oteny-bot` skill — Host Talent
+delivery](../SKILL.md).
 
 A client Talent is a third path. It composes these skills. It
 does not copy them.

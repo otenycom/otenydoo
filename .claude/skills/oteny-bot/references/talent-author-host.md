@@ -6,8 +6,8 @@ The recipe a bot reads lives in the module Talent
 This page is for operators who change the `oteny_bot` addon. It is
 not the runtime copy.
 
-Delivery and composition:
-[host-module-talents.md](../plans/host-module-talents.md).
+Delivery and composition: [`oteny-bot` skill — Host Talent
+delivery](../SKILL.md).
 
 The riverflow door that uses the same `open` dict is
 [`riverflow/talents/riverflow-execute-talent/`](../../../../riverflow/talents/riverflow-execute-talent/SKILL.md).

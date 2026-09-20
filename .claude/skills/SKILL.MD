@@ -14,6 +14,7 @@
 | [oteny-audit](oteny-audit/SKILL.md) | The audit trail model and mixin. |
 | [oteny-bot](oteny-bot/SKILL.md) | The bridge to an Oteny business bot: channel, activity log, form session, the work contract. |
 | [riverflow](riverflow/SKILL.md) | The workflow engine: services, states, transitions, bot dispatch. |
+| [oteny-knowledge-sync](oteny-knowledge-sync/SKILL.md) | Publishes this tree (and a consuming business's own) into Odoo Knowledge: sync process, link resolution across roots, image embedding, troubleshooting. |
 
 `oteny_backup_trigger` and `odoo_parallel_tests` are small enough that their
 `README.md` and the `odoo-development` references cover them.

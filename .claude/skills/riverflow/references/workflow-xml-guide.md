@@ -32,11 +32,12 @@ The `icon` must depict the ACTION that completes the task (go to the counter, po
 </record>
 ```
 
-For log entry workflows:
+For a workflow attached to a non-service model owned by a consumer module
+(e.g. a business's own log-entry model):
 
 ```xml
 <record id="log_entry_workflow_crew_change" model="riverflow.workflow">
-    <field name="model_id" ref="crewradar.model_crewradar_log_entry"/>
+    <field name="model_id" ref="example_biz.model_example_biz_log_entry"/>
     <field name="name">Work</field>
     <field name="description">Placement of an employee on a ship</field>
     <field name="icon">fa-ship</field>
@@ -49,7 +50,7 @@ For log entry workflows:
 
 - **FontAwesome 4.7 only.** Odoo 19 ships FA 4.7; a newer FA5/6 class name (e.g. `fa-calendar-plus`, `fa-file-invoice-dollar`) fails silently and renders as an **empty box**. Verify a candidate exists with `rg '^\.fa-NAME:before' <odoo>/addons/web/static/src/libs/fontawesome/css/font-awesome.css`. The guard test `riverflow/tests/test_workflow_icons.py` (post_install) validates every workflow, transition, and transition-action icon on the database against that CSS, so an invalid class fails the suite — including records loaded by downstream modules.
 - **Disambiguate sibling workflows.** Workflows on the same model appear side by side in the same picker and service lists; do not let siblings share a glyph (the 2026-08-10 audit found three workflows on `fa-file-text` and three on `fa-envelope`). The icon should show the ACTION the user must perform, not the artifact produced — see [SKILL.md § Choosing the Workflow Icon](../SKILL.md#choosing-the-workflow-icon) for the principle and worked examples.
-- **Changing a shipped icon needs a guarded post-migrate.** Workflow files — or at least their `ir_model_data` rows — are `noupdate`, so the XML edit alone never reaches existing databases (check the ROW, not the file: see [xml-data-noupdate.md](../../odoo-development/references/xml-data-noupdate.md#row-noupdate-is-stamped-at-creation--check-the-row-not-the-file)). Guard the update on the originally shipped value (`if workflow.icon == old: workflow.icon = new`) so a manual override survives. Canonical migrations: `crewradar/migrations/19.0.9.174/post-migrate.py`, `crewradar_cuneus_sign/migrations/19.0.5.53` + `19.0.5.54`, `riverflow/migrations/19.0.1.1198/post-migrate.py`.
+- **Changing a shipped icon needs a guarded post-migrate.** Workflow files — or at least their `ir_model_data` rows — are `noupdate`, so the XML edit alone never reaches existing databases (check the ROW, not the file: see [xml-data-noupdate.md](../../odoo-development/references/xml-data-noupdate.md#row-noupdate-is-stamped-at-creation--check-the-row-not-the-file)). Guard the update on the originally shipped value (`if workflow.icon == old: workflow.icon = new`) so a manual override survives. Canonical migration (riverflow's own): `riverflow/migrations/19.0.1.1198/post-migrate.py`. A consumer module doing the same guarded rewrite for its own workflows follows the identical shape in its own `migrations/` folder.
 
 ## State Records
 
@@ -275,13 +276,14 @@ The initial transition has an empty `from_state_id`:
 | `riverflow.transition_action_register_service` | Marks for billing/registration |
 | `riverflow.transition_action_supplier_confirmed` | Records supplier confirmation |
 
-For crewradar log entries:
+A consumer module adds its own transition actions the same way, under its own
+module namespace, for example:
 
 | Action ID | Purpose |
 |-----------|---------|
-| `crewradar.log_entry_transition_action_new_prospect` | New planning entry |
-| `crewradar.log_entry_transition_action_validate_employee_sign_on` | Validate sign-on |
-| `crewradar.log_entry_transition_action_set_actual_start_date` | Set actual start |
+| `example_biz.log_entry_transition_action_new_prospect` | New planning entry |
+| `example_biz.log_entry_transition_action_validate_employee_sign_on` | Validate sign-on |
+| `example_biz.log_entry_transition_action_set_actual_start_date` | Set actual start |
 
 ### Transition Examples
 
@@ -350,7 +352,7 @@ Both "Upload Permit" and "Bulk upload" in the DE Work Permit workflows were firs
 
 ## Cross-Module Template Enrichment (`noupdate=0` Section)
 
-When a workflow XML needs to set fields on records from another module (e.g. a service template defined in `crewradar` that needs `state_id` from a workflow in `crewradar_cuneus_sign`), use a `noupdate=0` `<data>` section at the end of the workflow XML file.
+When a workflow XML needs to set fields on records from another module (e.g. a service template defined in one consumer module that needs `state_id` from a workflow defined in another), use a `noupdate=0` `<data>` section at the end of the workflow XML file.
 
 ```xml
 <odoo noupdate="1">
@@ -360,9 +362,9 @@ When a workflow XML needs to set fields on records from another module (e.g. a s
 
 <odoo noupdate="0">
     <!-- Template enrichment: always re-applied on -u -->
-    <record id="crewradar.template_service_send_auv_information" model="riverflow.service">
+    <record id="example_biz.template_service_send_example" model="riverflow.service">
         <field name="state_id" ref="state_auv_not_started"/>
-        <field name="sign_template_id" ref="crewradar_cuneus_sign.auv_template"/>
+        <field name="sign_template_id" ref="example_biz_sign.example_template"/>
         <field name="sign_direct_generate" eval="True"/>
     </record>
 </odoo>
@@ -379,7 +381,7 @@ When modifying workflows:
 1. **Re-number sequences** if states/transitions are inserted or deleted
 2. **Keep existing flags** (`is_end_state`, `is_back_office_state`) unless there's a reason to change
 3. **Test transitions** ensure all paths work correctly
-4. **Removing a state or transition from a `noupdate="1"` file**: Odoo's standard module-update orphan cleanup does NOT delete records whose XML id was loaded with `noupdate="1"`, so the database rows for the removed `<record>` survive the upgrade. To clean them up, call `workflow.reset_workflow_to_xml()` in the post-migrate — it now archives XML-orphan records (records whose XML id is no longer in any data file). Before calling the reset, **re-home any live `riverflow.service` rows** pointing at the dying states to a surviving state (the helper cannot know the workflow-specific target). See [crewradar_cuneus_sign migration 19.0.4.25](../../../crewradar_cuneus_sign/migrations/19.0.4.25/post-migrate.py) for the canonical pattern (Work Permit workflow simplification).
+4. **Removing a state or transition from a `noupdate="1"` file**: Odoo's standard module-update orphan cleanup does NOT delete records whose XML id was loaded with `noupdate="1"`, so the database rows for the removed `<record>` survive the upgrade. To clean them up, call `workflow.reset_workflow_to_xml()` in the post-migrate — it now archives XML-orphan records (records whose XML id is no longer in any data file). Before calling the reset, **re-home any live `riverflow.service` rows** pointing at the dying states to a surviving state (the helper cannot know the workflow-specific target). A consumer module's own `migrations/` folder is where this re-home-then-reset pattern belongs — it is workflow-specific and cannot live in `riverflow` itself.
 
 ### Retiring an Entire Workflow
 
@@ -411,7 +413,7 @@ Add with appropriate sequence for its from_state group:
 <!-- Add new: sequence 30 -->
 ```
 
-**`noupdate="1"` + `-u` behaviour (important):** a *brand-new* `<record>` (an xmlid not yet in the DB) **is** created on plain `-u` — `noupdate="1"` only suppresses *updates* to records that already exist, never creation of new ones. So pure additions load without a migration. But the moment you **renumber an existing** transition (e.g. inserting a new transition mid-group and bumping the old `Back` from 20 → 30 to keep it last), that existing row's sequence change will **not** apply on `-u` — `noupdate="1"` blocks it. Call `workflow.reset_workflow_to_xml()` in a post-migrate to force-re-import the XML rows (it bypasses the `noupdate` guard), which lands both the new transitions and the renumbered existing ones. No states removed → nothing to re-home first. Canonical example: [crewradar_cuneus_sign migration 19.0.5.31](../../../crewradar_cuneus_sign/migrations/19.0.5.31/post-migrate.py) (Weekly Work Permit workflow — added skip / early-close / Back transitions + one renumbered `Back`).
+**`noupdate="1"` + `-u` behaviour (important):** a *brand-new* `<record>` (an xmlid not yet in the DB) **is** created on plain `-u` — `noupdate="1"` only suppresses *updates* to records that already exist, never creation of new ones. So pure additions load without a migration. But the moment you **renumber an existing** transition (e.g. inserting a new transition mid-group and bumping the old `Back` from 20 → 30 to keep it last), that existing row's sequence change will **not** apply on `-u` — `noupdate="1"` blocks it. Call `workflow.reset_workflow_to_xml()` in a post-migrate to force-re-import the XML rows (it bypasses the `noupdate` guard), which lands both the new transitions and the renumbered existing ones. No states removed → nothing to re-home first.
 
 ## Complete Example
 

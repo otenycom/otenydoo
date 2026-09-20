@@ -9,10 +9,10 @@ Unit testing and browser testing procedures for Odoo 19 addons in this workspace
 For crewradar, riverflow, and rivercreds tests:
 
 ```zsh
-cd /Users/ries/oteny/radar && ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo-bin \
+cd <business-repo> && ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo-bin \
   --stop-after-init \
   -p 8068 \
-  --addons-path=../../odoo/odoo19/addons,/Users/ries/odoo/enterprise19,/Users/ries/oteny/otenydoo,/Users/ries/oteny/radar \
+  --addons-path=../../odoo/odoo19/addons,/Users/ries/odoo/enterprise19,/Users/ries/oteny/otenydoo,<business-repo> \
   --without-demo=True \
   --http-interface 127.0.0.1 \
   --test-enable \
@@ -33,10 +33,10 @@ The radar workspace defines a command in `.claude/commands/test.md` that instruc
 Manual equivalent on database `cr-test` (same addons path and credentials as above; assumes that DB is installed with the full `odoo.installModules` list, not a single-module `-i`):
 
 ```zsh
-cd /Users/ries/oteny/radar && ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo-bin \
+cd <business-repo> && ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo-bin \
   --stop-after-init \
   -p 8068 \
-  --addons-path=../../odoo/odoo19/addons,/Users/ries/odoo/enterprise19,/Users/ries/oteny/otenydoo,/Users/ries/oteny/radar \
+  --addons-path=../../odoo/odoo19/addons,/Users/ries/odoo/enterprise19,/Users/ries/oteny/otenydoo,<business-repo> \
   --without-demo=True \
   --http-interface 127.0.0.1 \
   --test-enable \
@@ -55,15 +55,15 @@ cd /Users/ries/oteny/radar && ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo
 
 **Example red test from a full combined-tag run**: `crewradar_cuneus_sign.tests.test_a1_workflow.TestA1SendIssuedA1AutoProgress.test_full_workflow_credentials_linked_to_parent` can fail with an `AssertionError` comparing two `riverflow.state` records (expected vs actual state after Send Issued A1 / parent credential linking). Numeric ids in the message are database-specific. Reproduce in isolation with `--test-tags=.test_full_workflow_credentials_linked_to_parent` on a database installed with the full `odoo.installModules` list.
 
-After changes to Arrange Work Permit or Cuneus DE employee lifecycle code in `crewradar_cuneus_sign`, a focused run with `--test-tags=crewradar_cuneus_sign` (or `.test_auto_complete_state` for a single method) validates faster than only relying on the full combined tag set; see [crewradar-cuneus — Testing](../../crewradar-cuneus/SKILL.md#testing) for the command line and a common failure interpretation.
+After changes to Arrange Work Permit or Cuneus DE employee lifecycle code in `crewradar_cuneus_sign`, a focused run with `--test-tags=crewradar_cuneus_sign` (or `.test_auto_complete_state` for a single method) validates faster than only relying on the full combined tag set; the consuming business documents its own command line and common failure interpretation in its own skill bundle.
 
 For oteny_audit tests (not in use / disregard):
 
 ```zsh
-cd /Users/ries/oteny/radar && ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo-bin \
+cd <business-repo> && ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo-bin \
   --stop-after-init \
   -p 8068 \
-  --addons-path=~/odoo/odoo19/addons,~/odoo/enterprise19,~/oteny/otenydoo,~/oteny/radar \
+  --addons-path=~/odoo/odoo19/addons,~/odoo/enterprise19,~/oteny/otenydoo,<business-repo> \
   --without-demo=True \
   --http-interface 127.0.0.1 \
   -i oteny_audit \
@@ -125,7 +125,7 @@ class TestCrewradarCredentialPlan(TransactionCase):
 
 | Scenario | Action |
 |----------|--------|
-| Fresh start | `dropdb -f cr-test` then run with `-i` and the full module list from `odoo.installModules` in `.vscode/settings.json`. See [Fresh DB Install](../../../../../radar/.claude/skills/crewradar-development/references/fresh-db-install.md) — **do not** use `-i crewradar` alone; `crewradar_creds`, `crewradar_sign`, and others must be installed explicitly. |
+| Fresh start | `dropdb -f cr-test` then run with `-i` and the full module list from `odoo.installModules` in `.vscode/settings.json` (the consuming business documents its own full-install recipe) — **do not** use `-i crewradar` alone; `crewradar_creds`, `crewradar_sign`, and others must be installed explicitly. |
 | Schema changes | Add `-u riverflow,crewradar,crewradar_creds` etc. to update modules |
 | Subsequent runs | No `-i` or `-u` needed if schema unchanged |
 
@@ -134,7 +134,7 @@ class TestCrewradarCredentialPlan(TransactionCase):
 Always redirect test output for analysis:
 
 ```zsh
-cd /Users/ries/oteny/radar && ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo-bin \
+cd <business-repo> && ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo-bin \
   --stop-after-init \
   --test-enable \
   --test-tags=.test_method_name \
@@ -166,7 +166,7 @@ Check for **both** `failed` and `error(s)` when verifying test results.
 
 ### Culprit: not all intended modules installed on the test database
 
-Post-install tests in this workspace are written for a database that matches **local/CI practice**: install the full comma-separated module list from `.vscode/settings.json` → `odoo.installModules` (see [Fresh DB Install](../../../../../radar/.claude/skills/crewradar-development/references/fresh-db-install.md)). That list includes `crewradar`, `crewradar_creds`, `crewradar_sign`, `crewradar_wilma`, `crewradar_cuneus_sign`, and other addons the suite depends on—not a single module such as `-i rivercreds` or `-i crewradar` in isolation.
+Post-install tests in this workspace are written for a database that matches **local/CI practice**: install the full comma-separated module list from `.vscode/settings.json` → `odoo.installModules`. That list includes `crewradar`, `crewradar_creds`, `crewradar_sign`, `crewradar_wilma`, `crewradar_cuneus_sign`, and other addons the suite depends on—not a single module such as `-i rivercreds` or `-i crewradar` in isolation.
 
 **Why failures happen**: Odoo only loads Python and XML for modules in `installed` / `to upgrade` state on that database. Skipping modules from the intended set drops their models, records, and workflow data. The workspace post_install tests assume the same installed module graph as a full `-i` using `odoo.installModules`, not a hand-picked subset.
 
@@ -204,14 +204,14 @@ statement touches the type. Any `brew upgrade` can trigger it.
 stop Homebrew from replacing it again:
 
 ```zsh
-cd ~/oteny/radar/crewradar && ./install_pgvector.sh
+cd <business-repo>/crewradar && ./install_pgvector.sh
 brew pin pgvector
 ```
 
 The script clones pgvector v0.8.1, compiles it with `postgresql@16`'s
 `pg_config` (overriding `PG_SYSROOT` for the installed macOS SDK), and copies
-`vector.dylib` plus the SQL into the pg16 tree. Full notes in
-[`crewradar/PGVECTOR_INSTALL.md`](../../../../crewradar/PGVECTOR_INSTALL.md).
+`vector.dylib` plus the SQL into the pg16 tree. Full notes travel with the
+script, in the consuming business's own module.
 
 **Diagnosis in one command** — the build targets are visible in the Cellar, so
 this shows at a glance whether a pg16 library exists at all:
@@ -532,7 +532,7 @@ def _load_vscode_settings():
     return merged
 ```
 
-Reference implementations: [`crewradar_wilma/tests/test_wilma_live_integration.py`](../../../../crewradar_wilma/tests/test_wilma_live_integration.py) (Odoo test), [`riverdeploy/deploy_tools/utils.py`](../../../../riverdeploy/deploy_tools/utils.py) (`load_settings()` for deployment CLI), [`tools/nas_analysis/analyzer.py`](../../../../tools/nas_analysis/analyzer.py) (standalone tool). Non-secret settings (database names, addons paths, `installModules`) stay in `settings.json`.
+Reference implementations of this pattern exist as an Odoo test, a deployment-CLI settings loader, and a standalone tool, each in a consuming business's own codebase. Non-secret settings (database names, addons paths, `installModules`) stay in `settings.json`.
 
 #### Defense-in-depth: Claude Code permission rules
 
@@ -547,11 +547,11 @@ Reference implementations: [`crewradar_wilma/tests/test_wilma_live_integration.p
 
 The `Bash(*secrets.json*)` glob is a substring match on the full command, so it also blocks legitimate searches like `grep -rn secrets.json .` — use Grep/Read tools in AI sessions instead. The Read deny blocks the file and (as observed) anything in a denied-directory pattern; together they make API keys unavailable to AI sessions even if the bot tries every known read path.
 
-For CLI tools (e.g. the NAS importer `wp_analyzer.py`) the equivalent pattern is `--api-key-file PATH`: a mode-`600` file under `~/.config/<tool>/` that the tool reads, strips, and keeps in process memory only. See [rivercreds-docs — Generate API key](../../rivercreds-docs/references/import-pipeline.md#3-generate-api-key) for the end-to-end minting-to-file flow.
+For CLI tools (e.g. the NAS importer `wp_analyzer.py`) the equivalent pattern is `--api-key-file PATH`: a mode-`600` file under `~/.config/<tool>/` that the tool reads, strips, and keeps in process memory only. A consuming business documents its own end-to-end minting-to-file flow in its own skill bundle.
 
 ## CI-Safe Test Patterns (Odoo.sh)
 
-Odoo.sh dev builds fail not only on test assertion errors but also on WARNING/ERROR entries in the `ir_logging` table (written via `--log-db`). The patterns below prevent test code from generating noise that turns builds red even when all tests pass. See [Odoo.sh CI Reference](../../../../../radar/.claude/skills/crewradar-development/references/odoosh-ci.md) for the full failure detection mechanism.
+Odoo.sh dev builds fail not only on test assertion errors but also on WARNING/ERROR entries in the `ir_logging` table (written via `--log-db`). The patterns below prevent test code from generating noise that turns builds red even when all tests pass. A consuming business documents its own full failure-detection mechanism in its own skill bundle.
 
 ### Valid PDF Data in Tests
 
@@ -843,7 +843,7 @@ describe("parseStoredRange", () => {
 **Running from the command line**: `crewradar/tests/test_hoot.py` (`TestHootSuites`, tagged `hoot` only) opens `/web/tests` in headless Chrome through Odoo's own `browser_js`, filtered to the `@riverflow` and `@crewradar` suites by their hoot id hash (the same hash Odoo's `HOOTCommon` uses), and passes on `[HOOT] Test suite succeeded`:
 
 ```zsh
-cd ~/oteny/radar && ~/odoo/venv/bin/python3 ~/odoo/odoo19/odoo-bin --stop-after-init -p 8068 --addons-path=~/odoo/odoo19/addons,~/odoo/enterprise19,~/oteny/radar --without-demo=True --http-interface 127.0.0.1 --test-enable --test-tags=hoot -u crewradar -d cr-test --max-cron-threads 0 --limit-time-real 0 --log-level=test 2>&1 | tee /tmp/hoot.log
+cd <business-repo> && ~/odoo/venv/bin/python3 ~/odoo/odoo19/odoo-bin --stop-after-init -p 8068 --addons-path=~/odoo/odoo19/addons,~/odoo/enterprise19,<business-repo> --without-demo=True --http-interface 127.0.0.1 --test-enable --test-tags=hoot -u crewradar -d cr-test --max-cron-threads 0 --limit-time-real 0 --log-level=test 2>&1 | tee /tmp/hoot.log
 ```
 
 `-u crewradar` is what makes Odoo run the crewradar test module; the JS bundle is rebuilt from the files on disk at page load, so no further update is needed after a JS edit. Per-test results are in the log as `[HOOT] Test "…" failed:` with the expected/received values. Do not edit JS or Python files while a run is going: the assets are read when the page loads and the Python packages at startup.

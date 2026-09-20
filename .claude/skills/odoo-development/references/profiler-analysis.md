@@ -76,8 +76,8 @@ for entry in data:
     if 'target_table' not in q:  # filter to queries of interest
         continue
     stack = entry.get('stack', [])
-    our_lines = [l for l in stack if '/oteny/radar/' in str(l[0])]
-    sig = str([(str(l[0]).split('radar/')[-1], l[1], l[2]) for l in our_lines[:3]])
+    our_lines = [l for l in stack if '/<business-repo>/' in str(l[0])]
+    sig = str([(str(l[0]).split('<business-repo>/')[-1], l[1], l[2]) for l in our_lines[:3]])
     if sig not in stack_sigs:
         stack_sigs[sig] = {'count': 0, 'time': 0.0, 'full_stack': our_lines}
     stack_sigs[sig]['count'] += 1
@@ -86,7 +86,7 @@ for entry in data:
 for sig, info in sorted(stack_sigs.items(), key=lambda x: -x[1]['count'])[:10]:
     print(f"\n  {info['count']:5d}x  {info['time']*1000:8.1f}ms")
     for l in info['full_stack']:
-        print(f"    {str(l[0]).split('radar/')[-1]}:{l[1]} {l[2]}")
+        print(f"    {str(l[0]).split('<business-repo>/')[-1]}:{l[1]} {l[2]}")
 ```
 
 ### Step 4: Summarize by Table
@@ -116,7 +116,7 @@ A preload (`-i`/`-u`) profile of a large migration is captured **sampling-only**
 Two aggregations locate the bottleneck:
 
 - **Innermost frame (self time)** — where the thread actually sits. For a DB-bound update this is overwhelmingly `sql_db.py:execute`; a high share there with `cpu_duration ≪ duration` confirms the run is *waiting on the database* (an N+1), not CPU-bound.
-- **Deepest frame under `/oteny/radar/` (our self time)** — the project function directly driving each sample. Because the sampler captures the calling stack while a thread blocks in `execute()`, DB-wait time is attributed to the migration/compute that issued the query — so this ranking points straight at the slow code path.
+- **Deepest frame under the project's own path (our self time)** — the project function directly driving each sample. Because the sampler captures the calling stack while a thread blocks in `execute()`, DB-wait time is attributed to the migration/compute that issued the query — so this ranking points straight at the slow code path.
 
 ```python
 import json, re
@@ -124,21 +124,21 @@ from collections import Counter
 
 d = json.load(open('/tmp/traces_async.json'))   # psql -tA -c "SELECT traces_async FROM ir_profile WHERE id=<ID>"
 W = (d[-1]['start'] - d[0]['start']) / max(len(d) - 1, 1)   # avg interval as per-sample weight
-self_leaf, radar_leaf, mig = Counter(), Counter(), Counter()
+self_leaf, project_leaf, mig = Counter(), Counter(), Counter()
 for s in d:
     st = s.get('stack')
     if not st:
         continue
     self_leaf[st[-1][2]] += W                                        # innermost func
-    radar = [f for f in st if '/oteny/radar/' in f[0]]
-    if radar:
-        radar_leaf[f"{radar[-1][2]} ({radar[-1][0].split('radar/')[-1]})"] += W
+    project = [f for f in st if '/<business-repo>/' in f[0]]
+    if project:
+        project_leaf[f"{project[-1][2]} ({project[-1][0].split('<business-repo>/')[-1]})"] += W
     for f in st:                                                     # which migration is on-stack
         m = re.search(r'migrations/(\d+\.\d+\.\d+\.\d+)/', f[0])
         if m:
             mig[m.group(1)] += W
             break
-for label, c in (('SELF LEAF', self_leaf), ('DEEPEST RADAR FRAME', radar_leaf), ('BY MIGRATION', mig)):
+for label, c in (('SELF LEAF', self_leaf), ('DEEPEST PROJECT FRAME', project_leaf), ('BY MIGRATION', mig)):
     print(f'\n== {label} ==')
     for k, v in c.most_common(15):
         print(f'  {v:7.1f}s  {k}')

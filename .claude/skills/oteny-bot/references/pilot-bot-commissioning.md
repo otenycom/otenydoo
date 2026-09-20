@@ -1,17 +1,16 @@
 # Commission a pilot host-Talent bot — the fast path
 
 This page is the fast checklist for the next pilot bot. It strips the
-discovery narrative out of [`betty-live-proof.md`](../plans/betty-live-proof.md)
-and keeps only the commands and the guardrails. Read the live-proof file
-for the "why" behind each guardrail, and for Betty's exact values as a
-worked example.
+discovery narrative down to only the commands and the guardrails; a
+consuming business keeps the full live-proof worked example, with exact
+values, in its own skill bundle.
 
 **Scope.** This is Path B: an author's own `/json/2/` account key plus
 `dev_bot.ensure(...)` reuse on an existing dev-bot slot. It is not a real
 customer commission. Do not use
 `python -m hermeshost commission --internal`. Do not use
-`provision_barney.py`. Full background on the reuse mechanism:
-[`dev-bot-queue.md`](../../../../../hermeshost/skills/talent-dev-loop/references/dev-bot-queue.md).
+`provision_barney.py`. Full background on the reuse mechanism is in the
+platform's own dev-bot-queue documentation.
 
 ---
 
@@ -20,11 +19,11 @@ customer commission. Do not use
 A pilot that needs a platform fix still on a hermeshost feature branch lives in
 the **lab**, not the prod pool. A prod-pool dev bot takes its plugins from the
 prod router's `dev` commit on every converge, and the 5-minute talent belt
-re-converges it whenever the radar ref moves, so a feature-branch fix never
-sticks there. The lab router runs the feature branch. The lab recipe, with the
-three account gates and the `lab` ref prefix, is hermeshost
-[`ephemeral-lab.md`](../../../../../hermeshost/skills/testing-simulator/references/ephemeral-lab.md)
-**Commission a Path B dev bot in the lab**. No pilot stands today; Betty is the worked example.
+re-converges it whenever a consuming business's ref moves, so a feature-branch
+fix never sticks there. The lab router runs the feature branch. The lab
+recipe, with the three account gates and the `lab` ref prefix, is the
+platform's own **Commission a Path B dev bot in the lab** documentation. No
+pilot stands today; a consuming business documents its own worked example.
 
 ## 1. Decide these five values next
 
@@ -111,9 +110,9 @@ on channel traffic, not with Bot Activity.
 
 Minimum proof set, in order: `skill_view` on each host Talent slug,
 one `oteny.form.session` Contacts save + unlink, one riverflow
-`prepare_transition_action` execute on a disposable service. Full
-scripts for each turn (with the exact guardrails per turn) are in
-[`betty-live-proof.md`](../plans/betty-live-proof.md) §3–5.
+`prepare_transition_action` execute on a disposable service. A consuming
+business's own live-proof record carries the full scripts for each turn,
+with the exact guardrails per turn.
 
 ---
 

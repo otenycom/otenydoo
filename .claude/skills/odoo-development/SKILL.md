@@ -90,7 +90,7 @@ Compute methods are the Odoo way to implement business logic:
 - **Editable computed One2many**: For wizard lines users need to edit (e.g., checkboxes), use `store=True` + `readonly=False` on the model field, `force_save="1"` on readonly/invisible child fields in the view, and hidden fields to preserve round-trip values (see [Coding Patterns](references/coding-patterns.md))
 - **One2many line-to-line cascade**: `@api.onchange` on a line model can only modify `self` in the browser — sibling line changes are silently discarded. Place the onchange on the parent model instead (`@api.onchange('one2many_field')`). See [Coding Patterns — One2many Line-to-Line Cascade](references/coding-patterns.md)
 - **Never call _compute directly**: In tests, rely on `@api.depends` triggers instead
-- **A compute that unlinks records must publish its scalar results FIRST**: core `unlink()` calls `env.flush_all()` before it deletes, so every pending compute in the transaction runs *inside* the compute that called unlink. A dependent computed in that nested flush reads the caller's stored fields as they were before the compute, and an assignment made inside a compute never calls `modified()`, so the dependent is never re-marked. Assign the scalar fields before the delete/create/write of the child records (agreed 09-Sep-2026 for `rivercreds.plan.slot._compute_item_ids`; incident: a Renew Passport successor service dated at the expired passport's marker). See [Credential Planning — the at-home deadline anchor](../rivercreds/references/credential-planning.md#the-at-home-deadline-anchor)
+- **A compute that unlinks records must publish its scalar results FIRST**: core `unlink()` calls `env.flush_all()` before it deletes, so every pending compute in the transaction runs *inside* the compute that called unlink. A dependent computed in that nested flush reads the caller's stored fields as they were before the compute, and an assignment made inside a compute never calls `modified()`, so the dependent is never re-marked. Assign the scalar fields before the delete/create/write of the child records (agreed 09-Sep-2026 for `rivercreds.plan.slot._compute_item_ids`; incident: a Renew Passport successor service dated at the expired passport's marker). A consuming business documents its own worked example of this pattern in its own skill bundle.
 
 ### Install Hooks vs Migrations
 
@@ -264,19 +264,26 @@ Odoo loads dark mode SCSS files only when dark mode is active:
 
 ### Fresh Database for Testing
 
-For a new test database, install the **full** module set `oteny_audit,oteny_shortcut,oteny_bot,oteny_backup_trigger,odoo_parallel_tests,riverflow,rivercreds,crewradar,crewradar_wilma,crewradar_cuneus_sign,crewradar_creds,crewradar_sign,crewradar_marinetraffic`, not just `crewradar`. Otherwise tests in `crewradar_creds`, `crewradar_sign`, `crewradar_wilma`, and `crewradar_cuneus_sign` will fail or be skipped. See [Fresh DB Install](../../../../radar/.claude/skills/crewradar-development/references/fresh-db-install.md) for step-by-step instructions and the dependency table.
+For a new test database, install the full module set for the business repo
+you are testing against — installing only the base module leaves its
+derived addons untested or skipped. The consuming business repo documents
+its own module list and dependency table in its own skill bundle.
 
 ### Prod restore then `-i` / `-u`
 
-A production dump never installed `oteny_bot`, and its schema is older than the Python on disk. After `odoo-bin db load`, a plain `-u` skips `crewradar_cuneus_sign` because that depend is missing, and columns such as `riverflow_service.bot_work_started_at` stay absent. Opening Radar then Oops (`UndefinedColumn`). The skip from load is expected. Do **not** restore again to “fix” it.
-
-**Intent:** restore-only must leave a runnable `crmain`. A separate `cr-update` is not required.
-
-`crewradar_db_restore.py` always runs `odoo-bin --stop-after-init` with `-i` then `-u` of `odoo.installModules` after a successful load. The restore is not done if that upgrade fails. After that `-u`, **restart** the `:8069` process — browser Refresh is not enough. `cr-update` uses the same list only when you upgrade an already restored database. See [SH Backup Restore — Prod dump never installed `oteny_bot`](../../../../radar/.claude/skills/crewradar-development/references/sh-backup-restore.md#prod-dump-never-installed-oteny_bot).
+A production dump can be missing a module its on-disk schema now expects,
+so a plain `-u` after `odoo-bin db load` skips the dependent module and
+leaves stale columns undefined. Restore tooling must run `-i` then `-u` of
+the full module list, and restart the server process afterward — browser
+Refresh is not enough. The restore script and the full incident are owned
+by the consuming business, in its own skill bundle.
 
 ### Skill sync XML-RPC return
 
-`oteny.knowledge.sync.sync_skills_to_knowledge` must return a marshalable dict (`{"articles_synced": N}`), never `None`. Odoo 19 XML-RPC dumps with `allow_none=False`. First shipped in `crewradar` **19.0.10.9**; the model now lives in `oteny_knowledge_sync`. The CrewRadar skill `crewradar-development/references/knowledge-skill-sync.md` owns the call.
+`oteny.knowledge.sync.sync_skills_to_knowledge` must return a marshalable
+dict (`{"articles_synced": N}`), never `None` — Odoo 19 XML-RPC dumps with
+`allow_none=False`. Full history and the manual-call recipe:
+[oteny-knowledge-sync — Manual admin call](../oteny-knowledge-sync/SKILL.md#manual-admin-call-xml-rpc).
 
 ### Odoo test run issues
 
@@ -308,7 +315,7 @@ Odoo.sh dev builds are marked "Test: Failed" based on two mechanisms — not jus
 - Avoid `exc_info=True` on WARNING calls in module install code paths
 - When removing features, ensure `noupdate="1"` XML data still works on fresh installs (set `active=False`, no-op code body, remove `binding_model_id`)
 
-See [Testing Guidelines — CI-Safe Test Patterns](references/testing-guidelines.md#ci-safe-test-patterns-odoosh) for code examples, and [Odoo.sh CI Reference](../../../../radar/.claude/skills/crewradar-development/references/odoosh-ci.md) for build debugging procedures (SSH, ir_logging queries, log inspection).
+See [Testing Guidelines — CI-Safe Test Patterns](references/testing-guidelines.md#ci-safe-test-patterns-odoosh) for code examples. A consuming business documents its own build-debugging procedures (SSH, ir_logging queries, log inspection) in its own skill bundle.
 
 ### Mail templates (inline_template)
 
@@ -318,11 +325,10 @@ Bodies rendered with **`engine='inline_template'`** (e.g. via `mail.render.mixin
 
 | Module | Path |
 |--------|------|
-| crewradar | `~/oteny/radar/crewradar` |
-| rivercreds | `~/oteny/radar/rivercreds` |
-| riverflow | `~/oteny/otenydoo/riverflow` |
-| oteny_audit | `~/oteny/otenydoo/oteny_audit` |
-| oteny_knowledge_sync | `~/oteny/otenydoo/oteny_knowledge_sync` |
+| A business's own modules (e.g. `crewradar`, `rivercreds`) | `<business-repo>/<module>` |
+| `riverflow` | `~/oteny/otenydoo/riverflow` |
+| `oteny_audit` | `~/oteny/otenydoo/oteny_audit` |
+| `oteny_knowledge_sync` | `~/oteny/otenydoo/oteny_knowledge_sync` |
 | Odoo core | `~/odoo/odoo19` |
 | Odoo enterprise | `~/odoo/enterprise19` |
 
@@ -362,18 +368,11 @@ Command constants: `CREATE=0, UPDATE=1, DELETE=2, UNLINK=3, LINK=4, CLEAR=5, SET
 ### Future Ideas
 
 - [x] Parallel test runner: Odoo module `odoo_parallel_tests` that patches the test runner for parallelized test execution via database cloning and worker subprocesses. Workers pull one test class at a time from a shared queue (longest first, from stats persisted across runs), so the makespan does not depend on estimates; clones form a pool reused via schema + XML-ID + module-version fingerprints whatever the worker count, copied with `STRATEGY = FILE_COPY` on PostgreSQL 15+. Installed as dependency of crewradar. ~11x speedup on full suite (repeated runs). Falls back gracefully to sequential on Odoo.sh. (see [Parallel Test Runner](references/parallel-test-runner.md))
-- [x] SH backup fast restore: `crewradar_db_restore.py` auto-detects lite (no filestore) SH backups and uses SQL-only restore to preserve the existing filestore. Primary benefit is 9x smaller download (149 MB vs 1.3 GB) and zero filestore disk I/O. Supports `--link-from` for hardlinking filestores across databases. (see [SH Backup Restore](../../../../radar/.claude/skills/crewradar-development/references/sh-backup-restore.md))
-- [x] Oteny audit filter: `crewradar_db_restore_filter_audit.py` streams dump.sql and strips oteny_audit COPY data for faster restore when audit history is not needed. VSCode launch configs `crewradar-filter-cr-to-sans-audit` and `crewradar-restore-sans-audit` plus settings `backupZipPath` and `backupZipSansAuditPath` support the workflow. (see [SH Backup Restore](../../../../radar/.claude/skills/crewradar-development/references/sh-backup-restore.md))
-- [x] 30s restore: `crewradar_db_restore.py --lite` forces the SQL-only path even when the zip bundles a filestore, skipping the ~70s filestore unzip + Odoo registry boot of `odoo-bin db load`; the SQL replay streams from the zip in a single transaction with per-session `PGOPTIONS` tuning. `riverdeploy/pg_tune_local.sh` tunes the local PostgreSQL for bulk loads (wal_level=minimal, big WAL/buffers, fsync kept ON) — `tune-postgres-for-restore` task. The `crewradar-db-restore-sans-audit` task now passes `--lite`: ~104s → ~30s. (see [SH Backup Restore](../../../../radar/.claude/skills/crewradar-development/references/sh-backup-restore.md))
-- [x] Deploy tool CI pipeline: Enforce strict promotion pipeline (dev -> test1 -> main) with dedicated commands. test2 uses hard reset for ad-hoc feature branch staging, preventing merge conflicts when switching branches. (see [Deploy Tool](../../../../radar/.claude/skills/crewradar-development/references/deploy-tool.md))
-- [x] Feature branch merge with migration safety: `merge-branches` command detects stale migration folder versions on feature branches (versions that would be skipped by Odoo on production), renumbers them above the `max(dev, main)` ceiling, and performs the git merge. Supports `--analyze-only` dry run. No fabric/SSH dependency. (see [Deploy Tool](../../../../radar/.claude/skills/crewradar-development/references/deploy-tool.md))
-- [x] Auto-merge after restore: `crewradar_db_restore.py` automatically detects feature branches after restoring a production backup and merges dev into the current branch via `merge-branches`. This renumbers stale migration folders so the subsequent `-u` picks them up. Covers both riverdeploy download commands and VSCode `preLaunchTask` restore-and-update workflows. Skips silently on infrastructure branches; warns on dirty working tree. (see [Deploy Tool — Auto-merge After Restore](../../../../radar/.claude/skills/crewradar-development/references/deploy-tool.md#auto-merge-after-restore))
-- [x] Restore always `-i` then `-u`: prod dump never installed `oteny_bot`, so `odoo-bin db load` then `-u` alone skips `crewradar_cuneus_sign` and leaves a stale schema. Opening Radar then Oops (`UndefinedColumn`). `crewradar_db_restore.py` runs `odoo-bin --stop-after-init` with `-i` then `-u` of `odoo.installModules` after every successful load (full zip, `--lite`, and sans-audit). The restore fails if that upgrade fails. Restart `:8069` after `-u` — Refresh is not enough. Do not restore again to “fix” the skip. A separate `cr-update` is not required. (see [SH Backup Restore](../../../../radar/.claude/skills/crewradar-development/references/sh-backup-restore.md#prod-dump-never-installed-oteny_bot))
-- [x] Skill sync XML-RPC return (`crewradar` 19.0.10.9): `sync_skills_to_knowledge` always returns a dict so Odoo 19 `allow_none=False` can marshal it. (see [Knowledge Skill Sync](../../../../radar/.claude/skills/crewradar-development/references/knowledge-skill-sync.md#manual-admin-call-xml-rpc))
+- [x] SH backup fast restore, audit-history filtering, and 30s lite restore: a consuming business's own restore tooling can auto-detect lite (no filestore) SH backups, strip audit COPY data, and force a SQL-only replay when the zip bundles a filestore, skipping the filestore unzip and Odoo registry boot entirely. Owned by the consuming business, in its own skill bundle.
+- [x] Deploy tool CI pipeline, feature-branch merge migration safety, and auto-merge after restore: a consuming business's own CLI can enforce a strict promotion pipeline and a migration-renumbering safety net on merge. Owned by the consuming business, in its own skill bundle.
 
 ## References
 
-- [Fresh DB Install](../../../../radar/.claude/skills/crewradar-development/references/fresh-db-install.md) - Install a test database with all modules (crewradar, crewradar_creds, etc.) and dependency table
 - [Testing Guidelines](references/testing-guidelines.md) - Unit and browser testing procedures
 - [Coding Patterns](references/coding-patterns.md) - ORM patterns, Python idioms, extendability, mail `inline_template` pitfalls
 - [XML Guidelines](references/xml-guidelines.md) - XML formatting, naming conventions, inheritance
@@ -381,9 +380,5 @@ Command constants: `CREATE=0, UPDATE=1, DELETE=2, UNLINK=3, LINK=4, CLEAR=5, SET
 - [SCSS Guidelines](references/scss-guidelines.md) - CSS/SCSS formatting, naming, variables
 - [Migrations](references/migrations.md) - Pre/post-migration scripts, view cache cleanup
 - [Odoo Colors](references/odoo-colors.md) - Color integer reference for Odoo views
-- [Knowledge Skill Sync](../../../../radar/.claude/skills/crewradar-development/references/knowledge-skill-sync.md) - Syncing skills to Odoo Knowledge app
 - [Parallel Test Runner](references/parallel-test-runner.md) - Parallelized Odoo test execution with LPT balancing (Developers)
-- [SH Backup Restore](../../../../radar/.claude/skills/crewradar-development/references/sh-backup-restore.md) - Auto-detecting fast restore for lite SH backups with filestore preservation and cross-db hardlinking (Developers)
 - [Profiler Analysis](references/profiler-analysis.md) - Analyzing Odoo's built-in profiler traces from `ir_profile` for SQL query patterns, N+1 detection, and before/after benchmarking (AI Agents, Developers)
-- [Deploy Tool](../../../../radar/.claude/skills/crewradar-development/references/deploy-tool.md) - RiverDeploy CI pipeline, staging environments, deploy commands, and launch configs (Developers)
-- [Odoo.sh CI Reference](../../../../radar/.claude/skills/crewradar-development/references/odoosh-ci.md) - Build failure detection (ir_logging, console output), common noise sources, and SSH debugging procedures (Developers)

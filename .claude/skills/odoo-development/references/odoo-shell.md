@@ -19,9 +19,9 @@ Odoo's `shell` command starts the ORM, connects to a database, and provides a fu
 ## Base Command
 
 ```bash
-cd /Users/ries/oteny/radar && echo "<python code>" | \
+cd <business-repo> && echo "<python code>" | \
   ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo-bin shell \
-  --addons-path=../../odoo/odoo19/addons,/Users/ries/odoo/enterprise19,/Users/ries/oteny/radar \
+  --addons-path=../../odoo/odoo19/addons,/Users/ries/odoo/enterprise19,<business-repo> \
   -d crmain --no-http --max-cron-threads 0 --log-level=info 2>&1
 ```
 
@@ -46,7 +46,7 @@ for emp in employees:
     print(f'{emp.id}: {emp.name}')
 print(f'Total: {env[\"hr.employee\"].search_count([])}')
 " | ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo-bin shell \
-  --addons-path=../../odoo/odoo19/addons,/Users/ries/odoo/enterprise19,/Users/ries/oteny/radar \
+  --addons-path=../../odoo/odoo19/addons,/Users/ries/odoo/enterprise19,<business-repo> \
   -d crmain --no-http --max-cron-threads 0 --log-level=info 2>&1
 ```
 
@@ -60,7 +60,7 @@ partner = env['res.partner'].create({'name': 'Test Partner from Shell'})
 env.cr.commit()
 print(f'Created partner id={partner.id}')
 " | ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo-bin shell \
-  --addons-path=../../odoo/odoo19/addons,/Users/ries/odoo/enterprise19,/Users/ries/oteny/radar \
+  --addons-path=../../odoo/odoo19/addons,/Users/ries/odoo/enterprise19,<business-repo> \
   -d crmain --no-http --max-cron-threads 0 --log-level=info 2>&1
 ```
 
@@ -74,15 +74,15 @@ entries = env['crewradar.log.entry'].search([('active', '=', True)], limit=500)
 elapsed = time.time() - start
 print(f'Fetched {len(entries)} entries in {elapsed:.3f}s')
 " | ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo-bin shell \
-  --addons-path=../../odoo/odoo19/addons,/Users/ries/odoo/enterprise19,/Users/ries/oteny/radar \
+  --addons-path=../../odoo/odoo19/addons,/Users/ries/odoo/enterprise19,<business-repo> \
   -d crmain --no-http --max-cron-threads 0 --log-level=info 2>&1
 ```
 
 ### Run with heredoc (for complex multi-line scripts)
 
 ```bash
-cd /Users/ries/oteny/radar && ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo-bin shell \
-  --addons-path=../../odoo/odoo19/addons,/Users/ries/odoo/enterprise19,/Users/ries/oteny/radar \
+cd <business-repo> && ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo-bin shell \
+  --addons-path=../../odoo/odoo19/addons,/Users/ries/odoo/enterprise19,<business-repo> \
   -d crmain --no-http --max-cron-threads 0 --log-level=info 2>&1 <<'PYEOF'
 # Complex script with imports and multi-step logic
 from collections import Counter
@@ -101,7 +101,7 @@ Append `| tee /tmp/shell_output.txt` to save output while still displaying it:
 ```bash
 echo "print(env['res.company'].search([]).mapped('name'))" | \
   ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo-bin shell \
-  --addons-path=../../odoo/odoo19/addons,/Users/ries/odoo/enterprise19,/Users/ries/oteny/radar \
+  --addons-path=../../odoo/odoo19/addons,/Users/ries/odoo/enterprise19,<business-repo> \
   -d crmain --no-http --max-cron-threads 0 --log-level=info 2>&1 | tee /tmp/shell_output.txt
 ```
 

@@ -217,8 +217,8 @@ this module at once on the same machine and need different port bands.
 `ODOO_TEST_CLONE_PREFIX` already keys off `{db}`, so clone names need no
 change — crewradar's and HermesHost's base database names already differ.
 
-Full plan, with the exact command sequence for both repos:
-[hermeshost/plans/odoo-test-suite-parallelization.md](https://github.com/otenycom/hermeshost/blob/dev/plans/odoo-test-suite-parallelization.md).
+Full plan, with the exact command sequence for both repos, lives with the
+platform's own planning docs.
 
 ## Related
 

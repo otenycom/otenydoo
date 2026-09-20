@@ -283,8 +283,15 @@ class IrFilters(models.Model):
 
     @api.model
     def _prefer_models_with_a_menu(self, models):
-        """The models among ``models`` that a menu item opens, or all of them
-        when none has a menu."""
+        """The models among ``models`` that an ordinary user's menu opens, or
+        all of them when none has such a menu. A menu under Settings >
+        Technical (developer mode only, e.g. Server Actions, or the raw
+        Email/Messages lists) is not a door a user opens, so it must not
+        outrank a model with a real, user-facing menu. A leaf item there
+        often carries no group of its own; only its Technical folder
+        ancestor does. So the whole path to the root is checked, the same
+        way the sidebar itself prunes a menu whose folder is hidden.
+        """
         if not models:
             return models
         actions = self.env["ir.actions.act_window"].search(
@@ -293,11 +300,28 @@ class IrFilters(models.Model):
         menus = self.env["ir.ui.menu"].search(
             [("action", "in", [f"ir.actions.act_window,{action.id}" for action in actions])]
         )
+        menus = menus.filtered(lambda m: self._menu_is_user_reachable(m))
         models_with_menu = {
             action.res_model for action in actions if any(m.action == action for m in menus)
         }
         preferred = models.filtered(lambda m: m.model in models_with_menu)
         return preferred or models
+
+    @api.model
+    def _menu_is_user_reachable(self, menu):
+        """A user reaches ``menu`` by clicking through the sidebar only when
+        it, and every folder above it, carries no group the user lacks.
+        Settings > Technical (``base.group_no_one``) is developer-mode only,
+        so a group requirement met only through it never counts.
+        """
+        allowed = set(self.env.user._get_group_ids())
+        allowed.discard(self.env.ref("base.group_no_one").id)
+        node = menu
+        while node:
+            if node.group_ids and not (set(node.group_ids.ids) & allowed):
+                return False
+            node = node.parent_id
+        return True
 
     @api.constrains("shortcut_show_when")
     def _check_shortcut_show_when(self):

@@ -200,7 +200,7 @@ class IrModuleModule(models.Model):
 
 This follows the same pattern as Odoo's `account` module (`addons/account/models/ir_module.py`). Used in crewradar for automatic skill-to-Knowledge sync on every upgrade.
 
-The method must return a marshalable dict (`{"articles_synced": N}`), never `None`. Odoo 19 XML-RPC dumps with `allow_none=False`; `crewradar` **19.0.10.9** ships that contract. See [Knowledge Skill Sync — Manual admin call](knowledge-skill-sync.md#manual-admin-call-xml-rpc).
+The method must return a marshalable dict (`{"articles_synced": N}`), never `None`. Odoo 19 XML-RPC dumps with `allow_none=False`; `crewradar` **19.0.10.9** ships that contract. See [Knowledge Skill Sync — Manual admin call](../../../../../radar/.claude/skills/crewradar-development/references/knowledge-skill-sync.md#manual-admin-call-xml-rpc).
 
 ### @api.depends Declaration
 
@@ -446,7 +446,7 @@ A value placed in a `fields.Binary` on a **transient/new** wizard record (e.g. s
 
 ### `ir.attachment` Re-encodes Images (checksum ≠ sha1 of the source)
 
-Odoo re-encodes image attachments on store (its image-processing path re-saves the bitmap), so an attachment's `checksum` is the sha1 of the **transformed** bytes, not of the bytes you passed in — a 271 KB PNG comes back ~290 KB with a different sha1. **Don't dedupe image attachments by comparing your own `sha1(file_bytes)` to `ir.attachment.checksum`** — it never matches, so you create a fresh attachment on every run. Key on a marker you control instead (e.g. store `sha1(source)` in `description` and search that), and `sudo()` the search so `res_id=0` / access-restricted attachments aren't hidden. Real example: the Knowledge skill-sync image embedding (`SkillSyncService._embed_body_images`) — see [Knowledge Skill Sync § Duplicate image attachments](knowledge-skill-sync.md#duplicate-image-attachments-on-every-sync).
+Odoo re-encodes image attachments on store (its image-processing path re-saves the bitmap), so an attachment's `checksum` is the sha1 of the **transformed** bytes, not of the bytes you passed in — a 271 KB PNG comes back ~290 KB with a different sha1. **Don't dedupe image attachments by comparing your own `sha1(file_bytes)` to `ir.attachment.checksum`** — it never matches, so you create a fresh attachment on every run. Key on a marker you control instead (e.g. store `sha1(source)` in `description` and search that), and `sudo()` the search so `res_id=0` / access-restricted attachments aren't hidden. Real example: the Knowledge skill-sync image embedding (`SkillSyncService._embed_body_images`) — see [Knowledge Skill Sync § Duplicate image attachments](../../../../../radar/.claude/skills/crewradar-development/references/knowledge-skill-sync.md#duplicate-image-attachments-on-every-sync).
 
 ### One2many Line-to-Line Cascade (Onchange Gotcha)
 

@@ -125,7 +125,7 @@ class TestCrewradarCredentialPlan(TransactionCase):
 
 | Scenario | Action |
 |----------|--------|
-| Fresh start | `dropdb -f cr-test` then run with `-i` and the full module list from `odoo.installModules` in `.vscode/settings.json`. See [Fresh DB Install](fresh-db-install.md) — **do not** use `-i crewradar` alone; `crewradar_creds`, `crewradar_sign`, and others must be installed explicitly. |
+| Fresh start | `dropdb -f cr-test` then run with `-i` and the full module list from `odoo.installModules` in `.vscode/settings.json`. See [Fresh DB Install](../../../../../radar/.claude/skills/crewradar-development/references/fresh-db-install.md) — **do not** use `-i crewradar` alone; `crewradar_creds`, `crewradar_sign`, and others must be installed explicitly. |
 | Schema changes | Add `-u riverflow,crewradar,crewradar_creds` etc. to update modules |
 | Subsequent runs | No `-i` or `-u` needed if schema unchanged |
 
@@ -166,7 +166,7 @@ Check for **both** `failed` and `error(s)` when verifying test results.
 
 ### Culprit: not all intended modules installed on the test database
 
-Post-install tests in this workspace are written for a database that matches **local/CI practice**: install the full comma-separated module list from `.vscode/settings.json` → `odoo.installModules` (see [Fresh DB Install](fresh-db-install.md)). That list includes `crewradar`, `crewradar_creds`, `crewradar_sign`, `crewradar_wilma`, `crewradar_cuneus_sign`, and other addons the suite depends on—not a single module such as `-i rivercreds` or `-i crewradar` in isolation.
+Post-install tests in this workspace are written for a database that matches **local/CI practice**: install the full comma-separated module list from `.vscode/settings.json` → `odoo.installModules` (see [Fresh DB Install](../../../../../radar/.claude/skills/crewradar-development/references/fresh-db-install.md)). That list includes `crewradar`, `crewradar_creds`, `crewradar_sign`, `crewradar_wilma`, `crewradar_cuneus_sign`, and other addons the suite depends on—not a single module such as `-i rivercreds` or `-i crewradar` in isolation.
 
 **Why failures happen**: Odoo only loads Python and XML for modules in `installed` / `to upgrade` state on that database. Skipping modules from the intended set drops their models, records, and workflow data. The workspace post_install tests assume the same installed module graph as a full `-i` using `odoo.installModules`, not a hand-picked subset.
 
@@ -551,7 +551,7 @@ For CLI tools (e.g. the NAS importer `wp_analyzer.py`) the equivalent pattern is
 
 ## CI-Safe Test Patterns (Odoo.sh)
 
-Odoo.sh dev builds fail not only on test assertion errors but also on WARNING/ERROR entries in the `ir_logging` table (written via `--log-db`). The patterns below prevent test code from generating noise that turns builds red even when all tests pass. See [Odoo.sh CI Reference](odoosh-ci.md) for the full failure detection mechanism.
+Odoo.sh dev builds fail not only on test assertion errors but also on WARNING/ERROR entries in the `ir_logging` table (written via `--log-db`). The patterns below prevent test code from generating noise that turns builds red even when all tests pass. See [Odoo.sh CI Reference](../../../../../radar/.claude/skills/crewradar-development/references/odoosh-ci.md) for the full failure detection mechanism.
 
 ### Valid PDF Data in Tests
 

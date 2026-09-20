@@ -11,7 +11,7 @@ This reference covers:
 - A troubleshooting Q&A for the most common failure modes.
 - File-by-file reference (where each piece lives).
 
-**Related references:** [`migrations.md`](migrations.md) (how Odoo migrations work + module-boundary rules), [`deploy-tool.md`](deploy-tool.md) (the riverdeploy CLI this gate builds on), [`xml-data-noupdate.md`](xml-data-noupdate.md) (the noupdate=1 gotcha that motivates many of the gated migrations).
+**Related references:** [`migrations.md`](migrations.md) (how Odoo migrations work + module-boundary rules), [`deploy-tool.md`](../../../../../radar/.claude/skills/crewradar-development/references/deploy-tool.md) (the riverdeploy CLI this gate builds on), [`xml-data-noupdate.md`](xml-data-noupdate.md) (the noupdate=1 gotcha that motivates many of the gated migrations).
 
 ---
 
@@ -379,7 +379,7 @@ Removed. `discover_migration_modules` replaced it. Old PRs that mention "added m
 - **`README.md` § Migration version gate** — onboarding-level overview.
 - **`CLAUDE.md` § Project guidelines** — one-line pointer for AI agents.
 - **[`migrations.md`](migrations.md)** — sibling reference: how Odoo migrations work in this workspace; module-boundary rules.
-- **[`deploy-tool.md`](deploy-tool.md)** — sibling reference: the riverdeploy CLI this gate builds on.
+- **[`deploy-tool.md`](../../../../../radar/.claude/skills/crewradar-development/references/deploy-tool.md)** — sibling reference: the riverdeploy CLI this gate builds on.
 - **[`xml-data-noupdate.md`](xml-data-noupdate.md)** — sibling reference: the `noupdate=1` gotcha that motivates many of the gated migrations.
 
 ---

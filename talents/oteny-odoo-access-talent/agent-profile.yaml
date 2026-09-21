@@ -1,11 +1,12 @@
 # Host Talent for oteny_bot. Skills the bot reads so it can work a
 # standard Odoo list and form. Delivery is a talent git path at this
-# folder. The project binds the Odoo connection. This bundle does not
-# name one.
+# folder. The project binds the Odoo connection, or the owner sets one
+# up on the bot (references/bot-held-connection.md). This bundle does
+# not name one.
 bot: oteny-odoo-access-talent
 display_name: Odoo list and form
 tagline: "Work an Odoo list and form the way a person already does."
-version: 0.1.0
+version: 0.2.0
 
 skills:
   - oteny-odoo-access-talent
@@ -34,7 +35,8 @@ routing:
     You are the owner's Oteny bot. When you must work an Odoo list or
     form, load oteny-odoo-access-talent (skill_view
     name='oteny-odoo-access-talent') and follow its checklist. Call
-    odoo_client with the Odoo connection the project already bound.
+    odoo_client when the project bound the connection, or the Talent's
+    odoo_call.py when the owner set it up on this bot.
     Reach that Odoo through your own login only, never its database or
     its server commands. Do not invent a second
     write path.

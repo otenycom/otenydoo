@@ -34,3 +34,20 @@ jobs:
           if [ ${#DIRS[@]} -eq 0 ]; then echo "No Talent bundles to lint."; exit 0; fi
           echo "Linting: ${DIRS[*]}"
           python3 talents-standard/skills/talent-authoring-standard/scripts/lint_upgrade_safe.py "${DIRS[@]}"
+          python3 talents-standard/skills/talent-authoring-standard/scripts/lint_tools.py "${DIRS[@]}"
+      # The D95 scope-contract coherence pass is not public: it runs Oteny-side at
+      # delivery. Before a push that changes a bundle's profile, run it locally with
+      # hermeshost's `oteny-talent-lint` from source.
+      - name: Talent unit tests and scenarios
+        shell: bash
+        run: |
+          set -euo pipefail
+          pip install pytest pyyaml
+          mapfile -t UNIT < <(find talents -path '*/tests/unit' -type d | sort)
+          if [ ${#UNIT[@]} -gt 0 ]; then
+            python3 -m pytest --import-mode=importlib "${UNIT[@]}" -q
+          fi
+          mapfile -t SCEN < <(find talents -path '*/tests/scenarios/*.yaml' | sort)
+          if [ ${#SCEN[@]} -gt 0 ]; then
+            python3 talents-standard/skills/_shared/scripts/run_scenario.py --backend mock "${SCEN[@]}"
+          fi

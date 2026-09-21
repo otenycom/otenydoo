@@ -1,0 +1,17 @@
+# change_a_field_through_the_form — with an owner connection set up, a field
+# change runs open, set and save on the form host, through the Talent's
+# script. LIVE-ONLY: needs an Odoo with oteny_bot and a connection file.
+bot: oteny-odoo-access-talent
+live_only: true
+turns:
+  - user: "Set the city of the contact called Fixture Contact to Amsterdam."
+    expect:
+      reply:
+        contains_any: ["Amsterdam"]
+      trace:
+        markers:
+          - "odoo_call.py"
+          - "oteny.form.session"
+          - "\"values\""
+        absent:
+          - "OTENY_CONN_"

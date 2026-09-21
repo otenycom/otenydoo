@@ -1,7 +1,7 @@
 ---
 name: riverflow-execute-talent
 description: "Run a riverflow strip the way a person does."
-version: 0.1.0
+version: 0.1.1
 ---
 
 # Riverflow execute
@@ -22,9 +22,10 @@ does not copy this recipe.
 
 ## When to use
 
-Load this skill before you press a riverflow button. Call
-`odoo_client` with the Odoo connection the project already bound.
-Pass `connection=<name>` on every call. You reach this Odoo as an
+Load this skill before you press a riverflow button. Reach this Odoo
+the way `oteny-odoo-access-talent` says: `odoo_client` when the project
+bound the connection, its script when the owner set it up on this bot.
+Name the connection on every call. You reach this Odoo as an
 employee does: through your own login and its rights. Do not write to
 its database or run its server commands.
 
@@ -162,8 +163,8 @@ dict.
 
 ## Hard rules
 
-- Work this Odoo through `odoo_client` and your own login only. Never
-  its database, never its server commands.
+- Work this Odoo through the lane `oteny-odoo-access-talent` names and
+  your own login only. Never its database, never its server commands.
 - Do not `search_read` `riverflow.transition` by name.
 - Do not write `state_id` raw. `bot_claim` is open-and-save.
 - Do not copy deadline keys onto `bot_claim`.

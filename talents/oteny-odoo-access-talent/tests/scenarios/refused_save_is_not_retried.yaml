@@ -1,0 +1,16 @@
+# refused_save_is_not_retried — when the Odoo refuses a save (a 403), the bot
+# reports it and does not retry it as a direct write. LIVE-ONLY: needs a
+# contact the bot's login may read but not edit.
+bot: oteny-odoo-access-talent
+live_only: true
+turns:
+  - user: "Set the city of the contact called Fixture Staff Contact to Amsterdam."
+    expect:
+      reply:
+        contains_any: ["not allowed", "refused", "cannot", "no permission", "denied"]
+      trace:
+        markers:
+          - "oteny.form.session"
+        absent:
+          - "--method write"
+          - "\"method\": \"write\""

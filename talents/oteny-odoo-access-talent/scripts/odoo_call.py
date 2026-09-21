@@ -87,7 +87,6 @@ MODEL_RE = re.compile(r"^[a-z0-9_]+(\.[a-z0-9_]+)*$")
 PLATFORM_PREFIXES = ("OTENY_", "TELEGRAM_")
 SECRET_FIELDS = frozenset({"key", "api_key", "apikey", "password", "secret", "token"})
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
-KNOWN_FIELDS = frozenset({"url", "db", "login", "key_env"})
 
 DOC_GROUP_HINT = (
     "the login is not in 'Technical Documentation' (api_doc.group_allow_doc). Ask the "
@@ -384,6 +383,32 @@ def run_call(conn, key, model: str, method: str, kwargs: dict) -> int:
 
 # -------------------------------------------------------------------------------- --doc
 
+# What a relation map needs from one field. Odoo's full document adds help texts, flags
+# and every method's docstring, which passes 50,000 characters on a model such as
+# res.partner; --out keeps all of it.
+DOC_FIELD_KEYS = ("type", "string", "relation", "relation_field")
+DOC_FIELD_FLAGS = ("required", "readonly")
+DOC_NOTE = "a compact view; add --out <file> for Odoo's whole document, uncut"
+
+
+def _compact_doc(result, model: str):
+    if not isinstance(result, dict):
+        return result
+    if model:
+        fields = {}
+        for name, spec in (result.get("fields") or {}).items():
+            spec = spec if isinstance(spec, dict) else {}
+            slim = {k: spec[k] for k in DOC_FIELD_KEYS if spec.get(k)}
+            slim.update({k: True for k in DOC_FIELD_FLAGS if spec.get(k) is True})
+            fields[name] = slim
+        return {"model": result.get("model", model), "name": result.get("name"),
+                "fields": fields, "methods": sorted(result.get("methods") or {}),
+                "note": DOC_NOTE}
+    models = [{"model": m.get("model"), "name": m.get("name"),
+               "fields": len(m.get("fields") or {})}
+              for m in result.get("models") or [] if isinstance(m, dict)]
+    return {"count": len(models), "models": models, "note": DOC_NOTE}
+
 
 def run_doc(conn, key, model: str, out_path: str | None) -> int:
     if model and not MODEL_RE.match(model):
@@ -406,7 +431,7 @@ def run_doc(conn, key, model: str, out_path: str | None) -> int:
         emit(out)
         return 1
     if not out_path:
-        emit(_capped(result))
+        emit(_capped(_compact_doc(result, model)))
         return 0
     target = Path(out_path).expanduser()
     target.parent.mkdir(parents=True, exist_ok=True)

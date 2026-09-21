@@ -56,11 +56,12 @@ group. Use Odoo's documentation instead:
     python3 …/odoo_call.py --connection <name> --doc --out <file>
     python3 …/odoo_call.py --connection <name> --doc res.partner
 
-`--doc` lists every model your login may read, with its fields and
-methods. `--doc <model>` gives every field of one model, with its
-type, its relation target and its inverse field. `--out <file>`
-writes the whole document to a file instead of the chat-sized cut.
-Keep a map you make in your own data folder.
+`--doc` lists every model your login may read, with its field count.
+`--doc <model>` gives every field of one model: its type, its label,
+its relation target and its inverse field, and the model's method
+names. Both are compact views. `--out <file>` writes Odoo's whole
+document to a file instead, uncut, with help texts and method
+signatures. Keep a map you make in your own data folder.
 
 These calls need the "Technical Documentation" group. When the
 script says your login is not in it, ask the owner's admin to add

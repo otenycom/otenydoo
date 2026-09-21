@@ -446,6 +446,42 @@ def test_doc_index_and_model_paths(odoo, home):
     assert_no_key(p1)
 
 
+def test_doc_without_out_prints_a_compact_view_that_fits(odoo, home):
+    """Odoo's full per-model document passes 50,000 characters on a big model such as
+    res.partner, so the chat view keeps what a relation map needs and drops the rest."""
+    std_conn(home, odoo.url)
+    fields = {f"f{i}": {"type": "char", "string": f"Field {i}", "help": "h" * 400,
+                        "change_default": False, "company_dependent": False,
+                        "required": False, "readonly": i % 2 == 0, "module": "base"}
+              for i in range(200)}
+    fields["parent_id"] = {"type": "many2one", "string": "Parent", "relation": "res.partner",
+                           "help": "h" * 400, "required": False}
+    fields["child_ids"] = {"type": "one2many", "string": "Contacts",
+                           "relation": "res.partner", "relation_field": "parent_id"}
+    methods = {f"m{i}": {"signature": "(self)", "doc": "d" * 300} for i in range(100)}
+    odoo.answer("/doc-bearer/res.partner.json", (200, {"model": "res.partner",
+                                                       "name": "Contact", "doc": None,
+                                                       "fields": fields, "methods": methods}))
+    odoo.answer("/doc-bearer/index.json", (200, {"modules": ["base"], "models": [
+        {"model": f"m.{i}", "name": "M", "fields": {f"f{j}": {"string": "x" * 50}
+                                                    for j in range(40)}, "methods": []}
+        for i in range(300)]}))
+    p = run(home, "--connection", "acme", "--doc", "res.partner")
+    assert p.returncode == 0 and len(p.stdout) < 50_000, len(p.stdout)
+    got = out_json(p)
+    assert "truncated" not in got
+    assert got["fields"]["parent_id"] == {"type": "many2one", "string": "Parent",
+                                          "relation": "res.partner"}
+    assert got["fields"]["child_ids"]["relation_field"] == "parent_id"
+    assert got["fields"]["f0"] == {"type": "char", "string": "Field 0", "readonly": True}
+    assert "m0" in got["methods"] and "--out" in got["note"]
+    p = run(home, "--connection", "acme", "--doc")
+    assert p.returncode == 0 and len(p.stdout) < 50_000, len(p.stdout)
+    got = out_json(p)
+    assert got["count"] == 300
+    assert got["models"][0] == {"model": "m.0", "name": "M", "fields": 40}
+
+
 def test_doc_out_writes_the_full_document_and_prints_a_summary(odoo, home):
     std_conn(home, odoo.url)
     models = [{"model": f"m.{i}", "name": "x" * 300, "fields": {}, "methods": []}

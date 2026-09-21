@@ -37,3 +37,4 @@ routing:
     trail through odoo_client with the Odoo connection the project already
     bound. You reach that Odoo through your own login only; the trail shows
     you what that login may read, and you never write to it.
+  signature: "oteny-audit-talent"

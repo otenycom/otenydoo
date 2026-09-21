@@ -1,7 +1,7 @@
 ---
 name: oteny-audit-talent
 description: "Who changed which field, and when, from the audit trail."
-version: 0.1.0
+version: 0.1.1
 ---
 
 # Audit trail
@@ -16,10 +16,11 @@ not copy this recipe.
 ## When to use
 
 Load this skill when someone asks who changed a record or a field, when a
-value changed, or what a record looked like before. Call `odoo_client` with
-the Odoo connection the project already bound. Pass `connection=<name>` on
-every call. Read the trail as your own login may; a row you cannot read is
-not yours to tell.
+value changed, or what a record looked like before. Reach the Odoo the way
+`oteny-odoo-access-talent` says: `odoo_client` when the project bound the
+connection, its script when the owner set it up on this bot. Name the
+connection on every call. Read the trail as your own login may; a row you
+cannot read is not yours to tell.
 
 ## The model
 

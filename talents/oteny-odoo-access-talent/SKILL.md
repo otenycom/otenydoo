@@ -1,7 +1,7 @@
 ---
 name: oteny-odoo-access-talent
 description: "Work an Odoo list and form the way a person does."
-version: 0.1.0
+version: 0.2.0
 ---
 
 # Odoo list and form
@@ -23,11 +23,25 @@ It consumes, probes and releases your work by its token (`work_consume`,
 
 ## When to use
 
-Load this skill before you browse a list or fill a form. Call
-`odoo_client` with the Odoo connection the project already bound.
-Pass `connection=<name>` on every call. You reach this Odoo as an
-employee does: through your own login and its rights. Do not write to
-its database or run its server commands; that is not your machine.
+Load this skill before you browse a list or fill a form. You reach
+this Odoo as an employee does: through your own login and its rights.
+Do not write to its database or run its server commands; that is not
+your machine.
+
+There are two ways to reach it. Use the one that exists:
+
+- **The project bound the connection.** Call `odoo_client` with
+  `connection=<name>` on every call.
+- **The owner set it up on this bot.** The file
+  `~/.hermes/data/oteny-odoo-access-talent/connections/<name>.yaml`
+  exists. Call this Talent's script with the same model, method and
+  kwargs. It answers as `odoo_client` does:
+
+      python3 ~/.hermes/skills/talents/oteny-odoo-access-talent/scripts/odoo_call.py \
+        --connection <name> --model <model> --method <method> --kwargs '<json>'
+
+The owner offers a connection that is not set up yet? Load
+`references/bot-held-connection.md` and follow its checklist.
 
 ## Why the host holds the tab
 
@@ -55,6 +69,7 @@ and wipes a live request cache.
 | Delete the row the person could delete | Call `unlink_record`. |
 | The handle is dead | The verb returned `handle-expired`. Open the form again. |
 | A field is not in the photo | Do not `set` it. Ask or stop. |
+| Map the models and their relations | Owner's connection: `odoo_call.py --doc`. Never read `ir.model`. |
 
 ## Checklist — every form turn
 
@@ -67,8 +82,9 @@ and wipes a live request cache.
 
 ## Verbs
 
-Call these on `oteny.form.session` through `odoo_client`. Pass
-`model='oteny.form.session'` on the tool. Put the business model in
+Call these on `oteny.form.session` through your lane. Pass
+`model='oteny.form.session'` on the tool, or `--model
+oteny.form.session` to the script. Put the business model in
 `kwargs` as `res_model` or `model` (`kwargs={'res_model':
 'res.partner'}`). Do not put `res.partner` in the tool's own
 `model` argument. That argument is the host.
@@ -86,6 +102,16 @@ The handle is the transient row id. A verb on a dead handle returns
 | `discard` | Drop the handle. No `write`. |
 | `unlink_record` | Delete when the person could delete from that view. The wire job is unlink. The method name leaves ORM vacuum of the transient row alone. |
 
+Each verb takes these `kwargs`:
+
+| Verb | `kwargs` |
+| --- | --- |
+| `views` | `{"res_model": "res.partner"}` |
+| `list` | `{"xmlid": "base.action_partner_form", "domain": [["name", "ilike", "Acme"]], "limit": 20}` |
+| `open` | `{"xmlid": "base.action_partner_form", "res_id": 42}`. No `res_id` = new. |
+| `set` | `{"handle": 1, "values": {"city": "Amsterdam"}}` |
+| `save`, `discard`, `unlink_record` | `{"handle": 1}` |
+
 `open` / `set` / `save` return:
 
 - `handle` (opaque)
@@ -101,11 +127,18 @@ The handle is the transient row id. A verb on a dead handle returns
 `actions` is a photo, not a verb. This host ships no button-invoke
 call.
 
+A big form can pass 50,000 characters. Then the answer comes back
+cut and marked `truncated`, but `handle`, `model` and `res_id` stay
+whole. Go on with `set` and `save`. Read a long field with
+`search_read` instead.
+
 Do not return the view arch. Do not return `view_state` or
 `fields_spec`. Do not call `fields_get` or read `ir.ui.view`.
 
-`odoo_client` also stays the raw pipe for a DTO `search_read` the
-project already does.
+The same lane is also the raw pipe for reads: `search_read`,
+`search_count`, `read`. A write goes through `save`, unless the client
+Talent that loaded this one documents that exact write. A refused
+`save` is reported to the person. It is never retried as a `write`.
 
 ## Fail-closed `set`
 
@@ -141,10 +174,16 @@ Edit-save still sends changed fields only.
 
 ## Hard rules
 
-- Work this Odoo through `odoo_client` and your own login only. Never
-  its database, never its server commands, even when they are reachable
-  from your machine.
-- Do not invent a second write path.
+- Work this Odoo through your lane and your own login only:
+  `odoo_client` when the project bound it, the script when the owner
+  set it up. Never its database, never its server commands, even when
+  they are reachable from your machine.
+- Do not invent a second write path. A refused `save` is reported,
+  never retried as a `write`.
+- Never write a connection into `~/.hermes/.env`. A connection the
+  owner sets up lives in its connection file.
+- Never ask for, repeat or store a key in chat or in a file. The key
+  arrives through the secure connect page.
 - Do not `set` a field the photo does not list as amendable.
 - Do not read view arch or `view_state`.
 - A client Talent loads this skill. It does not copy this recipe.

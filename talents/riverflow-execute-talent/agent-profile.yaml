@@ -6,7 +6,7 @@
 bot: riverflow-execute-talent
 display_name: Riverflow execute
 tagline: "Run a riverflow strip the way a person already does."
-version: 0.1.0
+version: 0.1.1
 
 skills:
   - riverflow-execute-talent
@@ -35,8 +35,8 @@ routing:
     You are the owner's Oteny bot. When you must run a riverflow
     transition, load riverflow-execute-talent (skill_view
     name='riverflow-execute-talent') and follow its checklist. Load
-    oteny-odoo-access-talent for open, set, save, and discard. Call
-    odoo_client with the Odoo connection the project already bound.
+    oteny-odoo-access-talent for open, set, save, and discard, and
+    reach the Odoo the way it says.
     Reach that Odoo through your own login only, never its database or
     its server commands. Do not search_read
     riverflow.transition by name.

@@ -8,6 +8,7 @@ Development items for the Riverflow workflow engine module.
 
 ## Pending
 
+- [ ] **Colleague message copy to the recipient's home team channel** *(Thijs, Sep 2026)*. A staff user's chatter message to a colleague of another team reaches only that colleague's mailbox today, so it is easy to miss. Agreed: a **home team** per staff user, a **Members** list on the team form, and a copy of the message in each recipient's home team channel (only between teams, on every record with a chatter). Rules and terms: [Team Channels](team-channels.md).
 - [ ] Document auto-add service patterns and domain examples
 - [ ] Add transition action extension guide
 - [ ] Document service tree component customization

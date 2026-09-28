@@ -779,6 +779,8 @@ This mirrors the document-import wizard's results view and the credential wizard
 
 ### Chatter Mixin (`riverflow.mail.thread.review.mixin`)
 
+The mixin also copies a message from an outside sender into the Responsible team's Discuss channel. Which messages reach which team channel, and why, is in [Team Channels](references/team-channels.md).
+
 The mixin extends `mail.thread` and adds message classification used by `riverflow.service` and `crewradar.log.entry`. Key fields:
 
 | Field | Source | Purpose |
@@ -962,4 +964,5 @@ riverflow/
 - [Host module Talents](../oteny-bot/SKILL.md#host-talent-delivery) - git path delivery for both host bundles
 - [riverflow-execute-talent](../../../riverflow/talents/riverflow-execute-talent/SKILL.md) - the recipe the bot reads
 - [Talent author workflow](references/talent-author-workflow.md) - operator pointer to that Talent
+- [Team Channels](references/team-channels.md) - which chatter messages riverflow copies into a team's Discuss channel, and why (external message copy; agreed colleague message copy by home team)
 - [Roadmap](references/roadmap.md) - Development roadmap

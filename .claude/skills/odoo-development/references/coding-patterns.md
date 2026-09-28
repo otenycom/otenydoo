@@ -136,6 +136,25 @@ recent_first = entries.sorted('start_date', reverse=True)
 sorted_entries = entries.sorted(lambda e: (e.start_date, e.employee_id.name))
 ```
 
+### Overriding an `@api.constrains` method: repeat the decorator
+
+An override of a constraint method **must repeat `@api.constrains` with the full field list** of the base method. Odoo 19 builds `_constraint_methods` from the final class attribute only (`odoo/orm/models.py` `_constraint_methods`: `getmembers(cls, ...)` keeps a member only if it has `_constrains`). An undecorated override therefore hides the base constraint for **every** record of the model, not only for the records the override meant to relax — and nothing warns.
+
+`@api.depends` behaves differently: `Field.get_depends` walks the whole MRO (`resolve_mro(model, self.compute, ...)`, `odoo/orm/fields.py`) and merges the `_depends` of every override. So an undecorated **compute** override is safe, and that difference is why the trap is easy to miss.
+
+```python
+# WRONG: the base check disappears for every credential type
+def _check_number(self):
+    super(Credential, self.filtered(lambda c: not c._is_relaxed()))._check_number()
+
+# RIGHT: same field list as the base method
+@api.constrains("number", "credential_type_id", "application_date", "application_appointment_date")
+def _check_number(self):
+    super(Credential, self.filtered(lambda c: not c._is_relaxed()))._check_number()
+```
+
+Guard it with a test in the module that owns the base constraint: assert the method name is in `env[model]._constraint_methods` and compare its `_constrains` set. The test database installs every module, so the guard also catches an override in a module that sits higher in the tree. Real case: a client module overrode three `rivercreds.credential` checks without the decorator; for five months no credential of any type was checked for a number, expiry date or issuing country (the consuming business's skill bundle has the full record).
+
 ## Compute Method Patterns
 
 ### registry.loaded Guard and Migration Pattern
@@ -966,7 +985,7 @@ def _compute_is_required_fields(self):
 
 **Benefits**: requirement logic is testable in Python, shared across views (form, list, wizard), and avoids duplicating complex boolean expressions in XML. The `is_required_*` fields are non-stored (no database column) and recomputed on every form load.
 
-Applied in: `rivercreds.credential` (10 `is_required_*` fields for holder applicability, data field relaxation during application phase, validity period).
+Applied in: `rivercreds.credential` (10 `is_required_*` fields for holder applicability, data field relaxation during application phase, validity period). Note: as of 2026-09 only the credential upload wizards bind `required="is_required_number"`; the credential form loads the `is_required_*` fields invisibly but binds none of them, so the model constraints are the only enforcement there.
 
 ## XML View Patterns
 

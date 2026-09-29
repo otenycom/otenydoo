@@ -18,3 +18,4 @@ from . import test_transition_buttons_bot_hide
 from . import test_bot_execute
 from . import test_service_hooks
 from . import test_work_contract
+from . import test_team_channel_copy

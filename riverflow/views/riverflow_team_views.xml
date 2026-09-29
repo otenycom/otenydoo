@@ -28,6 +28,27 @@
                                 invisible="not id" />
                         </group>
                     </group>
+                    <!-- The staff users whose home team this is. The many2many widget makes "Add"
+                         pick an existing user; removing a line only clears that user's home team.
+                         A member is stored on res.users, which only access-rights administrators may
+                         write, so everybody else sees the list read-only. -->
+                    <separator string="Members" />
+                    <field name="member_ids" widget="many2many" nolabel="1"
+                        domain="[('share', '=', False)]"
+                        options="{'no_create': True}"
+                        groups="base.group_erp_manager">
+                        <list>
+                            <field name="name" />
+                            <field name="login" />
+                        </list>
+                    </field>
+                    <field name="member_ids" nolabel="1" readonly="1"
+                        groups="!base.group_erp_manager">
+                        <list>
+                            <field name="name" />
+                            <field name="login" />
+                        </list>
+                    </field>
                 </sheet>
                 <chatter />
             </form>

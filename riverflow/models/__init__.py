@@ -22,3 +22,5 @@ from . import models
 from . import mail_mail
 from . import res_partner
 from . import riverflow_oteny_bot
+from . import res_users
+from . import mail_thread

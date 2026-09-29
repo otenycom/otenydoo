@@ -1395,6 +1395,16 @@ Do not reach for `_get_html_link()` here. That helper emits
 where the chatter's link handler is present — it is inert in an ordinary Html
 field on a form.
 
+The reverse holds for a **message body**. Inside any `mail.message` rendered by
+the mail Message component — the chatter **and** a Discuss channel — the
+backend store's `handleClickOnLink`
+(`mail/static/src/core/web/store_service_patch.js`) opens a
+`data-oe-model` / `data-oe-id` link as a form. So `_get_html_link()` is the
+right helper for a link inside a channel post (riverflow's team channel copy).
+The mail sanitizer stores it as `<a href="#" data-oe-model="…" data-oe-id="…">`
+(double quotes) and drops styles such as `border-left`; a test that looks for
+the link must match that sanitized form.
+
 `crewradar.issue.mixin.get_record_link()` wraps this, and its `issues_details`
 renderer shows the pattern for mixing trusted and untrusted text: an issue may
 supply `description_html` (markup our own code built, emitted as-is) or
@@ -1796,6 +1806,39 @@ records_to_transition_ids = fields.Many2many(
 The base `riverflow.service.wizard` even flags `records_to_transition_ids` as `# to be overridden` for this reason. (Also add the new model's `ir.model.access` row — see the section above.)
 
 **The form view must be `mode="primary"`.** When the subclass reuses the base wizard's form via `inherit_id`, set `<field name="mode">primary</field>` on the view. A default (extension) inheritance is resolved against the **parent view's model**, so the web client silently **drops the subclass's own fields** (they don't exist on the parent model) — the wizard opens but the new fields are invisible, even though a server-side `env[child].get_view(view_id=...)` resolves them (it validates against the child model, masking the bug). Real example: `view_wp_request_ab_wizard_form` inherits the primary `view_service_email_sender_form` for the `crewradar_cuneus_sign.appointment.email.wizard` model; without `mode="primary"` its `appointment_date`/`appointment_time` never rendered. The sibling `view_wp_at_applied_wizard_form` / `view_wp_upload_permit_wizard_form` show the correct pattern (`mode="primary"` + `inherit_id`). Extension mode only works when the parent view shares the same model (or its base) — e.g. Book AB, whose parent is itself a `riverflow.service.wizard` extension.
+
+## A field on res.users must not reuse a res.partner field name
+
+`res.users` inherits `res.partner` by delegation (`_inherits`), so every
+partner field is also readable on a user. A new field on `res.users` with the
+name of an existing partner field shadows the partner field on users, with a
+different meaning, and `user.x` no longer equals `user.partner_id.x`. Check
+the partner model (including every module's extensions) before naming a user
+field. Worked example: riverflow names the user's team `home_team_id`, because
+`res.partner.riverflow_team_id` already means "the team whose contact this
+partner is".
+
+## A One2many that lists existing records (a Members list)
+
+To show and manage "which users belong to this team" on the team form, store
+the link on the user (`home_team_id`, a Many2one) and put the One2many
+`member_ids` on the team. Two details make it safe:
+
+- **`widget="many2many"` on the One2many.** "Add" then opens a picker of
+  existing records instead of a new-record form (Odoo core does the same on
+  `stock.picking.batch.picking_ids`). Add `options="{'no_create': True}"` so the
+  picker offers no "New".
+- **`ondelete="set null"` on the inverse Many2one.** Odoo deletes the line on
+  `Command.unlink` / `Command.set` only when the inverse cascades. With
+  `set null`, removing a person from the list clears their team; with
+  `cascade` it would delete the user.
+
+When the stored side is a model that only some groups may write (`res.users`:
+access-rights administrators), render the field twice with complementary
+groups — an editable node with `groups="base.group_erp_manager"` and a
+`readonly="1"` node with `groups="!base.group_erp_manager"` — so other users see
+the list without a save that would fail. Example:
+`riverflow/views/riverflow_team_views.xml`.
 
 ## Odoo 19 Field Rename: `res.users.groups_id` → `group_ids`
 

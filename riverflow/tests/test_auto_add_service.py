@@ -23,7 +23,7 @@ class TestAutoAddServiceDedup(TransactionCase):
         )
 
         # Create a domain condition that matches partners with a specific name
-        cls.auto_add_domain = cls.env["riverflow.auto.add.domain"].create(
+        cls.auto_add_domain = cls.env["riverflow.named.domain"].create(
             {
                 "name": "Test domain for auto-add dedup",
                 "applies_to_model_id": cls.partner_model.id,

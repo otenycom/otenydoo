@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Named Domains (riverflow.named.domain, until 19.0.1.1274
+         riverflow.auto.add.domain). The XML ids were renamed with the model by
+         the 19.0.1.1274 pre-migrate, so these records are updated in place. -->
+    <record id="view_named_domain_form" model="ir.ui.view">
+        <field name="name">riverflow.named.domain.form</field>
+        <field name="model">riverflow.named.domain</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <div class="oe_title">
+                        <h2>
+                            <field name="name" />
+                        </h2>
+                    </div>
+                    <group>
+                        <field name="applies_to_model_id" />
+                        <field name="applies_to_model" readonly="1" invisible="1" />
+                        <field name="domain" widget="domain" options="{'model': 'applies_to_model'}" />
+                        <field name="description" placeholder="Human-readable description of the domain condition." />
+                    </group>
+                    <!-- Where-used: a shared domain changes every user when it
+                         is edited. Other modules add their own pages here. -->
+                    <notebook name="used_by">
+                        <page string="Auto-Add Rules" name="auto_add_rules">
+                            <field name="auto_add_service_ids" readonly="1">
+                                <list>
+                                    <field name="name" />
+                                    <field name="service_template_id" />
+                                    <field name="active" widget="boolean_toggle" readonly="1" />
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_named_domain_list" model="ir.ui.view">
+        <field name="name">riverflow.named.domain.list</field>
+        <field name="model">riverflow.named.domain</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="applies_to_model_id" optional="show" />
+                <field name="name" optional="show" />
+                <field name="description" optional="show" />
+                <field name="domain" optional="show" />
+            </list>
+        </field>
+    </record>
+
+    <record id="view_named_domain_search" model="ir.ui.view">
+        <field name="name">riverflow.named.domain.search</field>
+        <field name="model">riverflow.named.domain</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="name" />
+                <field name="applies_to_model_id" />
+            </search>
+        </field>
+    </record>
+
+    <record id="action_named_domain" model="ir.actions.act_window">
+        <field name="name">Named Domains</field>
+        <field name="res_model">riverflow.named.domain</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_named_domain_search" />
+    </record>
+
+    <menuitem id="menu_named_domain"
+        name="Named Domains"
+        action="action_named_domain"
+        parent="riverflow.services_configuration_menu" sequence="100"
+    />
+</odoo>

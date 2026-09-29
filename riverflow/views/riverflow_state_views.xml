@@ -28,6 +28,11 @@
                             <field name="is_supply_order_delivered" />
                             <field name="hide_in_statusbar" />
                             <field name="show_state_in_crew_planning" />
+                            <!-- Credential planning reads these two flags (who
+                                 has holder rows, which onboarding documents show);
+                                 they were set in data only and invisible here. -->
+                            <field name="counts_as_active_employment" />
+                            <field name="requires_onboarding_credentials" />
                             <field name="auto_progress_on_children_done" />
                             <field name="auto_done_children_on_enter" />
                             <field name="is_owned_by_bot" />

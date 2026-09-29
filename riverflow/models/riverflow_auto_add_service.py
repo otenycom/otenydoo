@@ -19,7 +19,7 @@ class AutoAddService(models.Model):
         help="If unchecked, the auto-add rule will be disabled without removing it.",
     )
     domain_id = fields.Many2one(
-        "riverflow.auto.add.domain",
+        "riverflow.named.domain",
         string="Domain Condition",
         required=True,
         ondelete="restrict",

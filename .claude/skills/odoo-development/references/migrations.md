@@ -367,6 +367,24 @@ Guard the script so it only acts while the old table exists and the new one does
 
 Before renaming, count the text references on a production restore; a model that is not a `mail.thread` usually has none outside `ir_model*`, the action and the views.
 
+## Renaming a Stored Field
+
+A new field name with a new column is a removal plus an addition. On `-u` Odoo creates the new column: a stored compute is computed for every row, a plain field starts empty. At the end of the upgrade `ir.model.data._process_end` unlinks the old `ir.model.fields` row and **drops the old column** (see [Field Removal Checklist](#field-removal-checklist)). A plain field loses its values that way, and text that stores the old name keeps pointing at a field that no longer exists.
+
+Rename in place, in a **pre-migrate** of the module that defines the field, so the registry finds the column and the field row under the new name when the new code loads:
+
+- `ALTER TABLE "<table>" RENAME COLUMN "<old>" TO "<new>"`.
+- `ir_model_fields.name` of the row (`model = '<model>' AND name = '<old>'`).
+- The field's XML id in `ir_model_data` of the defining module: `field_<model_with_underscores>__<old>` becomes `field_<model_with_underscores>__<new>`. Without this, the old XML id counts as "not loaded" and `_process_end` still unlinks the row and drops the column.
+
+Guard the script: act only while the old column exists and the new one does not (`odoo.tools.sql.column_exists`), so a second run does nothing.
+
+Then, in the **post-migrate**, rewrite the text that names the field: stored domains (named domains, filters, record rules, server actions) and any other data that holds the name as a string. Before you write it, scan a production restore: loop over the text, varchar and json columns of the public tables and count the rows that contain the old name. The module's own views are reloaded from XML and need no rewrite. Knowledge articles, chat logs and similar free text can keep the old name.
+
+In the code, rename every reference in the same change: the field, its compute, `@api.depends` paths in every module, views, XML data and domains. Keep the old name only in migrations that ran before the rename.
+
+Test it like a model rename: put the database back into the old shape with SQL inside the test transaction (PostgreSQL DDL is transactional), call the migration's `migrate()`, and assert the column, the field row and the XML id. Test the text rewrite on a record you create with the old name. On a production restore, compare a checksum of the column values before and after the upgrade.
+
 ## Post-migration Patterns
 
 ### Comparing Two Domains

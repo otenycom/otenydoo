@@ -1444,6 +1444,49 @@ usable to restore an inheritance that a core compute no longer performs — a
 consuming business documents its own worked example of this (the `vies_valid`
 case) in its own skill bundle.
 
+## Hiding "Create" for one target model on every screen
+
+To stop users creating records of one model (say `res.partner`) from any
+dropdown, do not add `options="{'no_create': True}"` field by field. That misses
+Odoo's own screens (mail composer, Add followers, Sign, invoices) and every
+field added later.
+
+Odoo already hides every create option when the user lacks the `create` right
+on the target model. The view compiler marks each editable many2one/many2many
+field, and the root of each embedded x2many list, with `model_access_rights`;
+`ir.ui.view._postprocess_access_rights` then turns that marker into
+`can_create` (field) or `create` (embedded list) on **every** `get_view` call,
+after the view cache. The web client reads those attributes for "Create 'x'",
+"Create and edit...", the "New" button in "Search More..." and the new row of
+an embedded list.
+
+When the access-rights lever is closed (for example nearly every user is an
+Administrator, and `base.group_system` implies `base.group_partner_manager`),
+override that one method:
+
+```python
+def _postprocess_access_rights(self, tree):
+    if tree.get("model_access_rights") == "res.partner":
+        return super()._postprocess_access_rights(tree)  # the model's own screens
+    # Collect before super(): it pops the marker.
+    nodes = tree.xpath("//*[@model_access_rights='res.partner']")
+    tree = super()._postprocess_access_rights(tree)
+    for node in nodes:
+        node.set("can_create" if node.tag == "field" else "create", "False")
+    return tree
+```
+
+- `can_write` stays computed, so tag editing and opening the record keep working.
+- On a many2many list, "Add a line" still picks existing records: the x2many
+  field gates it on the "link" right, not on "create".
+- The chatter recipient field (`@mail/core/web/recipients_input`,
+  `RecipientsInput.getAutoCompleteSources()`) is not a view field and is not
+  reached; patch it in JS and drop the option with class
+  `o_m2o_dropdown_option_create`. Note that the chatter then does **not** send
+  to a typed address without a partner: `/mail/message/post` resolves
+  `partner_emails` with `no_create` and silently drops what it cannot find.
+- Worked example: crewradar 19.0.10.80 (`crewradar/models/ir_ui_view.py`).
+
 ## Think Extendable
 
 Keep methods small and logic overridable for submodules:

@@ -8,6 +8,7 @@ Development items for the Riverflow workflow engine module.
 
 ## Pending
 
+- [ ] **The 19.0.1.1266 pre-migrate fails on a database where crewradar already declares `team_cuneus_yangon`** *(found 2026-09-29 on a copy of `cr-test`)*. It moves the XML id from riverflow to crewradar with one `UPDATE ir_model_data SET module = 'crewradar'`; when both rows exist (crewradar was updated before riverflow, a partial-update drift), the unique index on (module, name) stops the whole upgrade. Production is not affected (riverflow is past 1266 there). Fix if another database meets it: drop the riverflow row when the crewradar row exists, move it otherwise.
 - [ ] Document auto-add service patterns and domain examples
 - [ ] Add transition action extension guide
 - [ ] Document service tree component customization

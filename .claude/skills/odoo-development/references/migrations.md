@@ -351,7 +351,40 @@ records.unlink()
 
 The salary timeline model has `_unlink_included_items()` that releases linked services, timesheets, and vacation payouts. `riverflow.service.has_been_paid_on_salary` is a stored computed field depending on `salary_timeline_id`. Raw SQL DELETE would leave services marked as "paid" with no timeline linked. ORM `unlink()` triggers both the cleanup method and the field recomputation.
 
+## Renaming a Model
+
+Odoo 19 has no model-rename helper, and the upgrade-util library (`odoo.upgrade.util.rename_model`) is not installed here. A rename is plain SQL in a **pre-migrate** of the module that defines the model, so the registry finds the renamed table and `ir.model` row when the new code loads instead of creating an empty new model. Worked example: riverflow `migrations/19.0.1.1274/pre-migrate.py` (`riverflow.auto.add.domain` → `riverflow.named.domain`) and its test `riverflow/tests/test_named_domain_rename.py`.
+
+What must follow the model name:
+
+- **The table**, its `_id_seq` sequence, and every constraint and index named after the table (renaming a primary-key constraint renames its index too; rename the remaining indexes after that).
+- **`ir_model.model`, `ir_model_fields.model` and `ir_model_fields.relation`** — the registry looks rows up by model name; `relation` covers Many2one fields in other modules that point to the model.
+- **`ir_model_data.model` for every module**, not only the defining one. Other modules' data records keep their XML ids, and the XML loader refuses an XML id whose stored model differs from the record's model ("found record of different model").
+- **The defining module's own XML ids** that carry the old name (`model_*`, `field_<model>__*`, `access_*`, views, action, menu). An old-named `field_…` XML id is not loaded in the upgrade, so `ir.model.data._process_end` unlinks the `ir.model.fields` row it points to **and drops the column** (see [Field Removal Checklist](#field-removal-checklist)).
+- **Text references**: `ir_act_window.res_model`, `ir_ui_view.model`, `ir_filters.model_id`, `ir_attachment.res_model`, and, if the model is a `mail.thread`, `mail_message.model`, `mail_followers.res_model`, `mail_activity.res_model`. Check audit tables that store model names (`oteny_audit_log*`).
+
+Guard the script so it only acts while the old table exists and the new one does not. Test it by putting the database back into the old shape with SQL inside the test transaction (PostgreSQL DDL is transactional) and asserting on rows, ids and XML ids.
+
+Before renaming, count the text references on a production restore; a model that is not a `mail.thread` usually has none outside `ir_model*`, the action and the views.
+
 ## Post-migration Patterns
+
+### Comparing Two Domains
+
+A migration that asks "is this the same domain as ours?" (for example before merging two records or before overwriting a value HR may have edited) must compare **meaning, not text**. Odoo's domain editor saves the explicit prefix form: `[A, "|", B, C]` comes back as `["&", A, "|", B, C]`, with double quotes. On a production restore two identical rules differed only that way, and a text comparison kept them apart. Normalise both through `odoo.fields.Domain`:
+
+```python
+import ast
+from odoo.fields import Domain
+
+def _parsed(expression):
+    try:
+        return list(Domain(ast.literal_eval((expression or "").strip() or "[]")))
+    except (ValueError, SyntaxError, TypeError):
+        return (expression or "").strip()  # ref(), datetime...: compare as text
+```
+
+`Domain([])` becomes `[(1, "=", 1)]`, so compare an empty domain with `_parsed("[]")`, not with `[]`. Example: crewradar_cuneus_sign `migrations/19.0.6.163/post-migrate.py`.
 
 ### Calling Compute Methods
 

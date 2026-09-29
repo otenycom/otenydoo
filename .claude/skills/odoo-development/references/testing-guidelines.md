@@ -850,6 +850,14 @@ cd <business-repo> && ~/odoo/venv/bin/python3 ~/odoo/odoo19/odoo-bin --stop-afte
 
 **Component test gotchas** (learned 09-Sep-2026): `mountWithCleanup` boots the web **and mail** services (crewradar depends on mail), which read `res.users` and `discuss.channel` — call `defineMailModels()` from `@mail/../tests/mail_test_helpers` at module level, `defineWebModels()` is not enough. Keep luxon `DateTime` instances out of `useState` (use a plain object plus a reactive version counter). The browser stores a style percentage with four decimals, so compare `parseFloat(el.style.left)` rounded, not the raw string. To prove a component test red, swap the fixed file for `git show HEAD:<path>` and rerun, then restore.
 
+**Form and chatter test gotchas** (learned 29-Sep-2026):
+
+- A test that opens a **form** must answer `onRpc("ir.config_parameter", "get_param", () => "False")`. oteny_shortcut's Form Wide Toggle asks it on every form open, and the mock server has no such model (`Cannot find a definition for model "ir.config_parameter"`).
+- To test the **chatter**, copy the setup of mail's own tests: `startServer()`, `pyEnv["res.fake"].create({})`, `registerArchs({"res.fake,false,form": "<form><sheet/><chatter/></form>"})`, `start()`, `openFormView("res.fake", id)`, then `click("button", { text: "Send message" })` (all from `@mail/../tests/mail_test_helpers`). The mock `res.partner` has no `email_normalized`, so search with a name, not an email.
+- `contains(selector, { count: 0 })` passes at once if the dropdown has not rendered yet. First wait for an element from the same render (for example a matching record), then check that the other element is absent.
+- One file runs without `-u`: `--test-tags "/web:WebSuite.test_unit_desktop[@crewradar/<file name without .test.js>]"`. Never add `-u <module>` to that command: it limits test collection to that module, and the run ends with `0 tests`.
+- To prove a patch test red, remove the patch file from the module's asset list in the manifest, rerun (it must fail), then restore the manifest.
+
 **Running in the browser**: open the Hoot runner at `http://localhost:8069/web/tests` (login required). The runner UI lists suites by module/file and supports filtering to a single suite or test; failures report per-assertion diffs in the browser console and page. Test files are only served from the `web.assets_unit_tests` bundle — they are never part of the production asset bundles.
 
 ## Browser Testing

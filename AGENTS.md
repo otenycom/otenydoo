@@ -39,6 +39,11 @@ paths, model and field names, flags, numbers. Hard-wrap committed markdown at
   clone: `pre-commit install --hook-type pre-commit --hook-type pre-push`.
 - **Check the git identity before the first commit** in a clone:
   `git config --local --get user.email`.
+- **Always update the skills at the end.** When the work is done, and before
+  the final reply, update the skill of every module you touched: what was
+  built, what was learned, and which roadmap items moved. The index in
+  [`.claude/skills/SKILL.MD`](.claude/skills/SKILL.MD) names the skill of each
+  module. A short session is not an exception.
 
 ## Branches and release order
 

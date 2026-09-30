@@ -6,6 +6,8 @@ to the correct sibling/child article rather than an identically-named
 file in a different skill folder.
 """
 
+from urllib.parse import quote
+
 from odoo.tests.common import TransactionCase
 from odoo.tests import tagged
 
@@ -332,6 +334,113 @@ class TestSkillSyncLinks(TransactionCase):
             excluded_href,
             agentonly_ref.body,
             "Agent-only skill href should be preserved unchanged in the article body",
+        )
+
+    def test_percent_encoded_agent_only_link_no_warning(self):
+        """A file name with a space or an em dash is percent-encoded in the href.
+
+        The target is agent-only, so the path is in the exclusion set as it is
+        on disk. The rewriter must decode the href before that comparison, leave
+        the link as-is, and not warn.
+        """
+        filename = "Meeting 2026-09-30 — summary.md"
+        encoded_href = "../notes/" + quote(filename, safe="")
+        disk_path = f"skills/notes/{filename}"
+        source = self._managed_article(
+            "test-link-encoded-agentonly",
+            f'<p>See <a href="{encoded_href}">Note</a></p>',
+            "Test",
+            "skills/test-link-encoded-agentonly/SKILL.md",
+            parent=self.root,
+        )
+
+        logger_name = "odoo.addons.oteny_knowledge_sync.models.knowledge_sync"
+        with self.assertLogs(logger_name, level="DEBUG") as cm:
+            self.env["oteny.knowledge.sync"]._rewrite_internal_links(
+                "Test", {disk_path}
+            )
+
+        offending = [
+            r
+            for r in cm.records
+            if r.levelname == "WARNING" and "Meeting 2026-09-30" in r.getMessage()
+        ]
+        self.assertEqual(
+            offending,
+            [],
+            "A percent-encoded link to an agent-only file must not warn. "
+            f"Got: {[r.getMessage() for r in offending]}",
+        )
+        source.invalidate_recordset(["body"])
+        self.assertIn(
+            encoded_href,
+            source.body,
+            "The encoded href should stay unchanged when the target is agent-only",
+        )
+
+    def test_percent_encoded_href_resolves_to_article(self):
+        """The same encoded file name resolves when the target is published."""
+        filename = "Meeting 2026-09-30 — summary.md"
+        encoded_href = "../notes/" + quote(filename, safe="")
+        target = self._managed_article(
+            "test-link-encoded-target",
+            "<p>Note</p>",
+            "Test",
+            f"skills/notes/{filename}",
+            parent=self.root,
+        )
+        source = self._managed_article(
+            "test-link-encoded-source",
+            f'<p>See <a href="{encoded_href}">Note</a></p>',
+            "Test",
+            "skills/test-link-encoded-source/SKILL.md",
+            parent=self.root,
+        )
+
+        logger_name = "odoo.addons.oteny_knowledge_sync.models.knowledge_sync"
+        with self.assertLogs(logger_name, level="DEBUG") as cm:
+            self.env["oteny.knowledge.sync"]._rewrite_internal_links("Test")
+
+        offending = [
+            r
+            for r in cm.records
+            if r.levelname == "WARNING" and "Meeting 2026-09-30" in r.getMessage()
+        ]
+        self.assertEqual(
+            offending,
+            [],
+            "A percent-encoded link to a published article must not warn. "
+            f"Got: {[r.getMessage() for r in offending]}",
+        )
+        source.invalidate_recordset(["body"])
+        self.assertIn(
+            f"/knowledge/article/{target.id}",
+            source.body,
+            "A percent-encoded href must become a Knowledge URL",
+        )
+
+    def test_percent_encoded_missing_file_still_warns(self):
+        """Decoding must not hide a real miss. An encoded name that no root
+        published, and that is not agent-only, still warns."""
+        filename = "does not exist.md"
+        encoded_href = "references/" + quote(filename, safe="")
+        self._managed_article(
+            "test-link-encoded-broken",
+            f'<p>See <a href="{encoded_href}">Missing</a></p>',
+            "Test",
+            "skills/test-link-encoded-broken/SKILL.md",
+            parent=self.root,
+        )
+
+        logger_name = "odoo.addons.oteny_knowledge_sync.models.knowledge_sync"
+        with self.assertLogs(logger_name, level="WARNING") as cm:
+            self.env["oteny.knowledge.sync"]._rewrite_internal_links("Test")
+
+        matched = [r for r in cm.records if filename in r.getMessage()]
+        self.assertTrue(
+            matched,
+            "Expected a WARNING that names the decoded file, "
+            f"but none mentioned {filename!r}. Got: {[r.getMessage() for r in cm.records]}",
         )
 
     def test_internal_broken_link_still_warns(self):

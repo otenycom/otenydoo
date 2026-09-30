@@ -32,6 +32,7 @@ import mimetypes
 import posixpath
 import re
 from pathlib import Path
+from urllib.parse import unquote
 
 from odoo import api, models, _
 from odoo.tools import config
@@ -230,7 +231,15 @@ class KnowledgeSync(models.AbstractModel):
         a ``skills/…`` tail against that map, so
         ``../../otenydoo/.claude/skills/riverflow/SKILL.md`` can become a
         Knowledge link when that skill is published. An escape with no skill tail
-        stays untouched. Returns ``(body, count)``.
+        stays untouched.
+
+        The href is percent-decoded before the lookup. A file name with a space
+        or an em dash is stored on disk as characters, and the markdown renderer
+        writes those characters as ``%20`` and ``%E2%80%94`` in the ``href``.
+        Without the decode, the path misses both the article map and the
+        agent-only set, and a deliberate exclusion logs ``Could not resolve link``.
+
+        Returns ``(body, count)``.
         """
         if not body:
             return body, 0
@@ -247,9 +256,11 @@ class KnowledgeSync(models.AbstractModel):
             original_href = match.group(1)
             if original_href.startswith(("http://", "https://")):
                 return match.group(0)
+            # Decode before lookup. The map stores the path as it is on disk.
+            href = unquote(original_href)
             resolved_lower = None
             if article_dir:
-                resolved = posixpath.normpath(posixpath.join(article_dir, original_href))
+                resolved = posixpath.normpath(posixpath.join(article_dir, href))
                 if self._escapes_skills_tree(resolved):
                     suffix = self._skills_tree_suffix(resolved)
                     if suffix and suffix in link_map:
@@ -260,23 +271,23 @@ class KnowledgeSync(models.AbstractModel):
                 if resolved_lower in link_map:
                     rewritten += 1
                     return knowledge_href(link_map[resolved_lower])
-            if original_href.lower() in link_map:
+            if href.lower() in link_map:
                 rewritten += 1
-                return knowledge_href(link_map[original_href.lower()])
-            skills_path = f"skills/{original_href}".lower()
+                return knowledge_href(link_map[href.lower()])
+            skills_path = f"skills/{href}".lower()
             if skills_path in link_map:
                 rewritten += 1
                 return knowledge_href(link_map[skills_path])
             if excluded_lower:
-                candidates = {original_href.lower(), skills_path}
+                candidates = {href.lower(), skills_path}
                 if resolved_lower:
                     candidates.add(resolved_lower)
                 if candidates & excluded_lower:
                     _logger.debug("Link %r in article %r points to an agent-only skill; left as-is",
-                                  original_href, article_name)
+                                  href, article_name)
                     return match.group(0)
             if warn:
-                _logger.warning("Could not resolve link %r in article %r", original_href, article_name)
+                _logger.warning("Could not resolve link %r in article %r", href, article_name)
             return match.group(0)
 
         return self._MD_LINK_RE.sub(replace_link, body), rewritten

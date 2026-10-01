@@ -68,6 +68,21 @@ The choice writes the filter's Show When expression; the expression, the positio
 
 When a toolbar of buttons stands directly above the list (the crewradar tabs: **Add Service**, **Full Screen**, ...), the row moves into that toolbar, at its right end, so the filters share the line with the actions (Thijs, 2026-09-15). Without such a toolbar the row stays on its own line above the list.
 
+The log entry Services row is the pattern for the other in-form lists.
+The add button and **Full Screen (count)** sit on the left. The filter
+buttons sit on the right. The Credentials row and the Child Services
+row use that pattern. **Credential Group** stays on the credential row.
+The log entry Credentials row keeps **Open Credential Planning** on the
+left and the three credential filters on the right. That list is
+`credential_plan_item_ids` (`rivercreds.plan.item`), so its shortcuts
+live in `crewradar_creds/data/log_entry_credential_shortcut_filters.xml`.
+The service strips on the employee, the ship, the log entry, and the
+service form (except the child list) start with **All**. Its domain is
+`[]`. **All Todo** stays the default. The child-service list already
+had **All**, and **All Todo** stays the default there. The credential
+buttons are **All** (default), **All | Not Expired**, and **Permits |
+Not Expired**. The heading `credential filters` is gone.
+
 ### Show When: where a button shows
 
 **Show When** is a Python expression on the filter, evaluated in the browser at each place a button could appear. Empty means everywhere. It governs the **buttons only**: the favorite itself stays in the Favorites menu of the model's views. One rule follows from that: **a shortcut's Default Filter applies only where its expression is true**, so a filter meant for the lists inside a form does not narrow the model's top-level views at open, while it is still the default inside those forms.

@@ -415,6 +415,11 @@ Add with appropriate sequence for its from_state group:
 
 **`noupdate="1"` + `-u` behaviour (important):** a *brand-new* `<record>` (an xmlid not yet in the DB) **is** created on plain `-u` — `noupdate="1"` only suppresses *updates* to records that already exist, never creation of new ones. So pure additions load without a migration. But the moment you **renumber an existing** transition (e.g. inserting a new transition mid-group and bumping the old `Back` from 20 → 30 to keep it last), that existing row's sequence change will **not** apply on `-u` — `noupdate="1"` blocks it. Call `workflow.reset_workflow_to_xml()` in a post-migrate to force-re-import the XML rows (it bypasses the `noupdate` guard), which lands both the new transitions and the renumbered existing ones. No states removed → nothing to re-home first.
 
+An inactive button in that file must use `<field name="active">0</field>`.
+The reset reads the element text only (`false` or `0`). `eval="False"`
+has empty text, so the reset turns the button back on. Write
+`active = False` on those xmlids after the reset as well.
+
 ## Complete Example
 
 See `/riverflow/data/riverflow_taxi_order_workflow.xml` for a complete workflow example with:

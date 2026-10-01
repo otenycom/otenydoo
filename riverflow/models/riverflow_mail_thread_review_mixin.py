@@ -192,8 +192,12 @@ class MailThreadReviewMixin(models.AbstractModel):
         # Perform the actual write
         result = super().write(vals)
 
-        # Check if responsible_team_id was changed and send notifications
-        if "responsible_team_id" in vals:
+        # Check if responsible_team_id was changed and send notifications.
+        # skip_responsible_team_notification: the first assignment of a team
+        # (the bounce review copies the parent's team onto a new service) is
+        # not a handover. The handover notice posts into the team channel,
+        # and that post can email the channel members.
+        if "responsible_team_id" in vals and not self.env.context.get("skip_responsible_team_notification"):
             for record in self:
                 old_team = old_teams.get(record.id)
                 new_team = record.responsible_team_id
@@ -405,8 +409,12 @@ class MailThreadReviewMixin(models.AbstractModel):
         # Group messages by record to avoid multiple notifications
         messages_by_record = {}
         for message in messages:
-            # Skip internal notes and system notifications
+            # Skip internal notes and system notifications. mail.mt_note is
+            # internal, so a log note is not outside mail and must not be
+            # copied into the team channel (that copy is posted as an email).
             if message.message_type not in ("email", "comment"):
+                continue
+            if message.subtype_id and message.subtype_id.internal:
                 continue
 
             # Skip messages from internal users: not sure if hiding these is actually helpful,

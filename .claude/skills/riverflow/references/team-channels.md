@@ -112,6 +112,13 @@ member is stored on `res.users`, which only that group may write.
 | `riverflow/views/riverflow_team_views.xml` | Members list: an editable `widget="many2many"` node for `base.group_erp_manager`, a read-only node for `!base.group_erp_manager` |
 | `riverflow/tests/test_team_channel_copy.py` | Tag `test_team_channels`: copy between teams (Send message, Log note mention, `email` post, plain `res.partner` record), no-copy cases, one copy per team, team contact, external copy unchanged, Members list |
 
+- **An internal note is not outside mail.** The external copy skips
+  `subtype_id.internal` (`mail.mt_note`). A log note posted as OdooBot
+  has no staff user on the author, so the staff-author skip does not
+  catch it. Without the subtype skip, the copy is posted as
+  `message_type` `email` in the Responsible team channel and can email
+  the channel members. The bounce-review note is an internal note and
+  takes this skip.
 - **Why `mail.thread`, not the review mixin.** The copy works on every record
   with a chatter. The review mixin's own `_message_create` override (the
   external copy) calls `super()`, so both hooks run; they handle disjoint

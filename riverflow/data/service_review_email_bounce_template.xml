@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+    <!-- One task for a bounced outgoing email. The live hook and the
+         post-migrate clone this record. Archiving it turns the feature off.
+         Empty allowed subjects: any record that can own a service is allowed.
+         The Task workflow and Not started are copied onto the clone. -->
+    <record id="template_service_review_email_bounce" model="riverflow.service">
+        <field name="name">Review email bounce</field>
+        <field name="is_this_a_template" eval="True" />
+        <field name="workflow_id" ref="workflow_service_task" />
+        <field name="state_id" ref="state_task_not_started" />
+    </record>
+</odoo>

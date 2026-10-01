@@ -1,6 +1,12 @@
-from odoo import models, fields, api, _, Command
-from datetime import timedelta, date, datetime
+import logging
+from datetime import date, datetime, timedelta
+
+from markupsafe import Markup
+
+from odoo import Command, _, api, fields, models
 from odoo.exceptions import UserError, ValidationError
+
+_logger = logging.getLogger(__name__)
 
 
 class Service(models.Model):
@@ -114,6 +120,18 @@ class Service(models.Model):
         string="Send to operator",
         default=False,
         help="The recipients for the email can also be set by adding followers to the chatter",
+    )
+    # One open child per bounced mail.message. Several notifications on that
+    # message share this link, so a second bounce address updates the same
+    # service instead of opening another one.
+    bounced_mail_message_id = fields.Many2one(
+        "mail.message",
+        string="Bounced message",
+        index=True,
+        copy=False,
+        ondelete="set null",
+        help="The outgoing message whose bounce opened this service. "
+        "Several notifications on one message share one open service.",
     )
 
     root_id = fields.Many2one("riverflow.service", compute="_compute_root_id", store=True, recursive=True)
@@ -1327,8 +1345,16 @@ class Service(models.Model):
         Modules that add fields to service templates override this method
         and call super() to accumulate all extra vals. Called from
         _create_service_member_from_template before the create() call.
+
+        bounce_review_responsible_team_id: the bounce review puts the
+        parent's team here so the new row is born with that team. A later
+        write of the same team is not a handover, and the handover notice
+        is what can email the team channel.
         """
-        return {}
+        vals = {}
+        if "bounce_review_responsible_team_id" in self.env.context:
+            vals["responsible_team_id"] = self.env.context["bounce_review_responsible_team_id"]
+        return vals
 
     @api.model
     def _create_service_member_from_template(self, template_service, parent_id=False, deadline=False):
@@ -1465,6 +1491,258 @@ class Service(models.Model):
             )
 
         return new_service
+
+    @api.model
+    def _review_email_bounce_template(self):
+        """The review template, or an empty recordset when the feature is off.
+
+        Off means the xmlid is missing, the record is missing, or active is
+        false. Archiving the template is how an operator turns this off.
+        Deleting the xmlid does the same. The caller must not create a
+        service and must not post notes. An open child is left as it is.
+        """
+        template = self.env.ref(
+            "riverflow.template_service_review_email_bounce",
+            raise_if_not_found=False,
+        )
+        if not template or not template.exists() or not template.active:
+            return self.browse()
+        return template
+
+    @api.model
+    def _record_can_own_service(self, record):
+        """True when a bounce on this record may open a review service.
+
+        A service is the parent of the review. Any other record that can own
+        a service is the subject: it inherits the review mixin (that mixin is
+        the team and chatter link), or an existing service already uses its
+        model as res_model. A template does not count as that proof.
+        """
+        if record._name == "riverflow.service":
+            return True
+        review_mixin = self.env.registry.get("riverflow.mail.thread.review.mixin")
+        if review_mixin and isinstance(record, review_mixin):
+            return True
+        return bool(
+            self.with_context(active_test=False).search_count(
+                [
+                    ("res_model", "=", record._name),
+                    ("active", "in", (True, False)),
+                    ("is_this_a_template", "=", False),
+                ],
+                limit=1,
+            )
+        )
+
+    @api.model
+    def _bounce_review_owner(self, message):
+        """The record that owns the bounced message, when it can own a service."""
+        model_name = message.model
+        res_id = message.res_id
+        if not model_name or not res_id or model_name not in self.env:
+            return None
+        owner = self.env[model_name].with_context(active_test=False).browse(res_id).exists()
+        if not owner or not isinstance(owner, self.env.registry["mail.thread"]):
+            return None
+        if not self._record_can_own_service(owner):
+            return None
+        return owner
+
+    @api.model
+    def _open_bounce_review_service(self, message):
+        """The open child for this message, if one exists.
+
+        Open means active and not an end state. A closed child does not
+        count: the caller creates a new service.
+        """
+        return self.with_context(active_test=False).search(
+            [
+                ("bounced_mail_message_id", "=", message.id),
+                ("active", "=", True),
+                ("is_end_state", "=", False),
+                ("is_this_a_template", "=", False),
+            ],
+            limit=1,
+        )
+
+    @api.model
+    def _bounce_address_line(self, notification):
+        partner = notification.res_partner_id
+        email = notification.mail_email_address or (partner.email if partner else "") or ""
+        name = partner.display_name if partner else ""
+        if name and email:
+            return f"{name} <{email}>"
+        return email or name or "unknown address"
+
+    @api.model
+    def _bounce_note_marker(self, message):
+        """Hidden id so a later bounce on this message finds the same note.
+
+        The sentence the reader sees does not include the mail.message id.
+        """
+        # mail.message body sanitizes attributes. An unknown data attribute
+        # is removed, so the note could not be found again. id is kept, and
+        # it is not part of the sentence the reader sees.
+        return f'id="riverflow-bounced-mail-message-{message.id}"'
+
+    @api.model
+    def _bounce_review_note_body(self, message, notifications):
+        """Internal note: who bounced, then each failure reason.
+
+        One sentence starts with "Bounced email to". Each recipient is
+        "name <email>". Several recipients of the same message stay in
+        that sentence, joined by a comma. The mail.message id is not in
+        the sentence. The wrapper id carries it, so a later notification
+        on the same message finds this note and replaces the body. The
+        new address is added without a second note.
+        """
+        addresses = [
+            self._bounce_address_line(notification) for notification in notifications.sorted("id")
+        ]
+        lines = [f"Bounced email to {', '.join(addresses)}"]
+        reasons = []
+        for notification in notifications.sorted("id"):
+            reason = (notification.failure_reason or "").strip()
+            if reason and reason not in reasons:
+                reasons.append(reason)
+        lines.extend(reasons)
+        paragraphs = Markup("").join(Markup("<p>%s</p>") % line for line in lines)
+        # Markup(f"...") does not escape. The paragraphs are already escaped.
+        # The marker is our own attribute, built from the integer id.
+        return Markup(f"<div {self._bounce_note_marker(message)}>{paragraphs}</div>")
+
+    @api.model
+    def _post_or_update_bounce_note(self, record, message, body):
+        marker = self._bounce_note_marker(message)
+        subtype = self.env.ref("mail.mt_note")
+        existing = record.message_ids.filtered(
+            lambda note: note.message_type == "comment"
+            and note.subtype_id == subtype
+            and marker in (note.body or "")
+        )
+        if existing:
+            existing[:1].body = body
+            return
+        # No partner_ids: an internal note must not mail anyone.
+        record.with_context(mail_create_nosubscribe=True).message_post(
+            body=body,
+            message_type="comment",
+            subtype_xmlid="mail.mt_note",
+        )
+
+    @api.model
+    def _create_bounce_review_service(self, template, owner, message):
+        """Clone the template, then set the parent's team and today's deadline.
+
+        The clone copies the template team. That team is not the parent's
+        team. The deadline argument of the clone does not write
+        project_deadline, so both are set after the clone. A service owner
+        becomes parent_id. Any other owner becomes res_model and res_id,
+        with no parent_id.
+        """
+        clone_context = {}
+        if "responsible_team_id" in owner._fields:
+            clone_context["bounce_review_responsible_team_id"] = owner.responsible_team_id.id
+        if owner._name == "riverflow.service":
+            parent_id = owner.id
+        else:
+            parent_id = False
+            clone_context["default_res_model"] = owner._name
+            clone_context["default_res_id"] = owner.id
+        service_env = self.with_context(**clone_context) if clone_context else self
+        child = service_env._create_service_member_from_template(template, parent_id=parent_id)
+        # One write, not field assignment. Assignment only dirties the cache,
+        # and the later flush calls write() without this context. That write
+        # would post a team-handover notice. This is the first team, copied
+        # from the parent, not a handover.
+        vals = {
+            "use_project_deadline_from": "self",
+            "project_deadline": fields.Date.today(),
+            "bounced_mail_message_id": message.id,
+        }
+        if "responsible_team_id" in owner._fields:
+            vals["responsible_team_id"] = owner.responsible_team_id.id
+        child.with_context(skip_responsible_team_notification=True).write(vals)
+        return child
+
+    @api.model
+    def _add_review_for_bounced_message(self, message):
+        """Open or update the review service for one bounced mail.message.
+
+        Returns the new service, or an empty recordset when nothing was
+        created (no bounce, feature off, owner cannot own a service, or an
+        open child already holds this message).
+        """
+        self = self.sudo()
+        message = message.exists()
+        if not message:
+            return self.browse()
+        bounced = message.notification_ids.filtered(
+            lambda notification: notification.notification_status == "bounce"
+            and notification.failure_type == "mail_bounce"
+        )
+        if not bounced:
+            return self.browse()
+        template = self._review_email_bounce_template()
+        if not template:
+            return self.browse()
+        owner = self._bounce_review_owner(message)
+        if not owner:
+            return self.browse()
+        open_child = self._open_bounce_review_service(message)
+        if open_child:
+            body = self._bounce_review_note_body(message, bounced)
+            self._post_or_update_bounce_note(open_child, message, body)
+            self._post_or_update_bounce_note(owner, message, body)
+            return self.browse()
+        child = self._create_bounce_review_service(template, owner, message)
+        body = self._bounce_review_note_body(message, bounced)
+        self._post_or_update_bounce_note(child, message, body)
+        self._post_or_update_bounce_note(owner, message, body)
+        _logger.info(
+            "review email bounce: opened service %s for mail.message %s",
+            child.id,
+            message.id,
+        )
+        return child
+
+    @api.model
+    def _backfill_review_email_bounces(self):
+        """Open review services for bounces already stored.
+
+        The latest email or email_outgoing message per record is the only
+        candidate. A note or a tracking message is not a send. The candidate
+        qualifies when it has a bounce notification and its date is at or
+        after 72 hours before this run. A latest send with no bounce does
+        not qualify, even when an older message bounced. Creation uses the
+        same path as the live hook, and it does not send email.
+        """
+        cutoff = fields.Datetime.now() - timedelta(hours=72)
+        self.env.cr.execute(
+            """
+            SELECT DISTINCT ON (model, res_id) id
+              FROM mail_message
+             WHERE message_type IN ('email', 'email_outgoing')
+               AND COALESCE(model, '') != ''
+               AND COALESCE(res_id, 0) != 0
+             ORDER BY model, res_id, date DESC NULLS LAST, id DESC
+            """
+        )
+        message_ids = [row[0] for row in self.env.cr.fetchall()]
+        messages = self.env["mail.message"].browse(message_ids)
+        opened = 0
+        for message in messages:
+            if not message.date or message.date < cutoff:
+                continue
+            bounced = message.notification_ids.filtered(
+                lambda notification: notification.notification_status == "bounce"
+                and notification.failure_type == "mail_bounce"
+            )
+            if not bounced:
+                continue
+            if self._add_review_for_bounced_message(message):
+                opened += 1
+        return opened
 
     @api.model
     def _create_services_from_template(self, template_service_id, project_deadline=False):

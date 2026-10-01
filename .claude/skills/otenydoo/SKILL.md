@@ -1,6 +1,6 @@
 ---
 name: otenydoo
-description: The repository of Oteny's generic Odoo modules — the layering rule, the release order, and how a business module extends a generic one.
+description: The repository of Oteny's generic Odoo modules — the layering rule, the release order, how a business module extends a generic one, and which checkout to write in. New work is written in ~/oteny/otenydoo. The otenydoo folder inside a business checkout is the deploy pin.
 ---
 
 # Otenydoo
@@ -11,6 +11,20 @@ A module here depends on Odoo and on modules here, never on a business's
 module, and no code here names a business's model. The customer-template gate
 holds the rule on every commit. A comment or a docstring may name a business
 as an example or as history.
+
+## Where you write
+
+New otenydoo work is checked out and written in `~/oteny/otenydoo`. It
+lands on `main`, or more often on a `feat/` branch that is checked out
+in that same clone. The folder `~/oteny/radar/otenydoo` is the submodule
+pin that odoo.sh deploys. Do not create branches there, do not edit code
+there, and do not treat a dirty submodule as local development. When the
+work is ready for odoo.sh, radar updates the pin to a commit that is
+already on otenydoo `main`. The local server reads `~/oteny/otenydoo`
+through `odoo.addonsPath`.
+
+The bounce feature was written in the submodule by mistake. The upgrade
+could not see it, because the server reads `~/oteny/otenydoo`.
 
 ## The layering
 

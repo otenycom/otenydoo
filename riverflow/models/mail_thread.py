@@ -1,6 +1,6 @@
 import logging
 
-from odoo import models
+from odoo import api, models
 from odoo.service.model import PG_CONCURRENCY_EXCEPTIONS_TO_RETRY
 
 _logger = logging.getLogger(__name__)
@@ -89,3 +89,18 @@ class MailThread(models.AbstractModel):
             for team, recipients in teams_recipients.items()
             if team.active and team.discuss_channel_id and team not in sender_users.home_team_id
         }
+
+    @api.model
+    def _routing_handle_bounce(self, email_message, message_dict):
+        """After the bounce write, open one review service for that message.
+
+        The write in this method sets notification_status to bounce and
+        failure_type to mail_bounce. The temporary exception that
+        mail.mail._send writes on the way out is a different write
+        (exception / unknown) and does not come through here, so mail that
+        then sends does not open a service.
+        """
+        super()._routing_handle_bounce(email_message, message_dict)
+        bounced_message = message_dict.get("bounced_message")
+        if bounced_message:
+            self.env["riverflow.service"]._add_review_for_bounced_message(bounced_message)

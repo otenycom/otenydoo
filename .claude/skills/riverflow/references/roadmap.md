@@ -30,6 +30,23 @@ Development items for the Riverflow workflow engine module.
 
 ## Completed
 
+- [x] **Review email bounce** (19.0.1.1281). A bounced outgoing email
+  opened no task for the team that owns the record. Built: template
+  `riverflow.template_service_review_email_bounce` on the Task workflow,
+  state Not started; hook `mail.thread._routing_handle_bounce` after the
+  `bounce` / `mail_bounce` write (not the temporary send exception);
+  one open child per `mail.message` (`bounced_mail_message_id`); parent
+  team and today's `project_deadline`; internal notes only. The note
+  sentence is `Bounced email to` plus each recipient as `name <email>`.
+  `failure_reason` follows in its own paragraph. The same note is
+  posted on the parent and on the child. An open child gets the new
+  address appended. A closed child means a new service.
+  Archiving the template, or removing its xmlid, turns it off.
+  `riverflow/migrations/19.0.1.1281/post-migrate.py` backfills a bounce
+  that is the latest sent message on the record and whose
+  `mail.message.date` is within 72 hours. A later successful send, a
+  note, or a tracking message does not qualify. Tests:
+  `test_review_email_bounce.py`.
 - [x] **Colleague message copy to the recipient's home team channel** *(Thijs, Sep 2026; 19.0.1.1275)*. A staff user's chatter message to a colleague of another team reached only that colleague's mailbox, so it was easy to miss. Built: `res.users.home_team_id`, the **Members** list on the team form (`member_ids`; editable for access-rights admins, read-only for others), and a `mail.thread._message_create` hook that posts a copy in each recipient's home team channel — only between teams, never to the sender, one copy per team, a team contact as recipient counts, on every record with a chatter. No migration; members are set by hand. Tests: `test_team_channel_copy.py` (tag `test_team_channels`). Rules, UI and technical notes: [Team Channels](team-channels.md).
 - [x] Bot execute door: a bot lists the same `transition_buttons_json` a person sees, opens `prepare_transition_action` (public `/json/2/` name), then `oteny.form.session` `open` on that dict. `bot_claim` is open-and-save. It runs `action_save`. It does not write `state_id` raw. `set_deadline_relative` writes the two relative fields and drops the email-sender `today + 1`. The human fence admits `riverflow_bot_caller`. Tests: `test_bot_execute.py` plus the relative case in `test_transition_email_template.py`. Version 19.0.1.1237. The recipe the bot reads is the module Talent `riverflow/talents/riverflow-execute-talent/` (git path). Operator `.claude` pages point at that bundle. Proven live on a pilot bot, documented as a worked example in a consuming business's own skill bundle.
 - [x] Host Talent layout: `oteny_bot/talents/oteny-odoo-access-talent/` and `riverflow/talents/riverflow-execute-talent/`. Delivery is the same git-path shape as a client Talent. No Odoo download API. No `terminal` requirement. See [Oteny Bots — Host Talent delivery](../../oteny-bot/SKILL.md#host-talent-delivery).

@@ -851,6 +851,61 @@ The email sender wizard is the transition action for `transition_action_email_se
 
 **Sending**: On confirm, the wizard calls `service.message_post()` with `message_type="email"` and `subtype_id=mail.mt_comment` (external). Recipients are auto-followed on the service chatter. The `email_layout_xmlid` from the template is used as the email layout.
 
+### Review email bounce
+
+A bounced outgoing email leaves a failed `mail.notification` on the
+record that sent it. The team that owns that record gets no task
+unless one is opened. The template
+`riverflow.template_service_review_email_bounce` (name Review email
+bounce, Task workflow, state Not started) is that task. There is no
+new workflow. Version `19.0.1.1281`.
+
+The live hook is `mail.thread._routing_handle_bounce`, after the write
+that sets `notification_status` to `bounce` and `failure_type` to
+`mail_bounce`. The temporary exception that `mail.mail._send` writes
+does not open a task.
+
+One open child per bounced `mail.message`
+(`bounced_mail_message_id`). A later notification on that message
+replaces the same internal note. An open child for that message gets
+the new address appended to the sentence. The sentence is
+`Bounced email to` and then each recipient as `name <email>`, joined
+by a comma. The mail.message id is not in that sentence.
+`failure_reason` follows in its own paragraph. The same internal note
+is posted on the parent and on the child. The mail body cleaner
+drops an unknown data attribute, so the wrapper id is
+`riverflow-bounced-mail-message-<id>`. A later bounce finds the note
+by that id. A later message gets its own child. A closed child means a
+new one. The parent is the record that owns the message. A
+`riverflow.service` gets `parent_id`.
+Any other owner that can own a service gets `res_model` and `res_id`
+and no `parent_id`. The clone copies the template team. The parent's
+`responsible_team_id` and today's `project_deadline` are set after the
+clone. The notes are `message_type` `comment`, subtype `mail.mt_note`,
+with no `partner_ids`.
+
+The note is posted as OdooBot. OdooBot is not a staff user, so the
+external message copy would treat the note as outside mail and post it
+in the Responsible team channel as `message_type` `email`. That post
+can email the channel members. The copy skips `subtype_id.internal`,
+so this note does not take that path. See
+[Team Channels](references/team-channels.md).
+
+Archiving the template, or removing its xmlid, turns the feature off.
+An open child stays. Nothing new is created and no note is posted.
+
+`riverflow/migrations/19.0.1.1281/post-migrate.py` uses the same
+create path. It opens a service only when the bounced message is the
+latest `email` or `email_outgoing` on the record and
+`mail.message.date` is within 72 hours of the run. A later successful
+send, a note, or a tracking message does not qualify. It does not
+send email.
+
+The code lives in `~/oteny/otenydoo` and lands on `main`.
+
+Tests: `riverflow/tests/test_review_email_bounce.py`, tag
+`test_review_email_bounce`.
+
 ### Reset Workflow to XML (`reset_workflow_to_xml`)
 
 Developer tool on `riverflow.workflow` that resets a workflow's states and transitions back to their XML data file definitions. Useful when manual UI changes have drifted from the source XML.

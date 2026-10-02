@@ -17,7 +17,11 @@
                     <group>
                         <field name="applies_to_model_id" />
                         <field name="applies_to_model" readonly="1" invisible="1" />
-                        <field name="domain" widget="domain" options="{'model': 'applies_to_model'}" />
+                        <!-- A named domain may call datetime.date.today(). Without
+                             allow_expressions the widget shows "Invalid domain"
+                             and does not count records. Same option as a saved
+                             filter and an automated action. -->
+                        <field name="domain" widget="domain" options="{'model': 'applies_to_model', 'allow_expressions': True}" />
                         <field name="description" placeholder="Human-readable description of the domain condition." />
                     </group>
                     <!-- Where-used: a shared domain changes every user when it

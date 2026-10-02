@@ -6,6 +6,20 @@ from odoo.tests.common import TransactionCase
 
 
 @tagged("post_install", "-at_install", "riverflow", "test_named_domain")
+class TestNamedDomainForm(TransactionCase):
+    """The domain widget accepts a non-literal such as datetime.date.today()."""
+
+    def test_named_domain_form_allows_expressions(self):
+        """Without allow_expressions the form shows "Invalid domain" and does
+        not count records. A saved filter uses the same option."""
+        view = self.env.ref("riverflow.view_named_domain_form")
+        self.assertIn(
+            "options=\"{'model': 'applies_to_model', 'allow_expressions': True}\"",
+            view.arch,
+        )
+
+
+@tagged("post_install", "-at_install", "riverflow", "test_named_domain")
 class TestNamedDomainRename(TransactionCase):
     """The 19.0.1.1274 pre-migrate renames riverflow.auto.add.domain to
     riverflow.named.domain in place.

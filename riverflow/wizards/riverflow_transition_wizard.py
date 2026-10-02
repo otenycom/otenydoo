@@ -129,10 +129,12 @@ class TransitionWizard(models.AbstractModel):
                 self.update_write_values(record, write_vals)
 
                 # Deadline overrides from transition action_context:
-                # clear_deadline: permanently remove the deadline (e.g. A1 Await Reply)
+                # clear_deadline: permanently remove the deadline
                 # set_deadline_to_today: freeze deadline as today (e.g. A1 Done)
                 # followup_in_days: set deadline to the wizard's project_deadline
-                #   (pre-filled as today + N days, user may have adjusted)
+                #   (pre-filled as today + N days, user may have adjusted).
+                #   A wizard without a deadline field (a custom action) gets
+                #   today + N, so the key never silently does nothing.
                 if self.env.context.get("clear_deadline"):
                     write_vals["use_project_deadline_from"] = "self"
                     write_vals["project_deadline"] = False
@@ -142,11 +144,12 @@ class TransitionWizard(models.AbstractModel):
                     write_vals["project_deadline"] = fields.Date.today()
                     write_vals["days_relative_to_project"] = 0
                 elif self.env.context.get("followup_in_days"):
-                    followup_deadline = getattr(self, "project_deadline", None)
-                    if followup_deadline:
-                        write_vals["use_project_deadline_from"] = "self"
-                        write_vals["project_deadline"] = followup_deadline
-                        write_vals["days_relative_to_project"] = 0
+                    followup_deadline = getattr(self, "project_deadline", None) or (
+                        fields.Date.today() + timedelta(days=int(self.env.context["followup_in_days"]))
+                    )
+                    write_vals["use_project_deadline_from"] = "self"
+                    write_vals["project_deadline"] = followup_deadline
+                    write_vals["days_relative_to_project"] = 0
                 elif self.env.context.get("set_deadline_relative"):
                     spec = self.env.context.get("set_deadline_relative")
                     if not isinstance(spec, dict) or "from" not in spec or "days" not in spec:

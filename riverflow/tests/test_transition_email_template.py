@@ -377,6 +377,33 @@ class TestFollowupInDays(TransactionCase):
         self.assertEqual(service.state_id, self.state_b)
         self.assertEqual(service.project_deadline, expected_date)
 
+    def test_followup_in_days_without_wizard_deadline(self):
+        """A wizard with no project_deadline value (e.g. a custom action whose
+        wizard has no deadline field) still sets today + N. Before, the key
+        silently did nothing there."""
+        service = self.env["riverflow.service"].create({
+            "name": "Test Service",
+            "state_id": self.state_a.id,
+            "company_id": self.env.company.id,
+        })
+        import ast
+        extra_ctx = ast.literal_eval(self.trans_followup_7.action_context)
+        ctx = {
+            "transition_id": self.trans_followup_7.id,
+            "active_model": "riverflow.service",
+            "active_ids": service.ids,
+            **extra_ctx,
+        }
+        Wizard = self.env["riverflow.service.wizard"].with_context(**ctx)
+        defaults = Wizard.default_get(Wizard._fields.keys())
+        defaults["project_deadline"] = False
+        wizard = Wizard.create(defaults)
+        wizard.action_save()
+
+        self.assertEqual(service.state_id, self.state_b)
+        self.assertEqual(service.use_project_deadline_from, "self")
+        self.assertEqual(service.project_deadline, fields.Date.today() + timedelta(days=7))
+
     def test_followup_in_days_overrides_email_sender_default(self):
         """When an email transition has followup_in_days, the deadline is
         today + N (not the email sender's default of tomorrow)."""

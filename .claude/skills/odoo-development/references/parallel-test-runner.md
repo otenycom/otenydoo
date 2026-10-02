@@ -195,6 +195,42 @@ Many failures on **one** worker with others green usually means that worker pull
 
 **Stale clones after a field-VALUE change without a version bump.** A value-only migration that **does** bump `latest_version` now invalidates clones via the module-version fingerprint. A `-u` that rewrites a field (or a pure M2M row such as `implied_ids`) **without** a version bump still matches the reuse key. The same miss happens when you rewind `latest_version` and apply the same version string again: the fingerprint at the end matches the pool from the first run, and the clones still hold the first run's field values. Symptom: the assertion passes in `psql` on `cr-test` and fails under `--test-tags`. Force a re-clone with `ODOO_TEST_REUSE_CLONES=false`, or drop the worker DBs — `for db in $(psql -lqt | awk '{print $1}' | grep '^cr-test-worker-'); do dropdb --if-exists "$db"; done` — or delete `/tmp/odoo_parallel_test_clones.json`. Hit first on a value-only SLA rewrite (`19.0.6.39`) and on `hr.group_hr_user → oteny_bot.group_oteny_bot_operator` (2026-08). Hit again on the MFNL reminder (2026-10-01): Hand to Barney was inactive on `cr-test` and still active on `cr-test-worker-0` until those two worker databases were dropped.
 
+### `ERROR: out of shared memory` on random workers (lock table full)
+
+The error does not mean that the machine is short of RAM. PostgreSQL has
+one shared lock table with about `max_locks_per_transaction ×
+max_connections` slots, plus some spare space. With the default of 64 × 100
+= 6,400 slots, a laptop fails at about 12,000 to 20,000 locks held at the
+same time. A full riverflow, rivercreds, crewradar_wilma and
+crewradar_cuneus_sign run (18 workers) peaks at about 16,300 locks by
+itself. The crmain restore (`crewradar_db_restore.py`) loads the dump in
+one transaction, and it holds a lock on each of its ~5,000 relations until
+it commits. A test run during a restore therefore fails on whichever
+workers ask for a lock at the wrong moment.
+
+The fix is `max_locks_per_transaction = 1024` on the server (102,400
+slots, some 30-50 MB). In radar, `riverdeploy/pg_tune_local.sh` sets it on
+any Mac with `ALTER SYSTEM` and restarts the Homebrew service of the running
+major version. Check it with
+`psql -d postgres -Atc "show max_locks_per_transaction"`.
+
+A machine that never ran the script stays green anyway, because the runner
+fits its workers to the lock table (`odoo_parallel_tests/locks.py`). Before
+it clones, it reads the table size through `psql` and allows one worker per
+1,000 slots (`LOCKS_PER_WORKER`, from the ~900 measured). When that caps
+the count, it logs a WARNING that names the setting. A stock server runs 6
+workers instead of 18. When `psql` cannot read the size, the count stays as
+it is.
+
+Red/green on 2026-10-02, the full suite beside one session that held 5,028
+advisory locks (the size of the crmain restore):
+
+- At 64 without the cap: 7 failed and 77 errors, with 176 `out of shared
+  memory` lines.
+- At 64 with the cap: the WARNING, 6 workers, and 0 failed and 0 errors of
+  3023 tests.
+- At 1024: 18 workers, no warning, 0 failed and 0 errors, in 58 s.
+
 ### `FileNotFoundError` reading an install-time fixture on a worker (empty worker filestore)
 
 **Fixed 2026-09-04.** Every fresh clone now receives a replica of the base DB's filestore (see *Worker filestore* above), so an installed fixture PDF, an asset bundle, and a browser test all work on a worker. The symptom before the fix: a test rendering an install-time fixture failed on a worker with `FileNotFoundError: .../filestore/cr-test-worker-N/<xx>/<checksum>` while passing on the main `cr-test` DB, and an `HttpCase.start_tour` test never became ready ("The ready code was always falsy") because `/web/assets/...` 500'd. The per-test guard from that era (`crewradar_cuneus_sign/tests/test_wp_ab_visit_documents.py::_bundle_fixture_files_present`, which `skipTest`s when the fixture bytes are absent) is still there and now simply never skips; it is harmless and can go when that file is next touched.

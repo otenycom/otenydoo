@@ -159,6 +159,7 @@ def _parallel_run(suite, global_report):
     and aggregates results back into an OdooTestResult.
     """
     from .cloner import clone_databases, drop_databases
+    from .locks import fit_workers
     from .runner import spawn_workers, wait_for_workers
     from odoo.tests.result import OdooTestResult
     from odoo import tools
@@ -189,6 +190,7 @@ def _parallel_run(suite, global_report):
     actual_workers = min(worker_count, len(ordered))
     if actual_workers < worker_count:
         _logger.info("Using %d workers (fewer classes than requested)", actual_workers)
+    actual_workers = fit_workers(db_name, actual_workers)
 
     tmpdir = tempfile.mkdtemp(prefix="odoo_parallel_tests_")
     queue_dir = create_queue(tmpdir, [class_key(cls) for cls, _tests in ordered])

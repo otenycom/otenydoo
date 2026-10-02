@@ -774,6 +774,7 @@ This prevents `ValueError` or `AttributeError` during fresh module install on Od
 | Wrong test tag format | Use `.method_name` not `Class.method_name` |
 | Tests don't terminate | Add `--stop-after-init` flag |
 | Missing dependencies | Verify addons paths include all modules |
+| `ERROR: out of shared memory` on random workers | The PostgreSQL lock table is full, not the RAM: set `max_locks_per_transaction = 1024`. See [Parallel Test Runner — lock table full](parallel-test-runner.md#error-out-of-shared-memory-on-random-workers-lock-table-full) |
 | Odd failures or one parallel worker red | See [Odoo test run issues](#odoo-test-run-issues)—often the test DB was not installed with the full `odoo.installModules` list |
 | Tests not found | Check module loading and `@tagged` decorator |
 | Schema errors | Add `-u module1,module2` to update |

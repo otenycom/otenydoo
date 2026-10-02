@@ -30,6 +30,18 @@ Development items for the Riverflow workflow engine module.
 
 ## Completed
 
+- [x] **Deferred children: dedup by template, and cancel on a back step**
+  (19.0.1.1284, 2026-10-02; first user: the A1 Employee A1 and Ship A1
+  children in the consuming business's skill bundle). A clone remembers its
+  template in `template_service_id`; `_create_deferred_children` finds the
+  template and dedups a child by that link, with the name as the fallback
+  for older services. The email step renames a child to the email subject,
+  so the name match created duplicates. A child in a cancelled state no
+  longer blocks a fresh clone. The transition context key `cancel_children`
+  cancels the open subtree after the state write, through
+  `_cascade_cancel_to_subtree()`. A state flag does not fit, because the
+  target of a back step is not a cancelled state. Tests: class
+  `TestDeferredChildrenTemplateLink` in `tests/test_deferred_children.py`.
 - [x] **Review email bounce** (19.0.1.1281). A bounced outgoing email
   opened no task for the team that owns the record. Built: template
   `riverflow.template_service_review_email_bounce` on the Task workflow,

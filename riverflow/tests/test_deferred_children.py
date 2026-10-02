@@ -193,3 +193,151 @@ class TestDeferredChildrenContextIsolation(TransactionCase):
         )
         self.assertEqual(grandchildren.name, grandchild_template.name)
         self.assertFalse(grandchildren.is_this_a_template)
+
+
+@tagged("post_install", "-at_install", "riverflow", "test_deferred_children")
+class TestDeferredChildrenTemplateLink(TransactionCase):
+    """Deferred children are deduplicated by the template they came from,
+    not by their name, and a cancelled child does not block a fresh one.
+
+    The email step renames a child to its email subject, so a name match
+    made a parent that came back to the state create a duplicate. A back
+    step with cancel_children cancels the open work underneath; when the
+    parent returns, it needs fresh children rather than the cancelled ones.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        Service = cls.env["riverflow.service"]
+        State = cls.env["riverflow.state"]
+        Workflow = cls.env["riverflow.workflow"]
+        Transition = cls.env["riverflow.transition"]
+        service_model = cls.env["ir.model"]._get("riverflow.service")
+        default_action = cls.env.ref("riverflow.transition_action_default")
+
+        workflow = Workflow.create({"model_id": service_model.id, "name": "Test Link WF"})
+        cls.state_initial = State.create({"workflow_id": workflow.id, "name": "Initial", "sequence": 10})
+        cls.state_waiting = State.create({"workflow_id": workflow.id, "name": "Waiting", "sequence": 20})
+        cls.trans_wait = Transition.create({
+            "name": "Wait",
+            "from_state_id": cls.state_initial.id,
+            "to_state_id": cls.state_waiting.id,
+            "action_id": default_action.id,
+            "sequence": 10,
+        })
+        cls.trans_wait_again = Transition.create({
+            "name": "Wait again",
+            "from_state_id": cls.state_waiting.id,
+            "to_state_id": cls.state_waiting.id,
+            "action_id": default_action.id,
+            "sequence": 10,
+        })
+        cls.trans_back = Transition.create({
+            "name": "Back",
+            "from_state_id": cls.state_waiting.id,
+            "to_state_id": cls.state_initial.id,
+            "action_id": default_action.id,
+            "sequence": 20,
+            "action_context": "{'cancel_children': True}",
+        })
+
+        child_workflow = Workflow.create({"model_id": service_model.id, "name": "Test Link Child WF"})
+        cls.child_open = State.create({"workflow_id": child_workflow.id, "name": "Open", "sequence": 10})
+        cls.child_done = State.create({
+            "workflow_id": child_workflow.id,
+            "name": "Done",
+            "sequence": 20,
+            "is_end_state": True,
+        })
+        cls.child_cancelled = State.create({
+            "workflow_id": child_workflow.id,
+            "name": "Cancelled",
+            "sequence": 30,
+            "is_end_state": True,
+            "is_cancelled_state": True,
+        })
+
+        cls.template = Service.create({
+            "name": "Test Link Parent Template",
+            "workflow_id": workflow.id,
+            "state_id": cls.state_initial.id,
+            "is_this_a_template": True,
+            "company_id": cls.env.company.id,
+        })
+        cls.child_template_a = Service.create({
+            "name": "Child A",
+            "parent_id": cls.template.id,
+            "workflow_id": child_workflow.id,
+            "state_id": cls.child_open.id,
+            "create_on_state_id": cls.state_waiting.id,
+            "company_id": cls.env.company.id,
+        })
+        cls.child_template_b = Service.create({
+            "name": "Child B",
+            "parent_id": cls.template.id,
+            "workflow_id": child_workflow.id,
+            "state_id": cls.child_open.id,
+            "create_on_state_id": cls.state_waiting.id,
+            "company_id": cls.env.company.id,
+        })
+        cls.subject = cls.env.company.partner_id
+
+    def _create_service(self):
+        return self.env["riverflow.service"].with_context(
+            default_res_model="res.partner",
+            default_res_id=self.subject.id,
+        )._create_services_from_template(self.template.id)
+
+    def _fire(self, service, transition):
+        action = service.with_context(transition_id=transition.id)._prepare_transition_action()
+        ctx = dict(action["context"], active_model="riverflow.service", active_ids=service.ids)
+        Wizard = self.env[action["res_model"]].with_context(**ctx)
+        Wizard.create(Wizard.default_get(Wizard.fields_get().keys())).action_save()
+
+    def _children(self, service):
+        return service.child_ids.filtered("active")
+
+    def test_link_and_dedup_by_template(self):
+        """Every clone remembers its template. A renamed child still blocks a
+        duplicate, and a parent with a new name still finds its template."""
+        service = self._create_service()
+        self.assertEqual(service.template_service_id, self.template)
+        service.name = "Renamed by hand"
+
+        self._fire(service, self.trans_wait)
+        children = self._children(service)
+        self.assertEqual(len(children), 2, "The template link finds the template of a renamed parent")
+        self.assertEqual(children.template_service_id, self.child_template_a | self.child_template_b)
+
+        children.filtered(lambda c: c.template_service_id == self.child_template_a).name = "Email subject"
+        self._fire(service, self.trans_wait_again)
+        self.assertEqual(self._children(service), children, "A self-loop and a renamed child create nothing new")
+
+    def test_cancel_children_then_fresh_children(self):
+        """A back step with cancel_children cancels the open children and
+        leaves a Done child alone. Coming back creates a fresh child only for
+        the cancelled one."""
+        service = self._create_service()
+        self._fire(service, self.trans_wait)
+        child_a = self._children(service).filtered(lambda c: c.template_service_id == self.child_template_a)
+        child_b = self._children(service) - child_a
+        child_a.state_id = self.child_done
+
+        self._fire(service, self.trans_back)
+        self.assertEqual(child_a.state_id, self.child_done, "A Done child stays Done")
+        self.assertEqual(child_b.state_id, self.child_cancelled, "An open child is cancelled")
+
+        self._fire(service, self.trans_wait)
+        new_children = self._children(service) - child_a - child_b
+        self.assertEqual(len(new_children), 1, "Only the cancelled child is cloned again")
+        self.assertEqual(new_children.template_service_id, self.child_template_b)
+        self.assertEqual(new_children.state_id, self.child_open)
+
+    def test_back_without_cancel_children_leaves_children_open(self):
+        """Without the key, a back step does not touch the children."""
+        self.trans_back.action_context = "{}"
+        service = self._create_service()
+        self._fire(service, self.trans_wait)
+        self._fire(service, self.trans_back)
+        self.assertEqual(self._children(service).state_id, self.child_open)

@@ -108,6 +108,19 @@ class Service(models.Model):
         "child creation -- e.g. transport/notification children that should "
         "only exist once an appointment is booked.",
     )
+    # The template a service was cloned from. The name is not a stable key:
+    # the email step renames a service to the email subject, and HR may
+    # rename one by hand. Deferred-child dedup and the template lookup read
+    # this link first and fall back to the name for services created before
+    # the link existed.
+    template_service_id = fields.Many2one(
+        "riverflow.service",
+        string="Created From Template",
+        index=True,
+        copy=False,
+        ondelete="set null",
+        help="The template service this service was cloned from.",
+    )
     mail_template_id = fields.Many2one(
         "mail.template",
         string="Email Template",
@@ -1389,6 +1402,7 @@ class Service(models.Model):
             "daily_prio": template_service.daily_prio,
             "weekend_deadline_rule": template_service.weekend_deadline_rule,
             "subject_from": template_service.subject_from,
+            "template_service_id": template_service.id,
         }
 
         if deadline:
@@ -1808,17 +1822,20 @@ class Service(models.Model):
         cloning (because create_on_state_id was set). They are created
         later when the service reaches the specified state.
 
-        Idempotent: skips children whose template name already exists
-        as a child of the current service (prevents duplicates on
-        repeated transitions to the same state, e.g. self-loops).
+        Idempotent: skips a template child when the service already has an
+        active child cloned from it (prevents duplicates on repeated
+        transitions to the same state, e.g. self-loops). A child in a
+        cancelled state does not count, so a parent that comes back to the
+        state after its children were cancelled gets fresh ones.
         """
         self.ensure_one()
         if not target_state:
             return
 
-        # Find the source template via the auto-add rule or by name match
-        template = False
-        if self.created_by_auto_add_service_id:
+        # Find the source template: the service's own template link, then
+        # the auto-add rule, then a name match
+        template = self.template_service_id
+        if not template and self.created_by_auto_add_service_id:
             template = self.created_by_auto_add_service_id.service_template_id
         if not template:
             # Fallback: find template by matching name
@@ -1838,8 +1855,9 @@ class Service(models.Model):
         if not deferred_children:
             return
 
-        # Existing child names for dedup (prevent duplicates on repeated transitions)
-        existing_names = set(self.child_ids.filtered("active").mapped("name"))
+        # Children that block a re-clone: active and not cancelled. A child
+        # cloned before template_service_id existed falls back to its name.
+        live_children = self.child_ids.filtered(lambda c: c.active and not c.state_id.is_cancelled_state)
 
         # Build a clean context with only the defaults that
         # _create_service_member_from_template needs for deferred children.
@@ -1855,7 +1873,10 @@ class Service(models.Model):
         clean_ctx["default_res_id"] = self.res_id
         Service = self.env["riverflow.service"].with_context(clean_ctx)
         for child_template in deferred_children:
-            if child_template.name in existing_names:
+            if live_children.filtered(
+                lambda c, tpl=child_template: c.template_service_id == tpl
+                or (not c.template_service_id and c.name == tpl.name)
+            ):
                 continue
             new_child = Service._create_service_member_from_template(child_template, self.id)
             # Recursively clone the full descendant tree of the deferred

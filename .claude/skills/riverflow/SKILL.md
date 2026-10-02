@@ -212,7 +212,8 @@ The `action_context` Text field on `riverflow.transition` stores a Python dict l
 | `clear_deadline` | Sets `use_project_deadline_from="self"`, `project_deadline=False`, `days_relative_to_project=0` — permanently removes the deadline | A waiting state with no due date. Caution: a row with no deadline stays in a team's Radar list with no signal. A1 Await Reply used this until 2026-10; it now uses `followup_in_days: 365` |
 | `set_deadline_to_today` | Sets `use_project_deadline_from="self"`, `project_deadline=today`, `days_relative_to_project=0` — freezes deadline as today | A1 Done: records the completion date |
 | `followup_in_days` | Pre-fills `project_deadline = today + N days` in `default_get` and makes it visible on the wizard form (labeled "Follow-up deadline" in the email sender). The user can adjust the date before confirming. In `action_save`, reads the wizard's `project_deadline` (possibly adjusted by user) and writes it to the service. Works for any transition type (email sender, default, custom wizard). For email sender transitions, overrides the hardcoded tomorrow default. A wizard with no `project_deadline` value (a custom action whose wizard has no deadline field, e.g. `crewradar_sign.fill.wizard`) gets `today + N` in `action_save`; before 2026-10 the key silently did nothing there. | Work Permit: 7-day follow-up for AB/pickup requests (weekly visit rhythm), 14-day for AT Applied skip. A1 Await Reply: 365 days, also on the fill-wizard "Regenerate and Resend" |
-| `set_deadline_relative` | Dict `{'from': <use_project_deadline_from value>, 'days': <int>}`. Writes those two fields only. Drops the email sender `project_deadline` write, so `today + 1` does not survive. Does not touch `weekend_deadline_rule`. | A send that must restore a parent-relative deadline |
+| `set_deadline_relative` | Dict `{'from': <use_project_deadline_from value>, 'days': <int>}`. Writes those two fields only. Drops the email sender `project_deadline` write, so `today + 1` does not survive. Does not touch `weekend_deadline_rule`. | A send that must restore a parent-relative deadline. A1 child Back and Restart: `{'from': 'root', 'days': 0}`, so a waiting child follows the application again |
+| `cancel_children` | Not a deadline key, but it runs in the same place: after the state write and before the deferred children, it calls `_cascade_cancel_to_subtree()`, so every open descendant goes to its workflow's cancelled state. Done children stay Done. A state flag (`auto_done_children_on_enter`) does not fit a back step, because its target is not a cancelled state. Because the cancel runs first, a cancelled child never blocks a fresh deferred child in the same save (19.0.1.1284). | A1 Needs Correction and Back: the withdrawn application's open A1 children are cancelled; the next entry into Awaiting Issued A1 creates fresh ones |
 
 **Email sender overrides**: The base email sender wizard's `update_write_values` checks one bare context key. The **rivercreds** module extends the wizard: `_compute_attachment_ids` reads an additional bare key for credential auto-attach — a consuming business documents this in its own rivercreds skill bundle. The **crewradar_sign** module extends the wizard: `_compute_attachment_ids` reads `chained_attachment_ids` for fill-then-email chaining — a consuming business documents this in its own crewradar-sign skill bundle.
 
@@ -429,6 +430,23 @@ Template children can be deferred until the parent service reaches a specific st
 - When the parent transitions to the matching state, the base `action_save()` in the transition wizard automatically clones the deferred children via `_create_deferred_children()`
 - Idempotent: children are not duplicated on repeated transitions to the same state
 
+**Template link and dedup** (19.0.1.1284): every clone remembers its template
+in `template_service_id` (set in `_create_service_member_from_template`, the
+one helper for roots, children and deferred children). The link is the key:
+
+- `_create_deferred_children` finds the parent's template through
+  `template_service_id` first, then the auto-add rule, then the name. A parent
+  renamed by hand still finds its template.
+- A deferred child is skipped when the parent has a live child (active, not
+  in a cancelled state) with the same template link. A child from before the
+  link existed falls back to the name match.
+- Why: the email sender renames a service to the email subject ("A1-verklaring
+  voor …"). The name match then missed the child, so a parent that came back to
+  the state cloned a second pair. Production had one such parent (17699, a Done
+  Back into the A1 Send Issued A1 state).
+- A cancelled child does not block. A parent that comes back after
+  `cancel_children` gets fresh children.
+
 This is a generic mechanism used by any workflow. Example: the "Arrange Work Permit" template has children (Inform Client, Arrange Transport, Review) with `create_on_state_id = AB Booked`. The service is auto-added without children at "Not Started". When the user books an AB appointment and transitions to "AB Booked", children are automatically created.
 
 **Recursive clone**: `_create_deferred_children()` materialises the **full** descendant tree of each matched deferred template, not just one level of grandchildren. It delegates to the shared `_clone_template_children(template, parent)` helper that `_create_services_from_template()` also uses, so the initial-clone and deferred-clone paths produce identical subtrees. This is what allows "great-grandchild" placements like the Cuneus *Inform Employee Travel Plan* service — a non-deferred child of *AB Arrange Transport* (itself an immediate child of the deferred *AB Appointment* marker) — to materialise on a live service when the parent reaches AB Booked. Before this fix, the loop only cloned the immediate children of the deferred template, silently dropping anything deeper.
@@ -447,7 +465,7 @@ When a state has `auto_progress_on_children_done = True`, the parent service aut
 
 **Typical pattern**: Combine `create_on_state_id` deferred children with `auto_progress_on_children_done` on the same state to create a fan-out/fan-in pattern — the state spawns parallel child tasks and auto-completes when all finish.
 
-**Example**: The A1 workflow's "Send Issued A1" state (seq 40) has two deferred children (Send A1 to Client, Send A1 to Employee) and `auto_progress_on_children_done = True`. When both email services reach Done or Not Needed, the parent auto-progresses to Done (seq 50).
+**Example**: The A1 workflow's "Awaiting Issued A1" state (seq 30) has two deferred children (Send A1 to Client, Send A1 to Employee), each in its own receive-and-send workflow, and `auto_progress_on_children_done = True`. When both children reach an end state, the parent auto-progresses. The next state, the old "Send Issued A1" (seq 40), is `hide_in_statusbar`, so the parent goes straight to Done (seq 50). A cancelled child is an end state too, so a parent whose children were all cancelled by hand also moves on.
 
 ### Auto-Done Children on Enter
 

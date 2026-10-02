@@ -165,6 +165,12 @@ class TransitionWizard(models.AbstractModel):
                     # Flush stored computes that depend on state_id (e.g. auto_add_trigger)
                     # so side-effects like auto-add services run before create_related_records.
                     record.flush_recordset()
+                    # cancel_children: a back step whose work underneath is
+                    # moot (e.g. the application goes back to be corrected).
+                    # Runs before the deferred children, so a cancelled child
+                    # never blocks a fresh one in the same transition.
+                    if self.env.context.get("cancel_children") and hasattr(record, "_cascade_cancel_to_subtree"):
+                        record._cascade_cancel_to_subtree()
                     # Create deferred template children that match the new state.
                     # Runs before create_related_records so wizards see the full child tree.
                     if hasattr(record, "_create_deferred_children"):

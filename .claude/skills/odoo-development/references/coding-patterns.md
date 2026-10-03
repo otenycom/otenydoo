@@ -422,6 +422,34 @@ Neither `readonly=False` nor `force_save` works alone — `readonly=False` witho
 
 **Inline vs popup editing**: Use `editable="bottom"` on `<list>` to allow adding and editing lines inline. Omit the `editable` attribute to have each line open in a popup form instead — useful when lines have many fields or complex sub-forms.
 
+### A Wizard That Reloads Keeps Only What the Database Holds
+
+A dialog wizard often comes back from the database: a button returns an
+`act_window` on the same `res_id` (a warning, a retry), or a JS controller
+saves, calls a server check and runs `record.load()`. Whatever only the
+browser held is gone then. Verified on Odoo 19 (2026-10-03, rivercreds
+credential wizard):
+
+- **The web client never saves a readonly field without `force_save`.**
+  `record.js` `_getChanges` skips a field whose `readonly` evaluates true
+  unless the view node has `force_save="1"`. `invisible` alone does not
+  drop a field, so the "also on `invisible`" advice above matters only when
+  the field is also readonly.
+- **On create, the server fills a dropped field from `default_get`.**
+  `create()` calls `default_get` for every field missing from the values, so
+  a readonly field that `default_get` derives from the context (a
+  transition's credential type) survives the drop. A value that an onchange
+  or a widget changed in the browser does not: the record keeps the default.
+  Put `force_save="1"` on every readonly field the browser changes.
+- **A plain unstored field (no compute) reads back empty after a reload.**
+  Make it `related=` or computed from stored fields when it must survive.
+- **A returned `act_window` without `name` titles the dialog "Odoo".** Give
+  a reopen the title of the action that opened the dialog.
+- **Test it with `odoo.tests.Form`.** On save it drops readonly fields
+  without `force_save` exactly like the web client, so a red test shows the
+  loss: open the form with the opening action's context and view, change
+  the field through its onchange, `save()`, and assert the stored value.
+
 ### `default_get` Must Be Side-Effect-Free (Idempotent or Deferred)
 
 The web client may invoke a wizard's `default_get` **several times in a single open** — observed as 8 record-creates in one transaction on one wizard open (the onchange protocol re-evaluates defaults). So any code that **creates a persistent record inside `default_get`** (or a method it calls) multiplies that record per open, leaving orphans.
@@ -986,6 +1014,34 @@ def _compute_is_required_fields(self):
 **Benefits**: requirement logic is testable in Python, shared across views (form, list, wizard), and avoids duplicating complex boolean expressions in XML. The `is_required_*` fields are non-stored (no database column) and recomputed on every form load.
 
 Applied in: `rivercreds.credential` (10 `is_required_*` fields for holder applicability, data field relaxation during application phase, validity period). Note: as of 2026-09 only the credential upload wizards bind `required="is_required_number"`; the credential form loads the `is_required_*` fields invisibly but binds none of them, so the model constraints are the only enforcement there.
+
+### Warn on Values, Not on Entry Modes
+
+A record that can be filled in more than one way (an AI read of a
+document, values typed by hand, a bulk import) gets one set of checks, on
+the values. Do not branch the checks on the entry mode.
+
+- **A blank optional value gives no warning.** A user who types the record
+  often cannot fill a value that only the document carries (a BSN, an ENI),
+  so a "value missing" warning there is noise the user must click away.
+- **A present value is checked**: not found, a name mismatch, another
+  record.
+- **A blank required value is the `required` / `is_required_*` rule's
+  job**, not a warning.
+- **Warn about a gap in the result, not about a blank input**: the record
+  ends with no holder, or its link is a guess (a fallback lookup).
+- **Why not a mode flag** ("manual" vs "AI"): it doubles the rules, and a
+  context flag is lost on a queue step or a later re-run of an import job.
+- **Watch the reverse check**: a check whose subject is the blank itself
+  ("the document names no employer") cannot tell "not read" from "read:
+  none named". It needs the reader to state the blank explicitly, or it
+  fires on every typed entry.
+
+Applied in: crewradar_cuneus_sign `_compute_a1_anchor_warnings`
+(2026-10-03, Ries: "it's just a matter of the values being optional or
+not, skipping if blank, validating if present"). The reverse case is still
+open there: `_compute_wp_employer_contract_warnings` treats an absent
+`nebenbestimmungen_employer` as "names no employer".
 
 ## XML View Patterns
 

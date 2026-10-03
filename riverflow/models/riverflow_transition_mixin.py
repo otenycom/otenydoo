@@ -99,10 +99,9 @@ class RiverflowTransitionMixin(models.AbstractModel):
 
         action_context.update(defaults_context)
 
-        title = transition.name if not transition.from_state_id else f"{transition.workflow_name} | {transition.name}"
         action = {
             "type": "ir.actions.act_window",
-            "name": title,
+            "name": transition._wizard_dialog_title(),
             "res_model": res_model,
             "view_mode": "form",
             "views": [(view.id, "form")],

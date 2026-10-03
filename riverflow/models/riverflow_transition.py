@@ -118,6 +118,20 @@ class RiverflowTransition(models.Model):
         for transition in self:
             transition.workflow_name = transition.workflow_id.name if transition.workflow_id else False
 
+    def _wizard_dialog_title(self):
+        """The title of the dialog this transition opens.
+
+        One rule for the dialog that opens the wizard and for every reopen of
+        it: a wizard that reopens itself on a warning or a retry must look like
+        the dialog the user just saw. An act_window without a name shows "Odoo".
+        A start transition (no from-state) runs outside a record, so its title
+        is the transition name alone.
+        """
+        self.ensure_one()
+        if not self.from_state_id:
+            return self.name
+        return f"{self.workflow_name} | {self.name}"
+
     model = fields.Char(
         "Related Model",
         related="workflow_id.model",

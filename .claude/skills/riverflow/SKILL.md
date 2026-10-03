@@ -142,6 +142,16 @@ carrier's transitions an action whose wizard applies to it, such as
 `<carrier_module>.log_entry_transition_action`. A consumer module's own
 generic-carrier test runs that way, and a second test pins the refusal.
 
+**The wizard dialog title is one rule** (2026-10-03).
+`riverflow.transition._wizard_dialog_title()` returns "workflow | transition",
+or the transition name alone for a start transition (no from-state).
+`_prepare_transition_action` uses it, and so must every wizard that reopens
+itself (a warning, a retry): an `act_window` without `name` shows "Odoo" as
+the dialog title. First consumer: rivercreds
+`rivercreds.credential.wizard._reopen_wizard`, after an A1 Ship upload
+reopened as "Odoo" on a manual-entry warning. Test:
+`test_credential_wizard_round_trip` (crewradar_cuneus_sign, in radar).
+
 **Execute vs. dispatch — two layers.** Execute (strip → open wizard →
 footer) is always on: a person, a tester, and a bot share this layer,
 and it never requires `bot_role`. Dispatch (`bot_role`, `is_owned_by_bot`,

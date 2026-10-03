@@ -425,8 +425,9 @@ Neither `readonly=False` nor `force_save` works alone — `readonly=False` witho
 ### A Wizard That Reloads Keeps Only What the Database Holds
 
 A dialog wizard often comes back from the database: a button returns an
-`act_window` on the same `res_id` (a warning, a retry), or a JS controller
-saves, calls a server check and runs `record.load()`. Whatever only the
+`act_window` on the same `res_id` (a retry), or the form reloads after a
+held OK (riverflow's save check, since 2026-10-03; before it, a JS
+controller saved, called a server check and ran `record.load()`). Whatever only the
 browser held is gone then. Verified on Odoo 19 (2026-10-03, rivercreds
 credential wizard):
 
@@ -449,6 +450,37 @@ credential wizard):
   without `force_save` exactly like the web client, so a red test shows the
   loss: open the form with the opening action's context and view, change
   the field through its onchange, `save()`, and assert the stored value.
+
+### A Gate That Runs Before Every Override
+
+A check that must run before a method does anything (a confirmation before a
+save) cannot live in the base method: an override does its work before its
+`super()` call, so the gate would run after the work. Calling the gate from
+each override does not work either: the load order decides which override
+runs first. Odoo's own answer (`base_automation`, `create` / `write`) is to
+wrap the method on the final registry class. Verified on Odoo 19 for
+riverflow's save check (2026-10-03):
+
+- **Wrap in `_register_hook`, unwrap in `_unregister_hook`.**
+  `setattr(self.env.registry[self._name], name, wrapper)`. Odoo calls
+  `_unregister_hook` before it sets the models up again (a module install in
+  a running registry) and `_register_hook` after, so the wrapper always wraps
+  the current method. Mark the wrapper (`wrapper._my_marker = True`) and
+  check the class's own `__dict__`, not `getattr`, to skip a second wrap.
+- **A child model with its own `_name` has the parent's registry class as a
+  base** (`odoo/orm/model_classes.py`, `add_to_registry`). A child
+  override's `super()` therefore reaches the parent's wrapper. Gate only
+  when `type(self) is` the class the wrapper was set on, or the check runs
+  twice, the second time after the child's work.
+- **Skip abstract models** (`self._abstract`): `_register_hook` runs on
+  every model in the registry.
+- **Return, do not raise, when the gate stops the call.** A `UserError`
+  rolls back what the gate stored (the findings to show, a cache of an
+  expensive check).
+
+Real example: riverflow `riverflow.save.check.mixin`
+(`riverflow/models/riverflow_save_check_mixin.py`); tests
+`test_save_check_runs_once_per_call`, `test_guard_sits_on_the_registry_class`.
 
 ### `default_get` Must Be Side-Effect-Free (Idempotent or Deferred)
 

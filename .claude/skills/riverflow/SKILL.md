@@ -900,6 +900,14 @@ shows `save_check_confirmed`) → `set` it, `save`, `action_save`.
 `bot_claim` (no one to tick) turns a hold into `{ok: False, reason: <the
 messages>}` in `_bot_claim_run_wizard`.
 
+**Consumers** (2026-10-03): the incomplete-children warning
+(`riverflow.service.wizard`, phase 1); in radar (phase 2) the credential
+upload wizard (rivercreds: the missing document is an error finding;
+crewradar_wilma: the Wilma scan, cached per file) and the airline and
+train ticket wizards (one batch scan per file set). Phase 3 (later, one at
+a time): the weekly bulk upload, the sign document wizard, MFNL Ask Barney.
+Out of scope: the billing and salary month wizards and DATEV.
+
 **Tests.** `riverflow/tests/test_save_check.py` (Python, with
 `odoo.tests.Form`): hold then confirm, same warnings keep the confirmation,
 different findings clear it, an error ignores a tick, one check per call,

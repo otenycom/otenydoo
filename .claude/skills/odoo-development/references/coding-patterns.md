@@ -482,6 +482,39 @@ Real example: riverflow `riverflow.save.check.mixin`
 (`riverflow/models/riverflow_save_check_mixin.py`); tests
 `test_save_check_runs_once_per_call`, `test_guard_sits_on_the_registry_class`.
 
+### Do Not Unlink Inside a Compute That a Read Can Trigger
+
+`unlink()` ends with `env.invalidate_all()`, which runs
+`transaction.field_data.clear()`. A field read (`Field.__get__`) takes its
+cache mapping first, then fetches; the fetch flushes pending recomputes. When
+such a recompute deletes records, the read's mapping is detached, the fetched
+value lands in the new one, and Odoo raises "Record does not exist or has
+been deleted" for a record that exists (`fields.py`, the SENTINEL check after
+`_fetch_field`). The error names the record being read, not the compute, so it
+looks like a vanished record. Found 2026-10-03: an AT Applied wizard failed on
+its own `records_to_transition_ids` after a manual import, because the import
+had queued credential plan slot recomputes that deleted plan items.
+
+- **Retire instead of delete in a compute.** Archive the records (a tombstone
+  `active` field), clear at once the links a delete would clear
+  (`ondelete=set null`), and delete them in a commit step
+  (`self.env.cr.precommit.add(...)`, guarded by a key in
+  `precommit.data`), with an `@api.autovacuum` fallback. Example: rivercreds
+  `rivercreds.plan.item._archive_obsolete` / `_purge_archived_items`.
+- **Make the tombstone invisible.** Readers check `active`; computes that sum
+  up the x2many depend on `<x2many>.active` (an x2many keeps archived ids in
+  its cache and filters only when it returns records); keep `active` out of
+  any field-based sync fingerprint; give the column a database default
+  `true` in `init()` when code or fixtures insert rows with SQL.
+- **The unlink also flushed everything first.** Code or tests that relied on
+  that side effect (a stored compute with side effects ran along the way) now
+  see the compute run at the next full flush. A search flushes only the
+  fields in its domain.
+- **How to find it:** replay the failing call in `odoo-bin shell` on a copy
+  of the database, wrap `Environment.invalidate_all` (and
+  `invalidate_model` / `invalidate_recordset`) to print a stack while the
+  failing field is read.
+
 ### A One2many's Inverse Must Point at the Model That Holds It
 
 A One2many reads the comodel rows whose inverse field equals this record's

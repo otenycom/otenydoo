@@ -482,6 +482,35 @@ Real example: riverflow `riverflow.save.check.mixin`
 (`riverflow/models/riverflow_save_check_mixin.py`); tests
 `test_save_check_runs_once_per_call`, `test_guard_sits_on_the_registry_class`.
 
+### A One2many's Inverse Must Point at the Model That Holds It
+
+A One2many reads the comodel rows whose inverse field equals this record's
+id. When the inverse Many2one points at another model, the ids come from
+another table and the list reads the wrong rows. Two ways this happens,
+both found on 2026-10-03:
+
+- **Inherited by a model with its own `_name`.** A child wizard
+  (`_inherit = "parent.wizard"`, new `_name`) gets the parent's One2many,
+  but the inverse still points at the parent's table. The child's record 1
+  reads the lines of the parent's record 1, or a save fails with a foreign
+  key error. Fix: the line names its owner by model and id
+  (`owner_model` Char + `fields.Many2oneReference(model_field="owner_model")`);
+  Odoo's One2many adds the model filter by itself, but it does not fill the
+  model field on create, so `default_get` and the list view carry it.
+  Example: rivercreds `rivercreds.credential.wizard.chatter.line`.
+- **Declared on the template, keyed on the variant.** A One2many on
+  `product.template` whose inverse is a `product.product` Many2one reads
+  the rows of the variant whose id equals the template id. Right on a fresh
+  install, wrong once the ids drift (a second variant). Fix: the One2many on
+  `product.product`, and on the template `related=
+  "product_variant_ids.<field>", readonly=False`. Go through the stored
+  `product_variant_ids`, not `product_variant_id`: an unstored link cannot
+  carry the recompute triggers ("Cannot convert ... to SQL because it is
+  not stored"). Example: crewradar `crewradar_product_country_konto_ids`.
+
+**Find them all:** loop over `env.registry`, and list every One2many whose
+inverse Many2one's `comodel_name` is not the model that holds the field.
+
 ### `default_get` Must Be Side-Effect-Free (Idempotent or Deferred)
 
 The web client may invoke a wizard's `default_get` **several times in a single open** — observed as 8 record-creates in one transaction on one wizard open (the onchange protocol re-evaluates defaults). So any code that **creates a persistent record inside `default_get`** (or a method it calls) multiplies that record per open, leaving orphans.

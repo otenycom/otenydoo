@@ -518,11 +518,11 @@ When a user manually transitions a service whose current state has `auto_progres
 
 **When the warning does not appear**: Transitions to a **non–end-state** (typical **Back** flows) or to a **cancelled** end state (**Cancel**) skip the warning, even if children are incomplete. Circumvent transitions that land on a normal end state (e.g., **Sent already** → Done) still show the warning when children are incomplete.
 
-**Mechanism**: The `incomplete_children_warning` computed Text field on `riverflow.service.wizard` (`riverflow/wizards/riverflow_service_wizard.py`) evaluates the conditions above; if the warning text is set, the wizard shows an `alert-warning` banner and a confirmation checkbox (`ignore_incomplete_children`, labeled "I confirm — skip the child services"). `action_save()` raises `UserError` if the warning is set and the checkbox is unchecked.
+**Mechanism** (since 19.0.1.1288, 2026-10-03): the first consumer of the [save check](#save-check-confirm-warnings-before-save). `riverflow.service.wizard._save_check()` (`riverflow/wizards/riverflow_service_wizard.py`) returns one `warning` finding (kind `incomplete_children`) when the conditions above hold. OK holds the dialog on the yellow box; the user ticks "I confirm — save with these warnings" and clicks OK again. The old `incomplete_children_warning` field, the `ignore_incomplete_children` checkbox and the `UserError` are gone. `bot_claim` answers the held case `{ok: False, reason}`, as it answered the `UserError` before.
 
 **UX rationale**: The warning is soft — users can override it by checking the confirmation box. This handles edge cases where child services are intentionally skipped (e.g., notification already sent manually outside the system).
 
-**Tests**: Generic behavior in `riverflow/tests/test_auto_progress.py` (manual Done with incomplete children, Back, Cancel, all children done). A1 integration for Back from Send Issued A1 in `crewradar_cuneus_sign/tests/test_a1_workflow.py`.
+**Tests**: Generic behavior in `riverflow/tests/test_auto_progress.py` (manual Done with incomplete children, Back, Cancel, all children done) and the hold-and-confirm round trip in `riverflow/tests/test_save_check.py`. A1 integration for Back from Send Issued A1 in `crewradar_cuneus_sign/tests/test_a1_workflow.py`.
 
 ### Radar & State Records
 
@@ -759,6 +759,7 @@ riverflow.transition.wizard (AbstractModel)
 | `update_write_values(record, vals)` | Add wizard field values to the dict that will be written to the service |
 | `create_related_records(record)` | Create side-effect records after the service is written (e.g., internal notes) |
 | `get_visibility_defaults(transition_id)` | Control field visibility based on the transition |
+| `_save_check()` | Return error and warning findings; OK holds until errors are fixed and warnings confirmed. See [Save Check](#save-check-confirm-warnings-before-save) |
 | `_after_ticket_attachment_posted(service)` | Hook called after ticket attachments are posted (train/airline wizards). Overridden by crewradar_wilma to trigger AI PDF parsing |
 
 ### Dynamic Selection Fields on Wizards
@@ -795,6 +796,8 @@ The `action_save` method orchestrates the transition: validates state hasn't cha
 
 ### In-Wizard Results / Warnings Gate (no self-loop state)
 
+**Superseded for new work by the [save check](#save-check-confirm-warnings-before-save)** (2026-10-03): return the findings from `_save_check()` instead of a reopen with a custom confirm field. The weekly bulk upload below moves in phase 3 of `radar/plans/save-check.md`.
+
 When a transition's action processes a batch (e.g. a bulk document upload) and some items may fail, show the warnings **in the wizard** and let the user retry or confirm — do **not** model this as a back-office "warn" self-loop state.
 
 **Mechanism**: the transition wizard runs its action, renders a per-item results table into a computed Html field (e.g. `result_html`), then:
@@ -807,6 +810,105 @@ This mirrors the document-import wizard's results view and the credential wizard
 **Worked example** — the "Weekly Work Permit Issue Request" bulk-upload transition (`cuneus.weekly.bulk.upload.wizard`, Permits Picked up → Done): drag-drop the scanned permit stack, classify AT vs FB, bind each to its holder; on unreadable/unmatched scans the wizard re-opens with `result_html` populated and does not advance — the weekly service reaches Done only when the batch is clean or HR confirms.
 
 **Design rule** (see [Action-with-Outcome = Transition, not State](#action-with-outcome--transition-not-state)): "show warnings and let the user retry/confirm" belongs **in** the wizard (a reopen-with-results gate), not in a workflow self-loop state.
+
+### Save Check: Confirm Warnings Before Save
+
+Built 2026-10-03 (19.0.1.1288), plan `radar/plans/save-check.md` (phases 1
+and 2; phase 3 moves three more radar wizards later). Why: at least eight
+wizards showed a warning with a confirm checkbox, each in its own way (five
+field names, four save behaviours, error versus warning mostly an icon, a
+stale tick that let a different warning through).
+
+**Terms.** A *save check* judges a record before a *guarded method* runs
+(default `action_save`, the OK button). It returns *findings*: an *error*
+holds the save (no checkbox, the message says how to fix it); a *warning*
+holds it until the user ticks the *confirmation* "I confirm — save with
+these warnings". No `info` level: an info needs no confirmation but would
+still stop the first save, so it stays a toast after the dialog closes.
+
+**Server.** `riverflow.save.check.mixin`
+(`riverflow/models/riverflow_save_check_mixin.py`); every
+`riverflow.transition.wizard` inherits it, and any other model can. A
+consumer overrides `_save_check()`, calls `super()` and appends dicts
+`{level, message, kind?, subject?, ref?}`. Fields: `save_check_state`
+(`warning` / `error`), `save_check_findings` (Json), `save_check_confirmed`.
+
+- **The gate wraps the guarded method on the final registry class.**
+  `_register_hook` sets a wrapper on `self.env.registry[model]` for every
+  name in `_save_check_methods` (precedent: `base_automation` patches
+  `create`); `_unregister_hook` removes it, so a module install in a running
+  registry re-wraps the current method. The wrapper is the outermost layer,
+  so the check runs before every override, in any load order: an override
+  that imports or uploads before its `super()` has not run when the gate
+  holds.
+- **Once per call, also for a child with its own `_name`.** Odoo puts the
+  parent's registry class in the bases of a child class (`add_to_registry`),
+  so an override's `super()` reaches the parent's wrapper too. A wrapper
+  gates only when `type(self)` is its own class. Test:
+  `test_save_check_runs_once_per_call` (also on
+  `riverflow.set.deadline.tomorrow.wizard`).
+- **The gate, on every call:** no findings → go on (and clear what a hold
+  stored); an error → hold; warnings only → go on when they equal the stored
+  findings (level, message, subject) and the confirmation is ticked, else
+  hold. A hold stores the findings, clears the confirmation, and returns
+  `{"type": "ir.actions.client", "tag": "riverflow_save_check_hold",
+  "params": {res_model, res_id, state, findings}}`. It returns normally, so
+  the transaction commits the findings and a consumer's cache; a `UserError`
+  would roll both back.
+- **No fingerprint** (Ries): every guarded call checks again, so findings
+  are never stale. A consumer with an expensive step caches that step
+  itself, keyed by what it reads.
+- `action_save_check()` is a "Check now" button: check, store, hold.
+
+**Browser.** `static/src/components/save_check/`: the field widget
+`save_check` (errors in a red box, warnings in a yellow box, `subject:
+message`) and the function client action `riverflow_save_check_hold`. It
+returns nothing, so the action service neither closes the dialog nor opens
+anything; it triggers `RIVERFLOW:SAVE_CHECK_HOLD` on `env.bus`.
+`static/src/patch/save_check_form_controller_patch.js` reloads the
+`FormController` whose `resModel` / `resId` match, so the box and the
+checkbox show.
+
+**Views.** Every transition wizard form carries three lines in a group
+`name="save_check"`, the **last element of the sheet**, so the findings box
+and the confirmation sit right above the OK button (Ries, 2026-10-03: the
+user reads the box where they click). The root view
+`riverflow.view_transition_wizard_form` has the group; a form that does not
+inherit it adds the group itself:
+
+```xml
+<group name="save_check">
+    <field name="save_check_state" invisible="1"/>
+    <field name="save_check_findings" widget="save_check" nolabel="1" colspan="2"
+           invisible="not save_check_findings"/>
+    <field name="save_check_confirmed" invisible="save_check_state != 'warning'"/>
+</group>
+```
+
+An inheriting view that adds content to the end of the sheet puts it
+`before` `//group[@name='save_check']`, so the box stays last.
+
+`test_every_transition_wizard_form_shows_the_save_check_box` runs on the
+full install and names every primary form of a transition wizard without
+them. The confirmation is a real field node because a bot can only change a
+visible, editable field (`oteny.form.session._assert_amendable`).
+
+**The bot follows the person's path** (Ries: "the user manual for the UI is
+the manual for the bot"). `save`, `action_save` → a hold carries the
+findings in `params` → `open` the form again with `res_id` (the photo now
+shows `save_check_confirmed`) → `set` it, `save`, `action_save`.
+`bot_claim` (no one to tick) turns a hold into `{ok: False, reason: <the
+messages>}` in `_bot_claim_run_wizard`.
+
+**Tests.** `riverflow/tests/test_save_check.py` (Python, with
+`odoo.tests.Form`): hold then confirm, same warnings keep the confirmation,
+different findings clear it, an error ignores a tick, one check per call,
+the wrapper on the registry class, a clean wizard writes nothing,
+`bot_claim`, the bot path, every form has the box. One hoot test,
+`riverflow/static/tests/save_check.test.js`: the reload after a hold
+(`mountView` needs `defineMailModels()` and an `onRpc` answer for
+`ir.config_parameter.get_param`, which oteny_shortcut's wide-form toggle
+reads).
 
 ### Chatter Mixin (`riverflow.mail.thread.review.mixin`)
 

@@ -250,7 +250,7 @@ class TestAutoProgressOnChildrenDone(TransactionCase):
         parent._check_parent_auto_progress()
         self.assertEqual(parent.state_id, self.state_await_children)
 
-    # -- incomplete_children_warning tests --
+    # -- incomplete-children save check tests (riverflow.save.check.mixin) --
 
     def _create_wizard(self, service, transition):
         """Create a transition wizard without saving, for field inspection."""
@@ -266,21 +266,22 @@ class TestAutoProgressOnChildrenDone(TransactionCase):
         """'Done Already' (end-state target) shows warning when children are incomplete."""
         parent, children = self._create_parent_with_children(2)
         wizard = self._create_wizard(parent, self.trans_manual_done)
-        self.assertTrue(wizard.incomplete_children_warning)
+        [finding] = wizard._save_check()
+        self.assertEqual(finding["level"], "warning")
 
     def test_no_warning_for_back_transition_with_incomplete_children(self):
         """'Back' transition (non-end-state target) should not show the
         incomplete children warning, even when children are still pending."""
         parent, children = self._create_parent_with_children(2)
         wizard = self._create_wizard(parent, self.trans_back)
-        self.assertFalse(wizard.incomplete_children_warning)
+        self.assertFalse(wizard._save_check())
 
     def test_no_warning_for_cancel_transition_with_incomplete_children(self):
         """'Cancel' transition (cancelled end-state) should not show the
         warning — the user is abandoning the workflow, not bypassing auto-progress."""
         parent, children = self._create_parent_with_children(2)
         wizard = self._create_wizard(parent, self.trans_cancel)
-        self.assertFalse(wizard.incomplete_children_warning)
+        self.assertFalse(wizard._save_check())
 
     def test_no_warning_when_children_are_all_done(self):
         """No warning for 'Done Already' when all children have completed."""

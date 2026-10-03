@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="riverflow.SaveCheckField">
+        <div class="o_riverflow_save_check w-100">
+            <div t-if="errors.length" class="alert alert-danger mb-2" role="alert">
+                <div t-foreach="errors" t-as="finding" t-key="finding_index" class="o_riverflow_save_check_error" style="white-space: pre-wrap;">
+                    <t t-if="finding.subject"><b t-esc="finding.subject"/>: </t><t t-esc="finding.message"/>
+                </div>
+            </div>
+            <div t-if="warnings.length" class="alert alert-warning mb-2" role="alert">
+                <div t-foreach="warnings" t-as="finding" t-key="finding_index" class="o_riverflow_save_check_warning" style="white-space: pre-wrap;">
+                    <t t-if="finding.subject"><b t-esc="finding.subject"/>: </t><t t-esc="finding.message"/>
+                </div>
+            </div>
+        </div>
+    </t>
+</templates>

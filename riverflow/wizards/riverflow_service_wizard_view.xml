@@ -5,12 +5,6 @@
         <field name="inherit_id" ref="riverflow.view_transition_wizard_form" />
         <field name="arch" type="xml">
             <xpath expr="//field[@name='responsible_team_id']" position="before">
-                <field name="incomplete_children_warning" invisible="1" />
-                <div class="alert alert-warning" role="alert" colspan="2"
-                     invisible="not incomplete_children_warning">
-                    <field name="incomplete_children_warning" nolabel="1" readonly="1" />
-                    <field name="ignore_incomplete_children" />
-                </div>
                 <field name="name" required="1" invisible="name_invisible" />
                 <field name="name_invisible" invisible="1" />
             </xpath>

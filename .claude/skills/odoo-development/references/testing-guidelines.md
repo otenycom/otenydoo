@@ -248,6 +248,24 @@ done
 modules — `-u` also gates test discovery, so a short list silently shrinks the
 suite (see the note under [Full radar workspace suite](#full-radar-workspace-suite-cursor-radartest)).
 
+### Culprit: a smoke-check seed left in the test database
+
+A manual smoke check seeds records into `cr-test` with `odoo-bin shell` and
+`env.cr.commit()`. A seed that stays there is seen by every later test run,
+because the tests run on top of the committed data. On 3-Oct-2026 a seed
+from an A1 smoke check (an employee and a credential whose file was
+`base/tests/minimal.pdf`) made the duplicate-file check fire in 26 tests
+of rivercreds, crewradar_wilma and crewradar_cuneus_sign: `'error' !=
+'ok'`, "This file is already filed as ...". The failures looked like a
+regression of the change under test.
+
+- **Delete the seed after the smoke check**, with a second shell script
+  that removes exactly what the seed made, and commit.
+- **When a run fails in tests that the change does not touch**, look for
+  records in the test database that no test made: `create_date` before
+  the run, names like "Smoke" or "Verify". Then drop and reinstall the
+  test database with the full module list.
+
 ### Culprit: a missing binary or package makes the test a no-op
 
 Odoo skips a test whose prerequisite is absent and still reports the run green, so a feature that never ran looks healthy. Two known cases in this workspace:

@@ -19,6 +19,14 @@
                         <field name="new_note" required="0" invisible="new_note_invisible" widget="html" />
                         <field name="new_note_invisible" invisible="1" />
                     </group>
+                    <!-- Save check (riverflow.save.check.mixin): last in the sheet, so the
+                         findings box and the confirmation sit right above the OK button.
+                         A real field node, so a bot can tick it through oteny.form.session. -->
+                    <group name="save_check">
+                        <field name="save_check_state" invisible="1" />
+                        <field name="save_check_findings" widget="save_check" nolabel="1" colspan="2" invisible="not save_check_findings" />
+                        <field name="save_check_confirmed" invisible="save_check_state != 'warning'" />
+                    </group>
                 </sheet>
                 <footer>
                     <button string="OK" type="object" name="action_save" class="btn-primary" data-hotkey="q" />

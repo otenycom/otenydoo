@@ -6,6 +6,9 @@ from odoo.exceptions import UserError, ValidationError
 
 class TransitionWizard(models.AbstractModel):
     _name = "riverflow.transition.wizard"
+    # Every transition wizard can hold its OK on errors and warnings by
+    # overriding _save_check(); the root view below shows the findings box.
+    _inherit = ["riverflow.save.check.mixin"]
     _description = "Transition action base Wizard"
 
     _workflow_model = "definedInDerivedClass"

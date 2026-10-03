@@ -730,7 +730,12 @@ class RiverflowStateBotMixin(models.AbstractModel):
         Wizard = self.env[action["res_model"]].with_context(**wizard_ctx)
         defaults = Wizard.default_get(list(Wizard._fields))
         wizard = Wizard.create(defaults)
-        wizard.action_save()
+        result = wizard.action_save()
+        # A save check that holds (an error, or a warning nobody confirmed)
+        # leaves the record where it is. bot_claim has no one to tick the
+        # confirmation, so the hold is a refusal, as a UserError is.
+        if wizard._save_check_is_held(result):
+            raise UserError("\n".join(f["message"] for f in result["params"]["findings"]))
 
     def _bot_claim_guard(self, transition):
         """Server-side precondition for a bot advance — the ONE place a domain layer can REFUSE

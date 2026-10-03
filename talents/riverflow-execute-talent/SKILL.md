@@ -1,7 +1,7 @@
 ---
 name: riverflow-execute-talent
 description: "Run a riverflow strip the way a person does."
-version: 0.1.1
+version: 0.1.2
 ---
 
 # Riverflow execute
@@ -46,6 +46,7 @@ JSON into the DTO `search_read` the Talent already does.
 | Open the wizard | Call `prepare_transition_action`. Then part 1 `open` on that dict. |
 | Change a visible wizard field | Part 1 `set` on that handle. |
 | Confirm | Part 1 `save`, then wizard `action_save`. |
+| OK held on errors or warnings | See "OK held" below. |
 | Cancel | Part 1 `discard`. |
 | The reaper, or the bridge's `work_release` | Call `bot_claim` on the timeout exit. It is open-and-save. |
 | A person clicks while a claim is live | The fence refuses them. You pass only with `riverflow_bot_caller`. |
@@ -61,6 +62,32 @@ JSON into the DTO `search_read` the Talent already does.
 6. If a field must change, `set` it. Read `warning`.
 7. `save`, then `action_save` with the session's stored context.
 8. If you must stop, `discard`.
+
+## OK held: errors and warnings
+
+A wizard can hold its OK. A person then sees a box in the open
+dialog. A red box lists errors. A yellow box lists warnings, with
+the checkbox "I confirm — save with these warnings". You do the
+same as the person.
+
+1. `action_save` answers a client action with `tag`
+   `riverflow_save_check_hold`. The record did not move.
+2. Read `params.findings`. Each finding has `level` (`error` or
+   `warning`) and `message`.
+3. An error: do not go on. Fix what the message says, or stop and
+   tell the owner.
+4. Only warnings: decide if they are acceptable. If not, stop and
+   tell the owner.
+5. To accept: `open` the form again with the same action dict and
+   `res_id` = `params.res_id`. The photo now shows
+   `save_check_confirmed`.
+6. `set` `save_check_confirmed` to true. `save`. `action_save`
+   with the session's stored context.
+7. The same warnings keep your confirmation. A different set holds
+   again and clears it. Read the new findings.
+
+`bot_claim` cannot tick the box. It answers a held OK with
+`ok: False` and the messages in `reason`.
 
 ## Checklist — no fields to fill
 

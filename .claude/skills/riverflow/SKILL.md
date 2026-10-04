@@ -535,6 +535,39 @@ The generic mixin and the `_for_record` pattern are riverflow's own; see
 architecture, plus a worked example of a business wiring several master
 models onto the Radar (the "which FK, which override file" table).
 
+### Check Results on a Service (19.0.1.1294)
+
+A check result (`riverflow.check.result`: check type, severity info/warning/error,
+name) is the project's mechanism for a note that tells someone working a record
+something about it. It shows as a coloured Issue tag on the record's form and in the
+Radar **Issues** column of its state record, and it matches the Radar "Has Issues"
+filter. A result disappears when its condition stops holding; there is no per-check
+"ignore".
+
+Services can carry check results since 2026-10-04 (Ries: the mechanism and its view
+belong in riverflow; an app only produces checks):
+
+- `riverflow.check.result.service_id`, and the base `_compute_state_record_id` routes a
+  service-anchored result to the service's own state record (Radar row). An app that
+  adds other anchors (log entry, employee, ship) routes those itself and calls `super()`
+  for the rest.
+- `riverflow.service` inherits `riverflow.check.results.mixin` and has a stored
+  `check_result_ids` (`models/riverflow_service_check_results.py`), shown as tags at the
+  top of the service form, hidden when empty.
+- An app produces checks through three hooks: `_get_services_with_checks` (the services it
+  claims — the compute does nothing, and never searches, for a service no producer
+  claims), `_get_service_check_types` (the types the sync owns; it never touches another
+  compute's rows) and `_get_service_check_results` (the dicts, with `service_id`).
+- Base trigger: `active` and `state_id.is_end_state`. Keep a producer's triggers narrow.
+  In radar, a trigger on the employee's credentials broke the plan-item link of
+  auto-added services, and one on the credential plan items broke the daily auto-close
+  job ("Could not find all values of rivercreds.plan.item to flush"); the first producer
+  therefore recomputes in its daily job instead.
+- The compute skips while the registry loads; a migration calls
+  `_compute_check_result_ids_impl()` directly.
+- First producer: `crewradar_creds` `placement_already_covered` (One per Placement).
+  Tests: `tests/test_service_check_results.py` (hooks patched).
+
 ### Service Deadlines
 
 Service deadlines are computed from a `project_deadline` plus an optional `days_relative_to_project` offset, controlled by `use_project_deadline_from`:

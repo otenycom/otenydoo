@@ -21,3 +21,4 @@ from . import test_work_contract
 from . import test_team_channel_copy
 from . import test_review_email_bounce
 from . import test_save_check
+from . import test_service_check_results

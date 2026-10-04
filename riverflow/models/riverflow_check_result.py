@@ -28,9 +28,26 @@ class CheckResult(models.Model):
         store=True,
     )
 
-    @api.depends()
+    # A check result can hang on a service (riverflow.service.check_result_ids). An app
+    # module adds its own anchors (log entry, employee, ...) and routes those itself.
+    service_id = fields.Many2one(
+        comodel_name="riverflow.service",
+        string="Service",
+        ondelete="cascade",
+        index=True,
+    )
+
+    @api.depends("service_id", "service_id.state_record_id")
     def _compute_state_record_id(self):
-        pass
+        """A result on a service shows on that service's Radar row.
+
+        The Radar lists state records, and a check result reaches the Issues column and
+        the "Has Issues" filter through its state record. Results on other anchors are
+        routed by the module that adds the anchor.
+        """
+        for record in self:
+            if record.service_id:
+                record.state_record_id = record.service_id.state_record_id
 
     @api.depends("severity")
     def _compute_color(self):

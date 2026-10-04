@@ -31,6 +31,9 @@
                         invisible="not is_root_a_template" />
                     <widget name="web_ribbon" title="Archived" bg_color="text-bg-danger"
                         invisible="active" />
+                    <!-- The service's Issues (check results), as on the other forms with Issues. -->
+                    <field name="check_result_ids" widget="many2many_tags" options="{'color_field': 'color'}"
+                        readonly="1" nolabel="1" invisible="not check_result_ids" />
                     <div class="oe_title">
                         <label for="name" />
                         <h2>

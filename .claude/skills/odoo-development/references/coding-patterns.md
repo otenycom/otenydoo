@@ -221,6 +221,16 @@ This follows the same pattern as Odoo's `account` module (`addons/account/models
 
 The method must return a marshalable dict (`{"articles_synced": N}`), never `None` — Odoo 19 XML-RPC dumps with `allow_none=False`. Full history and the manual-call recipe: [oteny-knowledge-sync — Manual admin call](../../oteny-knowledge-sync/SKILL.md#manual-admin-call-xml-rpc).
 
+### `x and y` with a recordset assigns the recordset, not `False`
+
+An empty recordset is falsy, so `record and _("text")` returns the **empty recordset itself**
+when `record` is empty. Assigned to a `Char`/`Text` field, Odoo stores its string form, the
+literal text `rivercreds.credential()`, which is truthy: a view guarded by
+`invisible="not my_message"` then shows a banner with that text on every record. Write the
+condition out, `value = _("…") if record else False`. Seen in radar 2026-10-04
+(`riverflow.service.placement_covered_by_message`: a yellow `rivercreds.credential()` bar on
+every A1 service); a test that asserts the field is empty on a record without a match catches it.
+
 ### @api.depends Declaration
 
 Always declare all dependencies. The ORM uses this for automatic recomputation:

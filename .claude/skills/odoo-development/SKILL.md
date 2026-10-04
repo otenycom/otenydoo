@@ -159,6 +159,8 @@ active_entries = entries.filtered(lambda e: e.active)
 
 **This applies to One2many traversals too**: `self.log_entry_ids.filtered(...)` must include `e.active` in the lambda. The Odoo UI sets `active_test=False` on certain write operations, which cascades into compute methods. Without the explicit check, archived records appear in One2many fields and can pollute computed results with stale data.
 
+**Inside a loop over many records, check `active` in the loop body, not with `filtered()`**: `for item in slot.item_ids.filtered("active")` gives each slot's items a prefetch set of their own, so every later field read on them is one query per slot (N+1). Write `for item in slot.item_ids: if not item.active: continue`. The same holds for `|=` unions that a helper reads afterwards. See [Profiler Analysis — prefetch set](references/profiler-analysis.md#recordset-operations-inside-a-per-record-loop-drop-the-prefetch-set).
+
 **Prefer FK comparison over One2many containment** when excluding a record's own related records: use `c.service_id != service` instead of `c not in service.credential_ids`. One2many traversals are sensitive to ambient `active_test` context, which varies between callers (wizard `default_get` vs `@api.depends` compute). Direct FK comparisons are context-independent. See [Coding Patterns — FK vs One2many Containment](references/coding-patterns.md#prefer-fk-field-comparison-over-one2many-containment).
 
 ### Date Handling

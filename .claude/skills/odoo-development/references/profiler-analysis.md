@@ -152,6 +152,30 @@ Symptom: thousands of `SELECT ... WHERE id IN %s` queries on the same table. Cau
 
 Fix: prefetch fields before iteration, or use `search()` / `read()` instead of per-record access. Avoid `invalidate_all()` inside loops.
 
+#### Recordset operations inside a per-record loop drop the prefetch set
+
+In Odoo 19, `filtered()`, `|` / `union()`, indexing and slicing (`records[0]`, `records[:1]`) and `browse()` build a **new** recordset whose prefetch set is only its own ids (`browse(ids)` → `self.__class__(env, ids, ids)`). `sorted()`, `with_prefetch()` and plain iteration keep the parent's prefetch set. Iterating `slot.item_ids` directly keeps the batch: the x2many value prefetches across every slot being processed. `slot.item_ids.filtered("active")` does not, so every field read on those items afterwards is one query **per slot**.
+
+The trap is easy to fall into because the workspace rule requires an explicit `active` check (see [SKILL.md — Active Records and Archiving](../SKILL.md#active-records-and-archiving)). Inside a loop over many records, check `active` in the loop body instead of calling `filtered()` per record:
+
+```python
+# N+1: filtered() gives each slot's items a prefetch set of their own
+for slot in self:
+    for item in slot.item_ids.filtered("active"):
+        services |= item.credential_service_ids
+
+# Batched: one query per relation for all slots
+for slot in self:
+    for item in slot.item_ids:
+        if not item.active:
+            continue
+        services |= item.credential_service_ids
+```
+
+When the loop builds a per-record recordset with `|=` and a helper then reads fields on it, collect the sets first and give them one shared prefetch set: `services.with_prefetch(all_services._prefetch_ids)`, where `all_services = Model.union(*sets)`.
+
+Workspace case (2026-10-04): the non-stored `rivercreds.plan.slot.service_infos_json` ran 1,304 queries for 559 ship slots on a prod copy, so the Credential Planning page waited about 1 s on one `search_read`. With both fixes it runs 7 queries; the full `search_read` went from 0.384 s and 1,312 queries to 0.053 s and 15 queries. Find the repeated query by wrapping `odoo.sql_db.Cursor.execute` in an `odoo shell` and counting the normalized SQL text with its first call stack; print the length of the id list in the params to see whether each query loads one record or a batch.
+
 ### `invalidate_all(flush=True)` in Loops
 
 Wipes the entire ORM cache, forcing every subsequent field access to re-query. Measured impact: 18x more queries and 39x slower than letting the ORM batch naturally.

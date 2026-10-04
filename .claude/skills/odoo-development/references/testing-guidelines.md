@@ -462,6 +462,27 @@ self.assertEqual(service.project_deadline, expected) # migration healed it
 
 **Why the `flush_all()` first**: without it, creating the record leaves `project_deadline` queued for recompute (or dirty-but-unflushed). The raw `UPDATE` writes the column, but the next read sees the field is still to-compute and **recomputes it, overwriting your planted value** — the precondition assert then fails reading the correct value instead of the stale one. Flushing first clears the queue so the column read is authoritative. Cover both branches of the compute (e.g. permit-backed → renewal point, and permit-less → contract-start fallback).
 
+### Testing a Query Count (the cold-cache exception)
+
+A test that guards against an **N+1 regression** is the second sanctioned exception to the no-invalidate rule. Every RPC starts with an empty ORM cache, so the test must clear the cache to read as cold as a real request does. `self.env.invalidate_all()` also flushes pending writes first, so no flush call is needed.
+
+Compare the query count of one record with that of several records, instead of asserting a fixed number. A fixed number breaks whenever an unrelated module adds a field or a record rule; a flat count only breaks when the code runs queries per record. Give the single record its own prefetch set with `browse(id)` (indexing and slicing do the same in Odoo 19; plain iteration does not, because each record it yields keeps the prefetch set of the whole recordset and would compute all of them).
+
+```python
+def count_queries(records):
+    # Every RPC starts with an empty cache
+    self.env.invalidate_all()
+    before = self.env.cr.sql_log_count
+    records.mapped("service_infos_json")
+    return self.env.cr.sql_log_count - before
+
+one_slot = count_queries(slots.browse(slots[0].id))
+four_slots = count_queries(slots)
+self.assertEqual(four_slots, one_slot, "service_infos_json must not run queries per slot (N+1)")
+```
+
+Prove it red first: run the test on the old code. Workspace example: `rivercreds/tests/test_credential_plan.py::test_badge_strip_query_count_does_not_grow_with_slots` (16 queries for four slots against 7 for one before the fix; equal after it). Make sure every record in the test takes the same code path (here: every slot has one plan item with one service), or the counts differ for reasons other than N+1.
+
 ## External HTTP Requests in Tests
 
 ### Odoo's HTTP Request Blocker

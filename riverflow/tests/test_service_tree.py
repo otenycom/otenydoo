@@ -1,5 +1,6 @@
 from odoo.tests.common import TransactionCase
 from odoo.tests import tagged
+from odoo.tools.sql import index_exists
 from datetime import date
 
 
@@ -1069,3 +1070,18 @@ class ServiceDeadlineTestCase(TransactionCase):
             list(range(1, child_count + 1)),
             "display_order must be sequential following deadline-sorted order",
         )
+
+
+@tagged("post_install", "-at_install", "riverflow", "test_services")
+class TestServiceIndexes(TransactionCase):
+    """The service lookups that run on every service write and every
+    log-entry edit need their indexes. Without them each lookup scanned the
+    whole service table (3-7 ms on 35k services, repeated dozens of times per
+    edit), so a missing index shows up only as a slow system."""
+
+    def test_subject_and_root_lookups_are_indexed(self):
+        cr = self.env.cr
+        # models.Index on (res_model, res_id): subject lookups
+        self.assertTrue(index_exists(cr, "riverflow_service_res_model_res_id_idx"))
+        # root_id index=True: the "root_id in (...)" dependency lookup
+        self.assertTrue(index_exists(cr, "riverflow_service__root_id_index"))

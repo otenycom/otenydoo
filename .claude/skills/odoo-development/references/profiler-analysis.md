@@ -176,6 +176,22 @@ When the loop builds a per-record recordset with `|=` and a helper then reads fi
 
 Workspace case (2026-10-04): the non-stored `rivercreds.plan.slot.service_infos_json` ran 1,304 queries for 559 ship slots on a prod copy, so the Credential Planning page waited about 1 s on one `search_read`. With both fixes it runs 7 queries; the full `search_read` went from 0.384 s and 1,312 queries to 0.053 s and 15 queries. Find the repeated query by wrapping `odoo.sql_db.Cursor.execute` in an `odoo shell` and counting the normalized SQL text with its first call stack; print the length of the id list in the params to see whether each query loads one record or a batch.
 
+### Calling a compute method directly writes every assignment
+
+Inside Odoo's own recompute, assigning a stored field its current value costs nothing. A compute method called **directly** (`records._compute_x()`, often after `invalidate_recordset`) runs outside the compute framework: each assignment is a full `write()` that marks the dependents and recomputes them, even when the value does not change. After an invalidation the ORM cannot even see that the value is unchanged. Compare first and assign only on change.
+
+Workspace case (2026-10-04): `crewradar.log.entry._compute_most_fitting_marker_trigger` re-resolves the employee's marker services with `_compute_subject()`. Each re-resolve rewrote `res_model`/`res_id` and recomputed state records, check results, the HR info service and `display_order`: about 0.5 s and 500 queries per marker, while 0 of 257 markers on `crmain` changed target. Assigning only on change in `_apply_custom_subject_from` took all 257 markers from 164.5 s to 0.08 s. The same pattern shows in a compute that writes **another** record unconditionally (`info.write(vals)`, `pax.info_service_id.write(vals)`); measure it before changing it, because a small, rare batch costs little.
+
+### A many2one used in a dependency path needs an index
+
+When field B on model M depends on `x_id.field`, every write to `field` makes Odoo search `M` for `x_id in (...)` to find the records to recompute. A many2one with `ondelete` also gets a reference check on every delete. Without an index on `x_id`, both are sequential scans. A many2one in `_order` adds a join to every `search()` without an explicit `order`. Find these in a measured workload by logging queries slower than 3 ms with their caller, then test the index inside the shell transaction (`CREATE INDEX` is transactional in PostgreSQL, so a rollback removes it) before declaring it. Choose `index="btree_not_null"` when most rows are empty. Workspace case: `riverflow_service.root_id`, `(res_model, res_id)` and `wp_info_for_id` on 35k services, see [riverflow SKILL — Indexes](../../riverflow/SKILL.md#services).
+
+### Scanning every stored compute for N+1
+
+To find N+1 computes across all modules, compute each stored field once for 1 record and once for a batch (`field.compute_value(records)` with a cold cache, `env.cr.rollback()` after each) and compare the query counts. Growth per record flags a candidate; it does not prove a problem. Then measure the realistic trigger **with `env.flush_all()`**, because the follow-on recomputes run at flush and were 5–10 times the compute's own cost in the workspace case. Rank by real user actions and real batch triggers (a dependency on a shared record recomputes every record at once).
+
+**Block the network first, and know that a Python block is not enough.** A stored compute may call an external service. `crewradar.site.marinetraffic_url` runs a web metasearch through `ddgs`, which makes its requests in Rust (`primp`), so patching `requests`, `httpx` or `socket` does not stop it. A 2026-10-04 scan on `crmain` sent real MMSI searches before it was stopped. Disable such clients at module level (`crewradar_marinetraffic.models.crewradar_site.DDGS = None`) and skip their fields, and watch the scan for a stall: an idle database connection with a waiting Python process means an outside call.
+
 ### `invalidate_all(flush=True)` in Loops
 
 Wipes the entire ORM cache, forcing every subsequent field access to re-query. Measured impact: 18x more queries and 39x slower than letting the ORM batch naturally.

@@ -28,6 +28,11 @@ class Service(models.Model):
     # set the display_order field to all services on any service update, so the root services are not sorted
     # by display_order, but by name.
     _order = "res_sortable_name,res_model,res_id,root_name,root_id,display_order"
+    # Services are looked up by their subject all the time: the auto-add dedup
+    # search, the display_order SQL and every "services of this record" read.
+    # Without this index each lookup scanned the whole table (3-7 ms on 35k
+    # services), which a single log-entry edit repeats dozens of times.
+    _res_model_res_id_idx = models.Index("(res_model, res_id)")
     DATE_FORMAT = "%d-%b-%y"  # 01-Jan-21; dont use %-d-%b-%y" to remove the leading zero, as it also triggers french locale format on odoo.sh
     DATETIME_FORMAT = "%d-%b-%y %H:%M:%S"
 
@@ -147,7 +152,13 @@ class Service(models.Model):
         "Several notifications on one message share one open service.",
     )
 
-    root_id = fields.Many2one("riverflow.service", compute="_compute_root_id", store=True, recursive=True)
+    # Indexed: after every service write Odoo searches "root_id in (...)" to
+    # find the services whose stored fields depend on their root, and a
+    # service delete checks the column for references. Unindexed, each of
+    # those lookups scanned the whole table.
+    root_id = fields.Many2one(
+        "riverflow.service", compute="_compute_root_id", store=True, recursive=True, index=True
+    )
     root_name = fields.Char(
         "Top-level service name",
         compute="_compute_root_name",

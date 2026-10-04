@@ -266,6 +266,8 @@ A transition has a **nominal** `to_state_id` in XML, but its wizard can rewrite 
 
 Services are tasks attached to records (e.g., log entries). They have their own workflow for task management. Services inherit `riverflow.state.mixin` and `riverflow.state.record.tracker.mixin`, so they appear in the Radar view alongside their subject records.
 
+**Indexes on `riverflow_service`** (4-Oct-2026). Two lookups run on nearly every service write and log-entry edit, so both columns are indexed: `(res_model, res_id)` as `_res_model_res_id_idx = models.Index(...)` (the auto-add dedup search, the `display_order` SQL, every "services of this record" read) and `root_id` (`index=True`; Odoo's `root_id in (...)` lookup for the stored fields that depend on the root, and the reference check on delete). Unindexed, each lookup scanned the whole table, 3–7 ms on 35k services. Measured on a prod copy together with the `wp_info_for_id` index of crewradar_cuneus_sign: five log-entry edits 3.19 s → 1.41 s, ten service deadline edits 0.232 s → 0.074 s. Note that `_order` sorts on the many2one `root_id`, so every service `search()` without an explicit `order` joins the root service. Test: `TestServiceIndexes` in `tests/test_service_tree.py`.
+
 ### Template Placement Guard Rails
 
 Service templates have metadata fields that control where they can be instantiated, preventing users from creating services in the wrong context (e.g. log-entry-only templates on employees/ships, or child-only templates as root services).

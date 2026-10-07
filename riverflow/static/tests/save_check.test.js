@@ -62,10 +62,6 @@ class TransitionWizard extends models.Model {
 defineMailModels();
 defineModels([TransitionWizard]);
 
-// oteny_shortcut's wide-form toggle reads a system parameter on the first
-// form; answer it as its own tests do.
-onRpc("ir.config_parameter", "get_param", () => "False");
-
 test("a held OK keeps the form open and shows the warnings with the confirmation", async () => {
     const findings = [
         {

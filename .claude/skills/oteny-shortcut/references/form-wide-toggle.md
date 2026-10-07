@@ -51,7 +51,7 @@ When a form opens, the layout is decided in this order (first match wins):
 
 An administrator can hide the toggle button system-wide by setting **Settings > Technical > System Parameters** key `oteny_shortcut.form_wide_toggle` to `"False"`. The form layout falls back to stock Odoo (1400px cap, chatter aside at XXL). The default value `"True"` is loaded on module install.
 
-The system parameter is fetched once per page load and cached in memory across all forms; toggling it requires a page refresh to take effect for users currently logged in.
+The server reads the system parameter once per page load, as sudo, and hands it to the client in the session info (`oteny_form_wide_toggle`, set by the `ir.http.session_info` override in `models/ir_http.py`); toggling it requires a page refresh to take effect for users currently logged in. Until 19.0.1.246 the first form fetched it with an RPC cached for the session. A user without the Settings right was refused, so the refusal was cached and every form failed for that user; and the cached request, bound to the first form's `useService("orm")`, never settled when that form was destroyed while it ran.
 
 ### Forms That Default to Wide
 
@@ -97,6 +97,8 @@ flowchart LR
 oteny_shortcut/
 ├── data/
 │   └── ir_config_parameter_data.xml         # Default-on system parameter
+├── models/
+│   └── ir_http.py                           # session_info: oteny_form_wide_toggle
 └── static/src/components/form_wide_toggle/
     ├── form_wide_toggle.js   # Component class + 3 prototype patches
     ├── form_wide_toggle.xml  # QWeb template for the icon button
@@ -109,7 +111,7 @@ The implementation extends Odoo's stock form view via three coordinated `patch()
 
 #### 1. `FormController.prototype` — state and class management
 
-- Reads `o_form_default_wide` marker from `props.className`, `localStorage["oteny_shortcut.form_wide.<resModel>"]`, and the cached system parameter
+- Reads `o_form_default_wide` marker from `props.className`, `localStorage["oteny_shortcut.form_wide.<resModel>"]`, and the system parameter from the session info (`session.oteny_form_wide_toggle`, enabled unless it is `false`)
 - Creates a reactive `useState({ enabled, isWide, atXXL })` and exposes it on `this.formWide` and via `useSubEnv({ formWide })` so child components in the renderer can read it
 - `useExternalListener(window, "resize", ...)` keeps `state.atXXL` in sync with `ui.size >= SIZES.XXL`
 - `useEffect(..., () => [state.isWide])` dispatches a synthetic `window.resize` event after each toggle so resize-aware components (status bar segment overflow detection, list view column widths, attachment preview sizing) re-measure against the new layout

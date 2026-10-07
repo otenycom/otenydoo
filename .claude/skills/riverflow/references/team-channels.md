@@ -111,6 +111,7 @@ member is stored on `res.users`, which only that group may write.
 | `riverflow/models/mail_thread.py` | `mail.thread._message_create` hook; `_colleague_copy_teams(message)` holds the routing rules; `_post_colleague_message_copies` posts each copy under a savepoint |
 | `riverflow/views/riverflow_team_views.xml` | Members list: an editable `widget="many2many"` node for `base.group_erp_manager`, a read-only node for `!base.group_erp_manager` |
 | `riverflow/tests/test_team_channel_copy.py` | Tag `test_team_channels`: copy between teams (Send message, Log note mention, `email` post, plain `res.partner` record), no-copy cases, one copy per team, team contact, external copy unchanged, Members list |
+| `riverflow/static/tests/tours/team_form_tour.js` | Tour `riverflow_team_form_opens`, run by `TestTeamFormOpens` in the same test file: opens Human Resources from the team list as an admin and as a non-admin and waits for the Members list |
 
 - **An internal note is not outside mail.** The external copy skips
   `subtype_id.internal` (`mail.mt_note`). A log note posted as OdooBot
@@ -143,6 +144,16 @@ member is stored on `res.users`, which only that group may write.
   `<a href=# data-oe-model=… data-oe-id=…>`. In the backend, the mail store's
   `handleClickOnLink` (`mail/static/src/core/web/store_service_patch.js`) opens
   such a link as a form from any message, including a Discuss channel message.
+- **The team form once never opened (2026-10-07).** On test and live the form
+  did its `web_read` and then never drew. The Members list is the first list
+  of `res.users` inside a form, and oteny_shortcut's in-form shortcut row kept
+  its per-model request in a page-wide cache, bound to the first list
+  component; that component was destroyed during the load, so the request
+  never settled and every later Members list waited forever. Fixed at the
+  owner, oteny_shortcut 19.0.1.246 (the cache loads through
+  `env.services.orm`); the same release moved the Form Wide Toggle's system
+  parameter into the session info, which a non-admin user could not read. The
+  tour above is the regression test; the server-side tests could not see it.
 - **The sanitizer rewrites the header.** Stored message bodies go through the
   mail HTML sanitizer: it drops a `border-left` style (margin and padding stay)
   and rewrites attributes with double quotes (`data-oe-model="…"`). A test that

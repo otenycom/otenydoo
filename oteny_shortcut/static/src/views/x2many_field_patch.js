@@ -49,6 +49,13 @@ import { isShortcutShown, showWhenContext } from "@oteny_shortcut/views/show_whe
 // Shortcuts per model for this page load; which of them show above a given
 // list is decided per form (see x2manyShortcuts). An admin who changes the
 // filters reloads the page to see the change, the same as for the banner.
+//
+// The cache outlives every component, so the caller must pass the unbound orm
+// service (env.services.orm), never the one from useService("orm"): a promise
+// from useService never settles once its component is destroyed, and every
+// later list of that model on the page then waits for it forever. That hung
+// the team form on 2026-10-07: the first Members list was destroyed while its
+// request ran, and the list that replaced it never rendered.
 const formShortcutsByModel = new Map();
 
 export function loadFormShortcuts(orm, resModel) {
@@ -129,7 +136,7 @@ patch(X2ManyField.prototype, {
 
         onWillStart(async () => {
             this.shortcutState.shortcuts = await loadFormShortcuts(
-                this._shortcutOrm,
+                this.env.services.orm,
                 this.list.resModel
             );
             const defaultShortcut = this.x2manyShortcuts.find((s) => s.is_default);

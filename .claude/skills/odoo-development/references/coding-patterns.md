@@ -2128,3 +2128,19 @@ Two rules, both in `riverflow/static/src/patch/many2many_binary_upload_patch.js`
 - **Block the UI for the whole modal-length operation** (`useService("ui")`, `block()` in a `try`, `unblock()` in `finally`): the overlay stops clicks and the hotkey service ignores Escape while blocked, so the dialog cannot be closed under the operation in the first place.
 
 Proof pattern: a browser tour that holds the upload response (patch `browser.fetch` from `@web/core/browser/browser`, not `window.fetch`, which is bound at module load), closes the dialog under it, and asserts the warning and no error dialog (`rivercreds/static/tests/tours/document_import_upload_race_tour.js`). The upstream fix, a `status` check in `FileInput.onFileInputChange` with a Hoot test, is [odoo/odoo#286831](https://github.com/odoo/odoo/pull/286831).
+
+### A cache shared by components must not hold a `useService` promise
+
+The same protection bites a module-level cache. A promise from
+`useService("orm")` stays pending forever once its component is destroyed, so a
+`Map` or module variable that keeps that promise for the page (one request per
+model, one per session) strands every later component that awaits it — the
+form or field simply never renders, with only `onWillStart's promise hasn't
+resolved after 3 seconds` in dev mode. Load a shared cache through the unbound
+service (`this.env.services.orm`) and keep `useService` for work that belongs to
+one component. A setting the client needs on every page belongs in the session
+info (`ir.http.session_info` override, read as sudo) rather than in a cached
+RPC: no request, no access check for users without the Settings right.
+Incident and fix: oteny_shortcut 19.0.1.246 (`x2many_field_patch.js`,
+`form_wide_toggle.js`, `models/ir_http.py`); the browser tour
+`riverflow_team_form_opens` reproduces it, server-side tests cannot.

@@ -2,7 +2,7 @@ from datetime import date
 
 from odoo import Command
 from odoo.tests import tagged
-from odoo.tests.common import TransactionCase, new_test_user
+from odoo.tests.common import HttpCase, TransactionCase, new_test_user
 
 
 @tagged("riverflow", "post_install", "-at_install", "test_team_channels")
@@ -167,3 +167,22 @@ class TestTeamChannelCopy(TransactionCase):
         self.assertFalse(self.dus_b.home_team_id)
         self.assertTrue(self.dus_b.exists())
         self.assertEqual(self.dus_team.member_ids, self.dus_a)
+
+
+@tagged("riverflow", "post_install", "-at_install", "test_team_channels")
+class TestTeamFormOpens(HttpCase):
+    """The team form must open in the browser for both variants of its Members list.
+
+    The form renders the Members list twice with complementary groups: an editable
+    many2many-widget list for access-rights administrators and a read-only list for
+    everybody else. The server returns a valid view and web_read for both, so only a
+    browser run shows whether the web client draws the form. The tour fails on any
+    console error.
+    """
+
+    def test_team_form_opens_for_admin(self):
+        self.start_tour("/odoo/action-riverflow.team_action", "riverflow_team_form_opens", login="admin")
+
+    def test_team_form_opens_for_non_admin(self):
+        new_test_user(self.env, login="tc_team_reader", groups="base.group_user,riverflow.group_service_manager")
+        self.start_tour("/odoo/action-riverflow.team_action", "riverflow_team_form_opens", login="tc_team_reader")

@@ -2,7 +2,6 @@
 
 import {
     Component,
-    onWillStart,
     useEffect,
     useExternalListener,
     useState,
@@ -13,6 +12,7 @@ import { SIZES } from "@web/core/ui/ui_service";
 import { useService } from "@web/core/utils/hooks";
 import { patch } from "@web/core/utils/patch";
 import { createElement, setAttributes } from "@web/core/utils/xml";
+import { session } from "@web/session";
 import { FormCompiler } from "@web/views/form/form_compiler";
 import { FormController } from "@web/views/form/form_controller";
 import { FormRenderer } from "@web/views/form/form_renderer";
@@ -24,22 +24,17 @@ import { FormRenderer } from "@web/views/form/form_renderer";
 // This module gives users a per-form toggle and lets specific forms
 // declare a default-wide preference via the o_form_default_wide marker.
 
-const SYS_PARAM_KEY = "oteny_shortcut.form_wide_toggle";
 const STORAGE_PREFIX = "oteny_shortcut.form_wide.";
 const XML_DEFAULT_WIDE_CLASS = "o_form_default_wide";
 
-// Cache the system parameter across all FormControllers in the session.
-// The toggle is a UI affordance, not security-sensitive, so reading it
-// once on first form load and reusing it for the rest of the session is
-// safe and avoids per-form RPCs.
-let _toggleEnabledPromise = null;
-function isToggleEnabled(orm) {
-    if (!_toggleEnabledPromise) {
-        _toggleEnabledPromise = orm
-            .call("ir.config_parameter", "get_param", [SYS_PARAM_KEY, "True"])
-            .then((val) => val !== "False");
-    }
-    return _toggleEnabledPromise;
+// The system parameter oteny_shortcut.form_wide_toggle reaches the client in
+// the session info (oteny_form_wide_toggle, models/ir_http.py), read once per
+// page load on the server. The form used to fetch it with an RPC cached for
+// the session: a user without the Settings right was refused, so every form
+// failed for that user, and a request bound to the first form never settled
+// when that form was destroyed while it ran (2026-10-07).
+function isToggleEnabled() {
+    return session.oteny_form_wide_toggle !== false;
 }
 
 function readStoredPreference(resModel) {
@@ -100,7 +95,6 @@ patch(FormController.prototype, {
     setup() {
         super.setup(...arguments);
 
-        const orm = useService("orm");
         const ui = useService("ui");
         const resModel = this.props.resModel;
 
@@ -117,10 +111,10 @@ patch(FormController.prototype, {
         const initialIsWide = stored ? stored === "wide" : xmlDefaultsWide;
 
         const state = useState({
-            // Flipped to true once the system parameter resolves. Until
-            // then the toggle button stays hidden, but the wide/narrow
-            // class is still applied immediately so layout does not jump.
-            enabled: false,
+            // The system parameter, from the session info: when it is
+            // off the toggle button stays hidden, but the wide/narrow
+            // class is still applied so a default-wide form stays wide.
+            enabled: isToggleEnabled(),
             isWide: initialIsWide,
             // Below the XXL breakpoint stock Odoo already renders the
             // chatter beneath the sheet (no SIDE_CHATTER), so the wide
@@ -162,10 +156,6 @@ patch(FormController.prototype, {
             },
             () => [state.isWide]
         );
-
-        onWillStart(async () => {
-            state.enabled = await isToggleEnabled(orm);
-        });
     },
 
     get className() {

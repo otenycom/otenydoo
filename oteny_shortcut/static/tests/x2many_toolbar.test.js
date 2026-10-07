@@ -28,8 +28,6 @@ class Line extends models.Model {
 
 defineModels([Parent, Line]);
 
-onRpc("ir.config_parameter", "get_param", () => "False");
-
 test("in a form the row moves into the toolbar above the list", async () => {
     clearFormShortcutsCache();
     onRpc("ir.filters", "get_shortcuts", () => [

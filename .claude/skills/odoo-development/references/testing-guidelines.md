@@ -26,7 +26,7 @@ cd <business-repo> && ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo-bin \
 
 ### Full radar workspace suite (Cursor `/radar/test`)
 
-The radar workspace defines a command in `.claude/commands/test.md` that instructs running the default **combined** tag set from `.vscode/settings.json` → `odoo.testTags`. That list must equal `odoo.installModules`: every first-party module we built and install for CrewRadar. In the command palette, the slash command may appear with the workspace or folder prefix (e.g. `/radar/test`).
+The radar workspace defines a command in `.claude/commands/test.md` that instructs running the default **combined** tag set: the tag of every module in `.vscode/settings.json` → `odoo.installModules`, every first-party module we built and install for CrewRadar. There is no separate `odoo.testTags` since 2026-10-07; the radar launch configurations and the deploy gate read the module list itself. In the command palette, the slash command may appear with the workspace or folder prefix (e.g. `/radar/test`).
 
 **Tag semantics**: Comma-separated values in `--test-tags` are **OR** in Odoo’s TagsSelector: a test runs if its class matches **any** of the listed tags.
 
@@ -49,9 +49,9 @@ cd <business-repo> && ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo-bin \
   | tee /tmp/radar_test_full_suite.txt
 ```
 
-**Suite size**: The `crewradar` tag selects every class that includes it, including derived addons (e.g. `crewradar_wilma`, `crewradar_cuneus_sign`) that tag tests with both their module tag and `crewradar`. Together with the other module tags the run covers 470 classes and 4263 tests, and it finishes in about 85 seconds on 21 parallel workers (2026-08-21). A module that does not carry the `crewradar` tag (`oteny_bot`, `odoo_parallel_tests`, `oteny_knowledge_sync`, `oteny_audit`, `riverflow`) still gates a deploy because `odoo.testTags` lists every installed first-party module.
+**Suite size**: The `crewradar` tag selects every class that includes it, including derived addons (e.g. `crewradar_wilma`, `crewradar_cuneus_sign`) that tag tests with both their module tag and `crewradar`. Together with the other module tags the run covers 470 classes and 4263 tests, and it finishes in about 85 seconds on 21 parallel workers (2026-08-21). A module that does not carry the `crewradar` tag (`oteny_bot`, `odoo_parallel_tests`, `oteny_knowledge_sync`, `oteny_audit`, `riverflow`) still gates a deploy because the gate runs the tag of every module in `odoo.installModules`.
 
-**`-u` also gates test discovery.** A combined `-u <modules> --test-enable` run loads tests only from the modules named in the `-u` list. So a tag in `odoo.testTags` selects nothing when its module is missing from `odoo.installModules`. `odoo_parallel_tests` hit exactly that on 2026-08-21: the tag was set, the module was not in the `-u` list, and `TestCloneReuseKey` dropped 6 tests from the run with no warning. Keep the two settings in step — every module whose tag you list must also sit in the install list.
+**`-u` also gates test discovery.** A combined `-u <modules> --test-enable` run loads tests only from the modules named in the `-u` list. So a tag selects nothing when its module is missing from the `-u` list. `odoo_parallel_tests` hit exactly that on 2026-08-21: the tag was set, the module was not in the `-u` list, and `TestCloneReuseKey` dropped 6 tests from the run with no warning. That is why radar now takes the test tags from `odoo.installModules` itself: one list cannot drift.
 
 **Example red test from a full combined-tag run**: `crewradar_cuneus_sign.tests.test_a1_workflow.TestA1SendIssuedA1AutoProgress.test_full_workflow_credentials_linked_to_parent` can fail with an `AssertionError` comparing two `riverflow.state` records (expected vs actual state after Send Issued A1 / parent credential linking). Numeric ids in the message are database-specific. Reproduce in isolation with `--test-tags=.test_full_workflow_credentials_linked_to_parent` on a database installed with the full `odoo.installModules` list.
 
@@ -92,7 +92,7 @@ Add tags to new test classes:
 
 - For base `crewradar` module tests, use `crewradar` as the module tag.
 - CrewRadar-derived addons (`crewradar_wilma`, `crewradar_cuneus_sign`, `crewradar_creds`, `crewradar_sign`, `crewradar_marinetraffic`) and `rivercreds`: include `crewradar` in `@tagged(...)` alongside the module-specific tag so `--test-tags=crewradar` still runs that stack as a convenience.
-- Generic modules in `otenydoo` (`oteny_shortcut`, `oteny_knowledge_sync`, `riverflow`, `oteny_audit`, …) gate a deploy through their **own** addon tag. `odoo.testTags` equals `odoo.installModules`. Do not add a leftover `crewradar` tag on a generic module — that is how `oteny_shortcut` used to hide from the gate, and how a class tagged only `oteny_knowledge_sync` never ran.
+- Generic modules in `otenydoo` (`oteny_shortcut`, `oteny_knowledge_sync`, `riverflow`, `oteny_audit`, …) gate a deploy through their **own** addon tag; the radar gate runs the tag of every module in `odoo.installModules`. Do not add a leftover `crewradar` tag on a generic module — that is how `oteny_shortcut` used to hide from the gate, and how a class tagged only `oteny_knowledge_sync` never ran.
 
 ```python
 from odoo.tests import tagged

@@ -17,7 +17,7 @@ An Odoo addon (`odoo_parallel_tests`) that monkey-patches `odoo.tests.loader.run
 ```text
 ┌─────────────────────────────────────────────────────┐
 │              Odoo CLI (odoo-bin)                     │
-│  --test-enable --test-tags=<odoo.testTags>          │
+│  --test-enable --test-tags=<odoo.installModules>    │
 └──────────────┬──────────────────────────────────────┘
                │
                ▼

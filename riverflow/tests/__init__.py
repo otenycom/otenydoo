@@ -23,3 +23,4 @@ from . import test_review_email_bounce
 from . import test_save_check
 from . import test_service_check_results
 from . import test_tombstone_mixin
+from . import test_service_write_changed

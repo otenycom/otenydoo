@@ -737,7 +737,10 @@ class Service(models.Model):
                 name = service.supply_leg_id.name
                 if not service.parent_id:
                     name = f"{name} ({service.supply_leg_id.service_id.name})"
-                service.name = name  # used in lists/radar
+                # name is not computed here: an assignment is a full write() with
+                # its dependency search, so write it only when it changes.
+                if service.name != name:
+                    service.name = name  # used in lists/radar
                 service.display_name = name  # used in calendar / chatter messages / emails
                 continue
 
@@ -791,7 +794,11 @@ class Service(models.Model):
     def _compute_project_deadline(self):
         for service in self:
             if service.supply_order_service_id:
-                service.use_project_deadline_from = "self"
+                # use_project_deadline_from is not computed here: an assignment is
+                # a full write() with its dependency search, so write it only
+                # when it changes.
+                if service.use_project_deadline_from != "self":
+                    service.use_project_deadline_from = "self"
                 service.project_deadline = service.supply_order_service_id.deadline
             else:
                 use_project_deadline_from = service.use_project_deadline_from
@@ -1077,7 +1084,14 @@ class Service(models.Model):
                 # env.remove_to_compute(), clearing the pending computation.
                 # For settled records, keep the read-and-compare to avoid
                 # unnecessary database writes and ORM overhead.
-                if self.env.is_to_compute(order_field, service) or service.display_order != display_order:
+                if self.env.is_to_compute(order_field, service):
+                    # Pending: store the value as its own compute would. Its
+                    # dependents were marked when it was marked, so no write()
+                    # and no dependency search per sibling is needed (one per
+                    # sibling cost thousands of queries on a billing month move).
+                    with self.env.protecting([order_field], service):
+                        service.display_order = display_order
+                elif service.display_order != display_order:
                     service.display_order = display_order
 
                 # Increment the display_order number for the next service
@@ -2098,6 +2112,40 @@ class Service(models.Model):
         """Allow manual override of computed active field"""
         # This is a flag method that allows the field to be written
         pass
+
+    def _write_changed(self, vals):
+        """Write only the values in ``vals`` that differ from this service.
+
+        For a compute that keeps a service in step with other data (an info
+        service). A write of an unchanged value is not free: Odoo marks every
+        dependent of the field for recompute and searches for the dependent
+        records, once per write, and a state_id write runs the state change
+        hooks (_on_state_changed). A compute that writes each of thousands of
+        services with the same values pays that per service (radar billing
+        month move, 2026-10-08). A Many2one value is an id or a record, an
+        x2many value a single Command.set; any other command list is written as
+        given.
+        """
+        self.ensure_one()
+        changed = {}
+        for name, value in vals.items():
+            field = self._fields[name]
+            if field.type == "many2one":
+                new_id = value.id if isinstance(value, models.BaseModel) else (value or False)
+                if self[name].id != new_id:
+                    changed[name] = value
+            elif field.type in ("one2many", "many2many"):
+                commands = list(value)
+                if len(commands) == 1 and commands[0][0] == Command.SET:
+                    if set(self[name].ids) != set(commands[0][2]):
+                        changed[name] = value
+                else:
+                    changed[name] = value
+            elif self[name] != value:
+                changed[name] = value
+        if changed:
+            self.write(changed)
+        return bool(changed)
 
     def _single_open_removal_blocked(self):
         """True when this OPEN service must not be deleted/archived by hand.

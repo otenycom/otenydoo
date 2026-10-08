@@ -407,7 +407,12 @@ class RiverflowStateRecord(models.Model):
     @api.depends("service_id.tag_ids")
     def _compute_tag_ids(self):
         for record in self:
-            record.tag_ids = self._compute_tag_ids_for_record(record)
+            # Assign only a change: assigning a Many2many diffs it against the
+            # stored relation, one query per record (11616 on a radar billing
+            # month move, 2026-10-08, for tags that did not change).
+            tags = self._compute_tag_ids_for_record(record) or self.env["riverflow.service.tag"]
+            if record.tag_ids != tags:
+                record.tag_ids = tags
 
     @api.model
     def _compute_tag_ids_for_record(self, record):

@@ -570,6 +570,37 @@ belong in riverflow; an app only produces checks):
 - First producer: `crewradar_creds` `placement_already_covered` (One per Placement).
   Tests: `tests/test_service_check_results.py` (hooks patched).
 
+### Tombstones: Retire Instead of Delete in a Compute (19.0.1.1299)
+
+`riverflow.tombstone.mixin` (`models/riverflow_tombstone_mixin.py`) is the one
+way a compute removes records it no longer needs (radar plan
+`tombstones-instead-of-deletes-in-computes`, Ries 2026-10-08). `unlink()` inside
+a compute runs every pending compute and clears the cache; that left a stale
+"No open Arrange Work Permit service" warning and caused "Record does not exist"
+errors. `records._retire()` flags `to_be_deleted`, archives (`active` False),
+clears the stored set-null links, retires the cascade children on the mixin and
+registers one pre-commit purge; `_gc_tombstones` (autovacuum) is the fallback.
+The rules for readers (filter the flag with `active_test=False`, `any` instead
+of `!= False`, `AND NOT to_be_deleted` in SQL, depend on `.active`) are in
+`odoo-development/references/coding-patterns.md`, "Do Not Unlink Inside a
+Compute That a Read Can Trigger".
+
+- **Check results** (`riverflow.check.result`) use it: `_sync_check_results`
+  skips flagged rows (a caller in an `active_test=False` env finds them) and
+  retires instead of `unlink()`; a retired row is never revived. Every sync
+  scope search filters `("to_be_deleted", "=", False)`.
+- **Services** (`riverflow.service`) use it for the services a compute removes
+  (radar: the info service of a cancelled supply order, the HR info service of
+  an AB appointment). Users keep archiving services: `active` stays writable
+  (`readonly=False`), the manual-archive guard in `write` skips a retire, the
+  unlink guards check only unflagged rows (the purge deletes what a compute
+  removed), and the purge deletes flagged rows only. `display_order` and the
+  auto-add dedup leave retired services out; `is_open` follows `active`, so the
+  partial unique "one open service" index never counts a retired one.
+- Tests: `tests/test_tombstone_mixin.py` (hide at once, no cache clear, one
+  purge step, a second round when the purge's flush retires more, a
+  user-archived row survives).
+
 ### Service Deadlines
 
 Service deadlines are computed from a `project_deadline` plus an optional `days_relative_to_project` offset, controlled by `use_project_deadline_from`:

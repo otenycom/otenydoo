@@ -494,36 +494,140 @@ Real example: riverflow `riverflow.save.check.mixin`
 
 ### Do Not Unlink Inside a Compute That a Read Can Trigger
 
-`unlink()` ends with `env.invalidate_all()`, which runs
-`transaction.field_data.clear()`. A field read (`Field.__get__`) takes its
-cache mapping first, then fetches; the fetch flushes pending recomputes. When
-such a recompute deletes records, the read's mapping is detached, the fetched
-value lands in the new one, and Odoo raises "Record does not exist or has
-been deleted" for a record that exists (`fields.py`, the SENTINEL check after
-`_fetch_field`). The error names the record being read, not the compute, so it
-looks like a vanished record. Found 2026-10-03: an AT Applied wizard failed on
-its own `records_to_transition_ids` after a manual import, because the import
-had queued credential plan slot recomputes that deleted plan items.
+`unlink()` is not a plain delete (`odoo/orm/models.py`, `BaseModel.unlink`).
+It first runs **every** pending compute of the transaction (`flush_all()`),
+in the middle of the compute that called it, and it ends by clearing the
+**whole** cache (`invalidate_all()`). Both reached production:
 
-- **Retire instead of delete in a compute.** Archive the records (a tombstone
-  `active` field), clear at once the links a delete would clear
-  (`ondelete=set null`), and delete them in a commit step
-  (`self.env.cr.precommit.add(...)`, guarded by a key in
-  `precommit.data`), with an `@api.autovacuum` fallback. Example: rivercreds
-  `rivercreds.plan.item._archive_obsolete` / `_purge_archived_items`.
-- **Make the tombstone invisible.** Readers check `active`; computes that sum
-  up the x2many depend on `<x2many>.active` (an x2many keeps archived ids in
-  its cache and filters only when it returns records); keep `active` out of
-  any field-based sync fingerprint; give the column a database default
-  `true` in `init()` when code or fixtures insert rows with SQL.
-- **The unlink also flushed everything first.** Code or tests that relied on
-  that side effect (a stored compute with side effects ran along the way) now
-  see the compute run at the next full flush. A search flushes only the
-  fields in its domain.
-- **How to find it:** replay the failing call in `odoo-bin shell` on a copy
-  of the database, wrap `Environment.invalidate_all` (and
-  `invalidate_model` / `invalidate_recordset`) to print a stack while the
-  failing field is read.
+- **A field read in flight loses its value.** A field read (`Field.__get__`)
+  takes its cache mapping first, then fetches; the fetch flushes pending
+  recomputes. When such a recompute deletes records, the read's mapping is
+  detached, the fetched value lands in the new one, and Odoo raises "Record
+  does not exist or has been deleted" for a record that exists (`fields.py`,
+  the SENTINEL check after `_fetch_field`). The error names the record being
+  read, not the compute. Found 2026-10-03: an AT Applied wizard failed on its
+  own `records_to_transition_ids` after a manual import, because the import
+  had queued credential plan slot recomputes that deleted plan items.
+- **A nested flush computes a field too early, and nothing computes it
+  again.** A record created inside the compute of field F asks for F's
+  recompute, and Odoo drops that request while F is being computed (the
+  field is protected). Found 2026-10-08 (radar, Cancel Offboarding): the log
+  entry check sync unlinked a result, that unlink computed the employee check
+  results, their own sync unlinked a row, and that second unlink ran the
+  auto-add, which created the work permit service. The employee kept "No open
+  Arrange Work Permit service" for good.
+
+**The way to do it: `riverflow.tombstone.mixin` (otenydoo riverflow).** A
+model whose rows a compute removes inherits it, and the compute calls
+`records._retire()` instead of `unlink()`:
+
+1. One write for the set, `{"to_be_deleted": True, "active": False}`, with
+   chatter tracking off. A write runs no flush and clears no cache.
+   `to_be_deleted` says why the row goes; `active` makes Odoo hide it by
+   itself: searches, x2many reads (`fields_relational.py`,
+   `convert_to_record` tests `active` of each row when it hands out the
+   list) and path domains.
+2. The stored, non-computed `ondelete="set null"` Many2one links that point
+   at the rows are cleared at once (found once per registry from the field
+   definitions). A **computed** link is left to its compute, which must skip
+   retired rows, clear a link to a retired row, and depend on `<link>.active`
+   (example: crewradar_creds `riverflow.service._compute_credential_plan_slot_id`).
+3. The `ondelete="cascade"` children that also use the mixin are retired
+   with the parent (a retired plan slot retires its items, a retired log
+   entry its check results, segments, timesheet lines and services). Other
+   children go with the database cascade at the purge.
+4. One pre-commit step (`_tombstone_purge`, guarded by a key in
+   `precommit.data`) deletes the flagged rows when no read is in flight, then
+   flushes; a compute that retires again in that flush registers the next
+   step, and Odoo runs it in the same commit (`Callbacks.run` loops). An
+   `@api.autovacuum` method is the fallback. `init()` gives `active` and
+   `to_be_deleted` database defaults, so a row inserted with SQL is live.
+
+**Where Odoo does not hide a retired row, the code does:**
+
+- **`active_test=False`.** The UI writes with it, and it reaches computes.
+  Searches and readers that run there filter `("to_be_deleted", "=", False)`.
+  For a model without a user archive, give the One2many lists to it
+  `context={"active_test": True}`: the field context wins over the env, so
+  every read, domain and fetch of that list sees live rows only (radar
+  crewradar: missing timesheets, timesheet lines, vacation segments).
+- **`("x_ids", "!=", False)` / `("x_ids", "=", False)`** read the comodel with
+  `active_test=False`. Use `("x_ids", "any", [])` / `("x_ids", "not any", [])`.
+- **SQL readers** add `AND NOT to_be_deleted`.
+- **`@api.depends`** sees `active` only when named: a compute that sums up a
+  list depends on `<x2many>.active` (the retire does not touch the inverse,
+  so the list itself does not change). Keep `active` and `to_be_deleted` out
+  of any field-based sync fingerprint.
+- **Syncs** skip flagged existing rows and create a new row instead of
+  reviving one; a compute gives a retired parent no new children.
+
+**Models with a user archive** (`riverflow.service`, `crewradar.log.entry`)
+redefine `active` with `readonly=False` (the mixin's is read-only, so the
+list's Archive action disappears otherwise). A write guard on manual archive
+skips a write that sets `to_be_deleted`, and an unlink guard checks only
+unflagged rows: the purge deletes what a compute removed. The purge deletes
+flagged rows only, so a user-archived row is never deleted.
+
+**The unlink also flushed everything first.** Code or tests that relied on
+that side effect (a stored compute with side effects ran along the way) now
+see the compute run at the next full flush. A search flushes only the fields
+in its domain. A test reproduces a nested-flush fault only with the read
+order of the real request: `flush_all()` after the wizard, as the request
+end does, not an early read of the trigger field.
+
+**`Command.clear()` on a One2many whose inverse is `ondelete="cascade"` is
+an `unlink()` too.** Retire the old lines and assign only the
+`Command.create(...)` list.
+
+**How to find it:** replay the failing call in `odoo-bin shell` on a copy of
+the database, wrap `Environment.invalidate_all` (and `invalidate_model` /
+`invalidate_recordset`) or the model's `unlink` to print a stack while the
+failing field is read.
+
+### Set-Based Reads in Computes
+
+A tombstone or any other change must not turn one query for a set into one
+query per record. Measured on the radar production copy (8-Oct-2026): the log
+entry check recompute of the 363 entries of the ten busiest employees took 140
+queries, 38 after the rules below.
+
+- **`filtered()` narrows the prefetch set.** `filtered()` and
+  `filtered_domain()` return `self.browse(ids)`, and so does a union `|`:
+  the result prefetches only its own records. After
+  `employee.log_entry_ids.filtered(...)` inside a loop, every x2many or
+  computed read on the result is one query for that employee alone.
+  `sorted()` keeps the prefetch set; `mapped()` on a relational field
+  prefetches the whole set.
+- **Re-attach the shared prefetch set** when a loop needs the narrowed set:
+  `entries.with_prefetch(employee.log_entry_ids._prefetch_ids)`.
+- **Or test inline:** loop over the x2many and `continue` on the rows to
+  skip, instead of `filtered()` per record.
+- **No search per record:** collect the records of the whole set, search
+  once, group in Python.
+- **Batch the writes:** retire the obsolete rows of all parents with one
+  call, create the new rows with one `create(vals_list)`.
+- **An assignment in a compute is a full `write()` unless the compute
+  protects the record.** Odoo 19 `Field.__set__` treats a record that the
+  running compute does not protect (another record, or a plain field the
+  compute does not compute) as a business write: every dependent is
+  searched for, once per write, and a `state_id` write runs the state hooks.
+  Assign such a field only when it changes, and write other records with only
+  the values that differ (`riverflow.service._write_changed(vals)`). A
+  pending sibling of a `recursive=True` field (`display_order`) can be stored
+  under `env.protecting([field], record)`: its dependents were marked with it.
+  On the radar production copy these writes made a billing month move cost
+  650,067 queries; written only on a change, 41,187 (2026-10-08).
+- **`env.ref()` checks the record with a query on every call:** resolve it
+  once before the loop.
+- **A search with the same domain in every record of a compute** runs once
+  per batch: search before the loop, or hold the ids for the batch (radar
+  `crewradar.log.entry._compute_tag_ids`, transfer tags in `env.cr.cache`
+  for the duration of the compute).
+- **Measure** with a per-line profile before guessing: wrap
+  `odoo.sql_db.Cursor.execute` in an `odoo-bin shell` script, count the
+  queries by the first frame in the project code, and compare one record with
+  several (`assertQueryCount` style test: three employees cost no more than
+  one; example radar `crewradar/tests/test_check_result_query_counts.py`).
 
 ### A One2many's Inverse Must Point at the Model That Holds It
 

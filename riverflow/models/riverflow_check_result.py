@@ -3,6 +3,7 @@ from odoo import fields, models, api
 
 class CheckResult(models.Model):
     _name = "riverflow.check.result"
+    _inherit = ["riverflow.tombstone.mixin"]
     _description = "Base Check Result"
     _oteny_audit_ignore = True
 

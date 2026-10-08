@@ -29,6 +29,11 @@ class CheckResultsMixin(models.AbstractModel):
     def _sync_check_results(self, existing_check_results, new_check_results, index_field):
         CheckResult = self.env["riverflow.check.result"]
 
+        # A retired row (to_be_deleted) is never the live result: a caller in an
+        # active_test=False env finds it, and compare() must not keep it. The
+        # sync creates a new row instead (no revive).
+        existing_check_results = existing_check_results.filtered(lambda r: not r.to_be_deleted)
+
         # Index existing check results
         existing_indexed = {}
         for result in existing_check_results:
@@ -56,8 +61,10 @@ class CheckResultsMixin(models.AbstractModel):
 
         created_results = CheckResult.create(to_create)
 
-        to_unlink = existing_check_results - to_keep
-        to_unlink.unlink()  # cascade delete
+        # Retire, never unlink: this runs inside a compute, and unlink() would
+        # run every pending compute and clear the cache (riverflow.tombstone.mixin).
+        to_retire = existing_check_results - to_keep
+        to_retire._retire()
 
     def base_check_results(self):
         result = self.check_result_ids.filtered(lambda r: r.check_type in ["gap", "overlap", "reversed"])

@@ -48,7 +48,7 @@ class Service(models.Model):
             return
         new_check_results = services._get_service_check_results()
         existing_check_results = self.env["riverflow.check.result"].search(
-            [("service_id", "in", services.ids), ("check_type", "in", check_types)]
+            [("service_id", "in", services.ids), ("check_type", "in", check_types), ("to_be_deleted", "=", False)]
         )
         services._sync_check_results(existing_check_results, new_check_results, index_field="service_id")
 

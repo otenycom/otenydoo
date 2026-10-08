@@ -53,6 +53,14 @@ change is on `main`, and its Odoo upgrades the modules here before its own.
 This repository is released before any business's build that depends on the
 change.
 
+When a business repository's change depends on a change here, commit both from
+the business repository, never this one alone. For radar that is
+`python -m riverdeploy commit-with-otenydoo` in `~/oteny/radar`: it commits and
+pushes this repository first, then moves radar's pin to the pushed commit and
+pushes radar. A commit here that is not pushed is invisible to the business's
+pin. On 2026-10-07 a radar test change waited 25 hours on an otenydoo fix that
+was committed in this clone but not pushed.
+
 ## Tests
 
 See [`README.md`](README.md) "Tests". The public runner covers the

@@ -105,7 +105,9 @@ class TombstoneMixin(models.AbstractModel):
         records = self.filtered(lambda r: not r.to_be_deleted)
         if not records:
             return
-        records.write({"to_be_deleted": True, "active": False})
+        # No chatter tracking: the commit deletes the record (services and log
+        # entries track active).
+        records.with_context(tracking_disable=True).write({"to_be_deleted": True, "active": False})
         set_null, children = self._tombstone_links()
         for model_name, field_name in set_null:
             linked = self.env[model_name].with_context(active_test=False).search([(field_name, "in", records.ids)])

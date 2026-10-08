@@ -18,6 +18,10 @@ class Service(models.Model):
         "riverflow.state.mixin",
         "riverflow.state.record.tracker.mixin",
         #        "oteny.audit.mixin",
+        # A compute that no longer needs a service (an info service) retires it
+        # instead of unlink() (plan tombstones-instead-of-deletes-in-computes,
+        # T5). Users keep archiving services: the purge deletes flagged rows only.
+        "riverflow.tombstone.mixin",
     ]
     _description = "Service"
     _parent_name = "parent_id"
@@ -204,6 +208,9 @@ class Service(models.Model):
         inverse="_inverse_active",
         store=True,
         default=True,
+        # Users archive services: writable in the UI, unlike the read-only
+        # active of riverflow.tombstone.mixin, which Odoo merges into this one.
+        readonly=False,
         help="Set active to false to archive the service",
         tracking=True,
     )
@@ -987,7 +994,7 @@ class Service(models.Model):
         # orphaned (their root_id column is still NULL while only the cache
         # holds the computed value), the sibling set comes back empty, and
         # display_order stays at its default.
-        self.env["riverflow.service"].flush_model(["root_id", "res_id", "res_model", "parent_path"])
+        self.env["riverflow.service"].flush_model(["root_id", "res_id", "res_model", "parent_path", "to_be_deleted"])
 
         Service = self.env["riverflow.service"].with_context(active_test=False).sudo()
 
@@ -1005,7 +1012,7 @@ class Service(models.Model):
                 self.env.cr.execute(
                     """
                     SELECT id FROM riverflow_service
-                    WHERE res_model = %s AND res_id = %s AND id != %s
+                    WHERE res_model = %s AND res_id = %s AND id != %s AND NOT to_be_deleted
                     """,
                     (record.res_model, record.res_id, record.id),
                 )
@@ -1013,7 +1020,7 @@ class Service(models.Model):
                 self.env.cr.execute(
                     """
                     SELECT id FROM riverflow_service
-                    WHERE root_id = %s AND id != %s
+                    WHERE root_id = %s AND id != %s AND NOT to_be_deleted
                     """,
                     (record.root_id.id, record.id),
                 )
@@ -1170,7 +1177,12 @@ class Service(models.Model):
         # the archive counterpart of the unlink guard. Scoped to a manual archive
         # while the subject is still active, so a legitimate subject-cascade
         # archive (subject_active already False) is never blocked.
-        if vals.get("active") is False and not self.env.context.get("bypass_user_unlink_check"):
+        # A retire (to_be_deleted) is a compute's delete, not a manual archive.
+        if (
+            vals.get("active") is False
+            and not vals.get("to_be_deleted")
+            and not self.env.context.get("bypass_user_unlink_check")
+        ):
             blocked = self.filtered(lambda s: s.subject_active and s._single_open_removal_blocked())
             if blocked:
                 raise UserError(
@@ -2107,14 +2119,18 @@ class Service(models.Model):
         return past_initial or bool(live_children)
 
     def unlink(self):
-        if not self.env.context.get("bypass_user_unlink_check"):
-            if self.supply_leg_id.ids and not self.env.user.has_group("base.group_no_one"):
+        # The guards protect a user's delete. A retired service (to_be_deleted)
+        # was removed by a compute and is deleted by the commit step
+        # (riverflow.tombstone.mixin), so no guard applies to it.
+        user_deleted = self.filtered(lambda s: not s.to_be_deleted)
+        if user_deleted and not self.env.context.get("bypass_user_unlink_check"):
+            if user_deleted.supply_leg_id.ids and not self.env.user.has_group("base.group_no_one"):
                 raise UserError(
                     _(
                         "Cannot delete info-service linked to a supply order leg. Delete the leg from the supply order instead."
                     )
                 )
-            blocked = self.filtered(lambda s: s._single_open_removal_blocked())
+            blocked = user_deleted.filtered(lambda s: s._single_open_removal_blocked())
             if blocked:
                 raise UserError(
                     _(

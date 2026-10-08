@@ -186,6 +186,8 @@ class AutoAddService(models.Model):
                     ("res_id", "in", list(candidate_ids)),
                     ("res_model", "=", candidate_model),
                     ("created_by_auto_add_service_id", "!=", False),
+                    # A service a compute retired is not a handled occasion.
+                    ("to_be_deleted", "=", False),
                 ]
             ):
                 if s.workflow_id.enforce_single_open and not s.is_open:

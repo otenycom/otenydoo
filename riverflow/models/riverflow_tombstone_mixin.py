@@ -90,7 +90,9 @@ class TombstoneMixin(models.AbstractModel):
                 continue
             Comodel = self.pool[field.comodel_name]
             inverse = Comodel._fields.get(field.inverse_name)
-            if inverse is not None and inverse.ondelete == "cascade" and issubclass(Comodel, Mixin):
+            # A Many2oneReference inverse has no ondelete: the database keeps no
+            # foreign key for it, so it cascades nothing.
+            if getattr(inverse, "ondelete", None) == "cascade" and issubclass(Comodel, Mixin):
                 children.append(field.name)
         return tuple(set_null), tuple(children)
 

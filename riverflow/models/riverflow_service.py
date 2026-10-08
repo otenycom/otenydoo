@@ -790,6 +790,7 @@ class Service(models.Model):
         "root_id.supply_actual_date",
         "root_id",
         "supply_order_service_id.deadline",
+        "supply_order_service_id.supply_actual_date",
     )
     def _compute_project_deadline(self):
         for service in self:
@@ -799,7 +800,16 @@ class Service(models.Model):
                 # when it changes.
                 if service.use_project_deadline_from != "self":
                     service.use_project_deadline_from = "self"
-                service.project_deadline = service.supply_order_service_id.deadline
+                # The supply date (the actual date once the trip is done, else the
+                # planned one), the date crewradar's leg passenger compute also
+                # writes. Both used to set this field, one to the order's deadline
+                # and one to its supply date, so it flipped on every recompute
+                # (Ries, 8-Oct-2026: the supply date). Read as supply_date is
+                # defined (_compute_supply_date), not through supply_date: one more
+                # computed hop in the deadline chain made the nested recompute of
+                # credential services overflow the stack.
+                order = service.supply_order_service_id
+                service.project_deadline = order.supply_actual_date or order.deadline
             else:
                 use_project_deadline_from = service.use_project_deadline_from
                 if use_project_deadline_from in ("self", "creation"):

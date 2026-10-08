@@ -1,5 +1,6 @@
 from odoo import models, Command, _, fields
 from odoo.exceptions import UserError
+from odoo.tools.misc import clean_context
 
 
 class ServiceNewWizard(models.TransientModel):
@@ -71,8 +72,22 @@ class ServiceNewWizard(models.TransientModel):
         if isinstance(project_deadline, str):
             project_deadline = fields.Date.from_string(project_deadline)
 
-        new_services = self.env["riverflow.service"]._create_services_from_template(
-            template_service_id, project_deadline
+        # The start screen's default_* keys describe the service the user starts:
+        # its subject, its parent and the date typed on the screen. The template
+        # clone also makes the sub-services of that service, and a default key
+        # reaches every service it creates, so the typed date became the date of
+        # every sub-service as well, whatever its own deadline mode (radar
+        # pipeline applicants plan, decision 87: the same leak as in the
+        # auto-add). Keep the keys the clone reads for the new service; the date
+        # goes to the started service only, through the deadline argument.
+        context = clean_context(self.env.context)
+        for key in ("default_res_model", "default_res_id", "default_parent_id", "default_is_this_a_template"):
+            if key in self.env.context:
+                context[key] = self.env.context[key]
+        new_services = (
+            self.env["riverflow.service"]
+            .with_context(context)
+            ._create_services_from_template(template_service_id, project_deadline)
         )
 
         return {

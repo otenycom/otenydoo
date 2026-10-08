@@ -37,6 +37,19 @@ class Service(models.Model):
     # Without this index each lookup scanned the whole table (3-7 ms on 35k
     # services), which a single log-entry edit repeats dozens of times.
     _res_model_res_id_idx = models.Index("(res_model, res_id)")
+    # One open service per subject on a workflow that enforces it
+    # (riverflow.workflow.enforce_single_open; radar pipeline applicants plan,
+    # decision 66). The auto-add already drops a second candidate
+    # (_filter_single_open), but a person can still make one by hand, and two
+    # requests can race. This unique index is the database constraint behind the
+    # rule, for every workflow that sets the flag, so no app keeps a hand-written
+    # copy with a fixed workflow id. A template has no subject and a closed or
+    # archived service is not open, so neither counts.
+    _single_open_uniq = models.UniqueIndex(
+        "(workflow_id, res_model, res_id) WHERE is_open AND workflow_enforce_single_open",
+        "This record already has an open service on this workflow, and the workflow "
+        "allows only one. Continue the open service, or close it first.",
+    )
     DATE_FORMAT = "%d-%b-%y"  # 01-Jan-21; dont use %-d-%b-%y" to remove the leading zero, as it also triggers french locale format on odoo.sh
     DATETIME_FORMAT = "%d-%b-%y %H:%M:%S"
 
@@ -223,6 +236,13 @@ class Service(models.Model):
         "a template, and not in an end state. Backs the one-open-service-per-"
         "subject invariant (see riverflow.workflow.enforce_single_open) and the "
         "partial-unique index on enforcing workflows.",
+    )
+
+    # Stored for the unique index above: a partial index can only read columns of
+    # its own table.
+    workflow_enforce_single_open = fields.Boolean(
+        related="workflow_id.enforce_single_open",
+        store=True,
     )
 
     @api.depends("active", "is_this_a_template", "state_id", "state_id.is_end_state")
@@ -1202,6 +1222,7 @@ class Service(models.Model):
         # while the subject is still active, so a legitimate subject-cascade
         # archive (subject_active already False) is never blocked.
         # A retire (to_be_deleted) is a compute's delete, not a manual archive.
+        heal = []
         if (
             vals.get("active") is False
             and not vals.get("to_be_deleted")
@@ -1216,7 +1237,10 @@ class Service(models.Model):
                         ", ".join(blocked.mapped("display_name")),
                     )
                 )
+            heal = self.filtered("subject_active")._single_open_heal_keys()
         result = super(Service, self).write(vals)
+        if heal:
+            self._heal_single_open_removal(heal)
         if "res_model" in vals and "res_id" in vals:
             for record in self:
                 if record.res_model == self._name:
@@ -1453,12 +1477,14 @@ class Service(models.Model):
         }
 
         if deadline:
-            # deadline param is an instance-level override set by the caller after creation;
-            # project_deadline is intentionally not set here -- "self" mode with no
-            # project_deadline means the service starts without a deadline until the
-            # caller assigns one. The "creation" option below is the template-level
-            # alternative for auto-setting deadlines at clone time.
+            # deadline param is the date the user typed on the start screen for the
+            # service being started. It is set here, on this service only: the
+            # start screen no longer passes it as a default_project_deadline key,
+            # which also reached every sub-service (decision 87). The "creation"
+            # option below is the template-level alternative for auto-setting
+            # deadlines at clone time.
             vals["use_project_deadline_from"] = "self"
+            vals["project_deadline"] = deadline
             vals["days_relative_to_project"] = 0
         elif template_service.use_project_deadline_from == "creation":
             # Materialize the deadline relative to today at clone time, then store
@@ -2166,7 +2192,9 @@ class Service(models.Model):
         workflow, never destroyed: destroying it would lose the in-progress work
         and silently drop the single-open guarantee. A childless service still at
         its initial state (a plain monitoring task) stays freely removable — it
-        self-heals (see crewradar_creds).
+        self-heals (_heal_single_open_removal). One rule for a delete and an
+        archive: for "one open task per need" both are the same event, the task
+        leaves the open set by hand (radar pipeline applicants plan, decision 89).
         """
         self.ensure_one()
         if not (self.is_open and self.workflow_id.enforce_single_open):
@@ -2181,6 +2209,7 @@ class Service(models.Model):
         # was removed by a compute and is deleted by the commit step
         # (riverflow.tombstone.mixin), so no guard applies to it.
         user_deleted = self.filtered(lambda s: not s.to_be_deleted)
+        heal = []
         if user_deleted and not self.env.context.get("bypass_user_unlink_check"):
             if user_deleted.supply_leg_id.ids and not self.env.user.has_group("base.group_no_one"):
                 raise UserError(
@@ -2198,8 +2227,111 @@ class Service(models.Model):
                         ", ".join(blocked.mapped("display_name")),
                     )
                 )
+            heal = user_deleted._single_open_heal_keys()
 
-        return super().unlink()
+        result = super().unlink()
+        if heal:
+            self.env["riverflow.service"]._heal_single_open_removal(heal)
+        return result
+
+    # A person who archives or deletes the open task of a single-open workflow
+    # gets it back at once (radar pipeline applicants plan, decision 89). The
+    # rule of such a workflow is "the subject always has one open task" (the
+    # renewal of a work permit, for example). A delete always came back, because
+    # an app re-ran the auto-add after it; an archive did not, so the subject had
+    # no task until his data changed. On 16-Sep-2026 HR archived two renewal tasks
+    # that looked like noise minutes after they were made, and the two crewmen had
+    # no renewal task for three weeks. To stop a task, a person closes it through
+    # the workflow step made for that; the message below names it.
+    # _single_open_removal_blocked keeps refusing the removal of a started task,
+    # so only a task that heals can be removed.
+
+    def _single_open_heal_keys(self):
+        """(workflow id, subject model, subject id) of each OPEN service on a
+        single-open workflow among these services. Read before the archive or the
+        delete: afterwards the service is no longer open or no longer exists."""
+        return list(
+            dict.fromkeys(
+                (service.workflow_id.id, service.res_model, service.res_id)
+                for service in self
+                if service.is_open
+                and service.workflow_id.enforce_single_open
+                and service.res_model
+                and service.res_id
+            )
+        )
+
+    @api.model
+    def _heal_single_open_removal(self, keys):
+        """Run the auto-add again for the subjects of the removed open services,
+        then tell the user which task came back and how to stop it.
+
+        The auto-add decides alone whether the subject still needs the task: its
+        rules and the app filters on the candidates (a subject out of scope, or a
+        need an app has closed, gets nothing). An archived or deleted subject
+        gets nothing either.
+        """
+        ids_by_model = {}
+        for _workflow_id, res_model, res_id in keys:
+            ids_by_model.setdefault(res_model, set()).add(res_id)
+        AutoAdd = self.env["riverflow.auto.add.service"]
+        for res_model, res_ids in ids_by_model.items():
+            if res_model not in self.env:
+                continue
+            subjects = self.env[res_model].browse(list(res_ids)).exists()
+            if "active" in subjects._fields:
+                subjects = subjects.filtered("active")
+            if subjects:
+                AutoAdd.auto_add_services(subjects)
+        self._notify_single_open_heal(keys)
+
+    @api.model
+    def _notify_single_open_heal(self, keys):
+        """Tell the user that the task came back and which step stops it.
+
+        The message names what the data names: the task, its subject, and the
+        steps that close the task from its state without the work being done
+        (transitions into an end state that counts as cancelled, such as a
+        "Not Needed" state). A step into a normal end state is not offered: it
+        records the work as done, and the next task follows for the next
+        occasion. Without such a step the user is sent to the workflow.
+        """
+        for workflow_id, res_model, res_id in keys:
+            task = self.search(
+                [
+                    ("workflow_id", "=", workflow_id),
+                    ("res_model", "=", res_model),
+                    ("res_id", "=", res_id),
+                    ("is_open", "=", True),
+                ],
+                limit=1,
+            )
+            if not task:
+                continue
+            steps = task.state_id.from_transition_ids.filtered(
+                lambda t: t.active and t.to_state_id.is_end_state and t.to_state_id.is_cancelled_state
+            ).sorted("sequence")
+            step_names = list(dict.fromkeys(steps.mapped("name")))
+            if step_names:
+                how_to_stop = _("To stop it, use %s.", _(" or ").join(step_names))
+            else:
+                how_to_stop = _("To stop it, close it through its workflow.")
+            subject = self.env[res_model].browse(res_id).display_name
+            self.env.user._bus_send(
+                "simple_notification",
+                {
+                    "type": "warning",
+                    "title": _("The task comes back"),
+                    "message": _(
+                        "%(task)s comes back: %(subject)s needs one open task on this "
+                        "workflow. %(how_to_stop)s",
+                        task=task.name,
+                        subject=subject,
+                        how_to_stop=how_to_stop,
+                    ),
+                    "sticky": True,
+                },
+            )
 
     @api.constrains("use_project_deadline_from", "project_deadline")
     def _check_project_deadline_if_self(self):

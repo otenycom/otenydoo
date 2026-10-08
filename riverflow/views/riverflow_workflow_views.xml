@@ -37,6 +37,7 @@
                             <field name="has_legs" />
                             <field name="has_supply_time" />
                             <field name="auto_complete_state_id" />
+                            <field name="enforce_single_open" />
                         </group>
                     </group>
                     <notebook>

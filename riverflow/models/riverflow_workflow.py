@@ -43,11 +43,12 @@ class RiverflowWorkflow(models.Model):
     enforce_single_open = fields.Boolean(
         "Enforce Single Open Service",
         default=False,
-        help="When set, auto-add creates at most one OPEN (active, non-end-state) "
-        "service per subject for this workflow, and a partial-unique index makes a "
-        "second open service structurally impossible. Used for credential-renewal "
-        "workflows like the DE Work Permit, where the golden rule is exactly one "
-        "live service per employee.",
+        help="One open service per subject. The automatic rules create at most one "
+        "open (active, not closed) service per record on this workflow, the "
+        "database refuses a second one, and a person who archives or deletes the "
+        "open service that has not started gets it back at once, with a message "
+        "that names the step to close it. Use it where a record must always have "
+        "exactly one open task, such as a document renewal.",
     )
 
     workflow_start_transition_ids = fields.One2many(

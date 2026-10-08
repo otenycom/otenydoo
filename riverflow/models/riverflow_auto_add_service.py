@@ -1,5 +1,6 @@
 from odoo import api, fields, models, tools
 from odoo.fields import Domain
+from odoo.tools.misc import clean_context
 from odoo.tools.safe_eval import safe_eval
 import logging
 from odoo.exceptions import ValidationError
@@ -222,11 +223,19 @@ class AutoAddService(models.Model):
         # on enforcing workflows is the structural backstop against races.
         to_create = self._filter_single_open(to_create)
 
-        if to_create:
-            for service_vals in to_create:
-                ctx = self._get_service_creation_context(service_vals)
-                service_context = self.env["riverflow.service"].with_context(**ctx)
-                service_context._create_services_from_template(service_vals["template_id"])
+        # A clean context: the services are made with this rule's defaults only
+        # (radar pipeline applicants plan, decision 87). The auto-add often runs
+        # inside the save of a step screen, whose context carries the open
+        # service's own values as default_* keys (riverflow.transition.mixin
+        # copies every field the wizard declares). A new service took every such
+        # value its template clone does not set, and a value given at create
+        # never runs the compute: on 7-Oct-2026 the next work permit task got the
+        # due date of the task whose step uploaded the new permit (radar service
+        # 37725), two years too early.
+        Service = self.env["riverflow.service"].with_context(clean_context(self.env.context))
+        for service_vals in to_create:
+            ctx = self._get_service_creation_context(service_vals)
+            Service.with_context(**ctx)._create_services_from_template(service_vals["template_id"])
 
     def _filter_single_open(self, to_create):
         """Drop candidates that would create a second OPEN service for a

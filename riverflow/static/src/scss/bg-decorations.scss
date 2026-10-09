@@ -39,3 +39,15 @@
     color: var(--black) !important;
     --table-bg: rgba(var(--secondary-rgb), var(--bs-bg-opacity)) !important;
 }
+
+// A kanban card paints its own background ($o-view-background-color), lighter
+// than the column behind it. The transparent tints above would replace it, so the
+// tint fell on the darker column and, in dark mode, a tinted card looked like any
+// other card. Lay the tint over the card's own background instead, as a list row
+// tint lies over the table (radar plan crewradar-hr/plans/kanban-moved-card.md).
+@each $type, $color in (danger: danger, warning: warning, success: success, info: info, primary: primary, muted: secondary) {
+    .o_kanban_record.row-bg-#{$type} {
+        background-color: $o-view-background-color !important;
+        background-image: linear-gradient(rgba(var(--#{$color}-rgb), .1), rgba(var(--#{$color}-rgb), .1));
+    }
+}

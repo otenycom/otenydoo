@@ -129,7 +129,7 @@ When adding a new model to the Radar, override these `_for_record` methods at mi
 
 Optional overrides depending on the model:
 - `deadline`, `end_date` -- for Radar calendar/gantt views
-- `user_write_date` -- for highlight row (only if model inherits `riverflow.highlight.row.mixin`)
+- `user_write_date` -- for highlight row (only if model inherits `riverflow.highlight.row.mixin`, which `riverflow.mail.thread.review.mixin` brings along); radar routes the log entry, the employee and the ship (crewradar 19.0.11.21: before, the employee's and the ship's own rows never highlighted)
 - `tag_ids` -- for tag display
 - `res_date` -- for date-based sorting
 

@@ -197,7 +197,18 @@ A state changes only through a step, because the step screen does the step's wor
 - Server: `riverflow.state.mixin.action_kanban_drop(from_state_id, to_state_id)` in `models/riverflow_state_mixin.py` returns the step screen (`_prepare_transition_action` with the chosen `transition_id`) or a `display_notification` warning.
 - Browser: `static/src/patch/kanban_renderer_patch.js` patches `KanbanRenderer.sortRecordDrop`; it calls the method instead of saving the field and reloads the board when the screen closes. A drop inside one column keeps Odoo's behaviour.
 - Limit: the patch keys on the field, not on the model. A model with a `state_id` to `riverflow.state` but without the mixin (`riverflow.state.record`, radar's `crewradar.plan.item`) answers a drop with a "method does not exist" error and writes nothing; neither has a kanban.
+- After OK the moved card shows first in its new column until the page is refreshed, the latest move on top (19.0.1.1317; radar plan `crewradar-hr/plans/kanban-moved-card.md`, Ries: it makes it simpler to drag cards on between columns). Every step reloads the board, so `riverflowPinMovedCards` keeps `riverflowMovedIds` on the renderer (a page refresh, or leaving the board, empties it) and after each reload moves those cards to the top of their columns. A moved card the reload did not load (a long column: the radar Employed column holds 265 employees and a board loads 80 cards a page, the action's limit) is read with one `search_read` in the board's search and added on top with `group.list.addExistingRecord(id, true)`, whose count raise the patch undoes (the column already counts the card). The board then scrolls to the card (`onPatched`, `scrollIntoView` with `block`/`inline` `"nearest"`). After Discard the card did not move and is not put first; a folded column or a card outside the board's search is left alone; "Load more" shows the column's own order again until the next drop. The moved card also gets the tint of a changed record (next section).
 - Tests: `tests/test_kanban_drop.py`, hoot `static/tests/kanban_drop.test.js`.
+
+### Highlight of a Recently Changed Record (Lists and Boards)
+
+A row or a card that a user changed a few seconds ago gets a light tint, so the user sees where the change landed.
+
+- `riverflow.highlight.row.mixin` (`models/riverflow_highlight_row_mixin.py`) stores `user_write_date`. `create` sets it; `write` sets it when the values hold a field that is not compute-only; `riverflow.mail.thread.review.mixin` (which inherits the highlight mixin) also sets it when a chatter message changes the message summaries. The value is `cr.now()`, the start time of the save's transaction.
+- `highlight_row` (not stored) is true when `user_write_date` is less than **10 seconds** old when the server reads the record; `highlight_row_type` (default `info`, a light blue) picks the colour; a model may return another type, for example `danger` for a row that needs attention. A brighter yellow was tried and dropped (Ries, 9-Oct-2026): on the dark theme it needs dark text, and every coloured text in the row with it. No timer removes the tint: it stays until the view reloads. The 10 seconds count from the start of the save, so a save that takes longer gives no tint; a Start Contract step on the radar production copy saved in 0.6 s.
+- A list row gets `row-bg-{highlight_row_type}` (`static/src/patch/list_renderer_patch.js`); a kanban card gets the same class (`static/src/patch/kanban_record_patch.js`, `KanbanRecord.getRecordClasses`, 19.0.1.1317). The classes live in `static/src/scss/bg-decorations.scss` (10% of the colour; in dark mode the text stays white). A row's tint is transparent and lies over the table; a kanban card paints its own background, so for `.o_kanban_record.row-bg-*` the card keeps `$o-view-background-color` and the tint lies over it as a `background-image` gradient. Without that the tint replaced the card's background and was invisible on a dark board.
+- A view shows the tint only when it loads both fields: `<field name="highlight_row" column_invisible="1"/>` in a list, `<field name="highlight_row" />` before `<templates>` in a kanban, the same for `highlight_row_type`.
+- `riverflow.state.record` computes `user_write_date` from its service; a consuming app routes other subjects (radar: the log entry, the employee, the ship).
 
 ### Transition Actions
 
@@ -1242,8 +1253,9 @@ riverflow/
 ├── static/src/patch/
 │   ├── many2many_binary_upload_patch.js  # Every many2many_binary upload (email sender, ticket wizards, credential uploads) blocks the UI until the file is linked; a late upload into a closed dialog warns instead of crashing with "Component is destroyed". Stock Odoo bug, upstream fix odoo/odoo#286831
 │   ├── date_field_format_patch.js        # Date display format patch
-│   ├── kanban_renderer_patch.js          # A drop on a board grouped by state opens the step (action_kanban_drop), never saves state_id; see "A Kanban Drop Is a Step"
-│   └── list_renderer_patch.js            # List renderer patch
+│   ├── kanban_record_patch.js            # A card a user just changed gets the row-bg tint of a changed list row; see "Highlight of a Recently Changed Record"
+│   ├── kanban_renderer_patch.js          # A drop on a board grouped by state opens the step (action_kanban_drop), never saves state_id, and after OK puts the moved cards first in their column until a page refresh; see "A Kanban Drop Is a Step"
+│   └── list_renderer_patch.js            # A row a user just changed gets the row-bg tint (highlight_row)
 
 │   ├── state_record_calendar/     # Custom calendar for radar screen
 │   │   ├── state_record_calendar_controller.js  # Extends Odoo's CalendarController

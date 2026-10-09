@@ -5,10 +5,12 @@ import {
     contains,
     defineModels,
     fields,
+    makeMockServer,
     models,
     MockServer,
     mountView,
     onRpc,
+    patchWithCleanup,
 } from "@web/../tests/web_test_helpers";
 import { defineMailModels } from "@mail/../tests/mail_test_helpers";
 
@@ -21,6 +23,11 @@ import { defineMailModels } from "@mail/../tests/mail_test_helpers";
  * drop must call action_kanban_drop and open what it answers, must not save the
  * state, and must reload the board when the step screen closes; a board grouped
  * by another field keeps Odoo's own drop.
+ *
+ * After OK the moved card shows first in its new column until the page is
+ * refreshed, the latest move on top, and the board scrolls to it (radar plan
+ * crewradar-hr/plans/kanban-moved-card.md); a card a user just changed gets the
+ * tint of a changed list row (kanban_record_patch.js).
  */
 
 class RiverflowState extends models.Model {
@@ -51,6 +58,14 @@ class Crewman extends models.Model {
     name = fields.Char();
     state_id = fields.Many2one({ relation: "riverflow.state" });
     team_id = fields.Many2one({ relation: "drop.team" });
+    // riverflow.highlight.row.mixin: a user changed the record a few seconds ago.
+    highlight_row = fields.Boolean();
+    highlight_row_type = fields.Selection({
+        selection: [
+            ["info", "Info"],
+            ["warning", "Warning"],
+        ],
+    });
 
     // The mock server shows only groups with records, so every column keeps a
     // crewman after Gacotano moves.
@@ -155,4 +170,129 @@ test("a board grouped by another field keeps Odoo's drop", async () => {
 
     expect.verifySteps(["web_save"]);
     expect(queryAllTexts(".o_kanban_group:eq(1) .o_kanban_record")).toEqual(["Acabo", "Gacotano"]);
+});
+
+// The step screen of a drop. Its OK moves the dropped card to Offboarding (2)
+// and stamps it as changed by a user, as the server's step does.
+function stepScreenMovesTheCard() {
+    let droppedId;
+    onRpc("action_kanban_drop", ({ args }) => {
+        droppedId = args[0][0];
+        return {
+            type: "ir.actions.act_window",
+            res_model: "drop.step.wizard",
+            views: [[false, "form"]],
+            target: "new",
+        };
+    });
+    onRpc("drop.step.wizard", "action_save", () => {
+        MockServer.env["drop.crewman"].write([droppedId], { state_id: 2, highlight_row: true });
+        return false;
+    });
+    onRpc("drop.crewman", "search_read", () => expect.step("read the moved cards"));
+    patchWithCleanup(Element.prototype, {
+        scrollIntoView() {
+            expect.step(`scroll to ${this.textContent}`);
+        },
+    });
+}
+
+// One card per page and the order by name, so a moved card's own place in its
+// new column is not loaded: Acabo, Buan, Gacotano, Zamora in Offboarding.
+async function mountBoard() {
+    await makeMockServer();
+    MockServer.env["drop.crewman"].create({ name: "Zamora", state_id: 2, team_id: 2 });
+    stepScreenMovesTheCard();
+    await mountView({
+        type: "kanban",
+        resModel: "drop.crewman",
+        arch: `
+            <kanban limit="1" default_order="name">
+                <field name="highlight_row"/>
+                <field name="highlight_row_type"/>
+                <templates>
+                    <t t-name="card"><field name="name"/></t>
+                </templates>
+            </kanban>`,
+        groupBy: ["state_id"],
+    });
+}
+
+async function dragFirstCardToOffboardingAnd(button) {
+    await contains(".o_kanban_group:eq(0) .o_kanban_record").dragAndDrop(".o_kanban_group:eq(1)");
+    await animationFrame();
+    await contains(`.modal ${button}`).click();
+}
+
+test.tags("desktop");
+test("a card a user just changed gets the tint of a changed list row", async () => {
+    await makeMockServer();
+    MockServer.env["drop.crewman"].write([1], { highlight_row: true });
+    MockServer.env["drop.crewman"].write([2], { highlight_row: true, highlight_row_type: "warning" });
+
+    await mountView({
+        type: "kanban",
+        resModel: "drop.crewman",
+        arch: `
+            <kanban>
+                <field name="highlight_row"/>
+                <field name="highlight_row_type"/>
+                <templates>
+                    <t t-name="card"><field name="name"/></t>
+                </templates>
+            </kanban>`,
+    });
+
+    expect(".o_kanban_record:contains(Gacotano)").toHaveClass("row-bg-info");
+    expect(".o_kanban_record:contains(Acabo)").toHaveClass("row-bg-warning");
+    expect(".o_kanban_record:contains(Buan)").not.toHaveClass("row-bg-info");
+    expect(".o_kanban_record:contains(Buan)").not.toHaveClass("row-bg-warning");
+});
+
+test.tags("desktop");
+test("after OK the moved card is first in its new column, also beyond the loaded page", async () => {
+    await mountBoard();
+    expect(queryAllTexts(".o_kanban_group:eq(0) .o_kanban_record")).toEqual(["Buan"]);
+    expect(queryAllTexts(".o_kanban_group:eq(1) .o_kanban_record")).toEqual(["Acabo"]);
+
+    await dragFirstCardToOffboardingAnd("button[name=action_save]");
+
+    // Buan's own place, after Acabo, is not loaded; he is read and put on top,
+    // tinted, and the column still counts three crewmen.
+    await expect.waitForSteps(["read the moved cards", "scroll to Buan"]);
+    expect(queryAllTexts(".o_kanban_group:eq(1) .o_kanban_record")).toEqual(["Buan", "Acabo"]);
+    expect(".o_kanban_record:contains(Buan)").toHaveClass("row-bg-info");
+    expect(".o_kanban_group:eq(1) .o_column_title").toHaveText(/\(3\)/);
+});
+
+test.tags("desktop");
+test("the moved cards stay first after the next drop, the latest on top", async () => {
+    await mountBoard();
+    await dragFirstCardToOffboardingAnd("button[name=action_save]");
+    await expect.waitForSteps(["read the moved cards", "scroll to Buan"]);
+    // Gacotano is now the first card left in Applicant.
+    expect(queryAllTexts(".o_kanban_group:eq(0) .o_kanban_record")).toEqual(["Gacotano"]);
+
+    await dragFirstCardToOffboardingAnd("button[name=action_save]");
+
+    await expect.waitForSteps(["read the moved cards", "scroll to Gacotano"]);
+    expect(queryAllTexts(".o_kanban_group:eq(1) .o_kanban_record")).toEqual([
+        "Gacotano",
+        "Buan",
+        "Acabo",
+    ]);
+    expect(".o_kanban_group:eq(1) .o_column_title").toHaveText(/\(4\)/);
+});
+
+test.tags("desktop");
+test("after Discard the card stays in its column and is not put first anywhere", async () => {
+    await mountBoard();
+
+    await dragFirstCardToOffboardingAnd(".btn-close");
+
+    // The card was loaded where it was, so nothing is read.
+    await expect.waitForSteps(["scroll to Buan"]);
+    expect(queryAllTexts(".o_kanban_group:eq(0) .o_kanban_record")).toEqual(["Buan"]);
+    expect(queryAllTexts(".o_kanban_group:eq(1) .o_kanban_record")).toEqual(["Acabo"]);
+    expect(".o_kanban_record:contains(Buan)").not.toHaveClass("row-bg-info");
 });

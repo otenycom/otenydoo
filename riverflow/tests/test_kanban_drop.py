@@ -6,6 +6,10 @@ the state. The browser half (the drop calls the server instead of saving the
 field) is the hoot test kanban_drop.test.js.
 """
 
+from datetime import datetime, timedelta
+
+from freezegun import freeze_time
+
 from odoo.exceptions import UserError
 from odoo.tests import tagged
 from odoo.tests.common import TransactionCase
@@ -89,3 +93,22 @@ class TestKanbanDrop(TransactionCase):
 
         with self.assertRaises(UserError):
             self.service.action_kanban_drop(self.state_applicant.id, self.state_signed.id)
+
+    def test_the_step_of_a_drop_flags_the_record_as_changed_by_a_user(self):
+        """After OK the reloaded board tints the moved card (radar plan
+        crewradar-hr/plans/kanban-moved-card.md): the step's save counts as a user
+        change, so the record's highlight_row is true when the board reads it."""
+        self.service.user_write_date = datetime(2025, 1, 1, 12, 0)
+        self.assertFalse(self.service.highlight_row)
+
+        action = self.service.action_kanban_drop(self.state_applicant.id, self.state_signed.id)
+        ctx = dict(action["context"], active_model="riverflow.service", active_ids=self.service.ids)
+        Wizard = self.env[action["res_model"]].with_context(**ctx)
+        Wizard.create(Wizard.default_get(Wizard.fields_get().keys())).action_save()
+
+        self.assertEqual(self.service.state_id, self.state_signed)
+        # The save stamps the start of its transaction, the time the board's
+        # reload measures from; read the flag a few seconds after it.
+        self.assertEqual(self.service.user_write_date, self.env.cr.now())
+        with freeze_time(self.env.cr.now() + timedelta(seconds=5)):
+            self.assertTrue(self.service.highlight_row)

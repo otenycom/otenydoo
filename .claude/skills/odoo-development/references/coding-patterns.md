@@ -1111,8 +1111,21 @@ usable reverse, so `"supply_order_service_id.deadline"` (related to
   (`riverflow.service.leg.supply_service_ids`). The ORM keeps its cache in step
   on every write of the many2one, also inside a compute.
 
+- Never let a dependency path cross a **computed** one2many backwards. In
+  `"credential_plan_item_ids.slot_id.blocked_by_dependency_id"` the hop
+  `slot_id` has the reverse `rivercreds.plan.slot.item_ids`, a stored compute.
+  When the row's flag is marked, the ORM reads `row.item_ids` to find the
+  entries, and a pending compute runs right there, inside the write that
+  marked it. Depend on a path with a plain reverse field instead
+  (`"credential_plan_slot_ids.blocked_by_dependency_id"`), even when it
+  triggers on a few more records. In one planning save this cut 3,183 row
+  computes to 200 and 10.5 s to 2.9 s.
+
 Find these with a patched `BaseModel.search` that counts calls whose caller
-frame is `_modified_triggers`, keyed on `(model, domain field)`. The planning
+frame is `_modified_triggers`, keyed on `(model, domain field)`. For an
+expensive compute that runs too often, wrap it and walk the frames up to
+`_modified_triggers`: its locals `self`, `invf`, `tree.root` and `subtree`
+name the field the walk reads and the dependency behind it. The planning
 save of 10 log entries had 2,899 + 536 such searches (8.9 s of 24 s) on
 9-Oct-2026: crewradar-development `references/planning-save-performance.md`.
 

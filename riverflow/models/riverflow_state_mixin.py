@@ -1,4 +1,5 @@
 from odoo import _, fields, models, api
+from odoo.exceptions import UserError
 from odoo.addons.riverflow.models.riverflow_transition_mixin import RiverflowTransitionMixin  # type: ignore
 from datetime import timedelta
 import ast
@@ -358,6 +359,51 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
     def action_button_click(self):
 
         return self._prepare_transition_action()
+
+    def action_kanban_drop(self, from_state_id, to_state_id):
+        """A card dropped in another column of a board grouped by state (radar
+        pipeline applicants plan, decision 127).
+
+        A state changes only through a step, because the step screen does the
+        step's work (a contract started, a date asked, a note required). So a drop
+        never writes the state: it opens the screen of the first step that leads
+        into the column, as a click on that button would. The record's own button
+        strip decides which steps count, not the transitions table: the strip
+        already hides the bot's claim and work steps from a person, and every exit
+        but the hand-back while a bot run is live.
+
+        ``from_state_id`` is the column the card was dragged from. The board can be
+        older than the record, and a step chosen from a state the user did not see
+        would surprise them, so a stale card is refused like a stale button."""
+        self.ensure_one()
+        if self.state_id.id != (from_state_id or False):
+            raise UserError(_("Another user just updated this record. Please refresh and try again."))
+
+        buttons = self.transition_buttons_json.get("buttons", [])
+        offered = self.env["riverflow.transition"].browse(
+            [button["context"]["transition_id"] for button in buttons]
+        )
+        step = offered.filtered(lambda transition: transition.to_state_id.id == to_state_id)[:1]
+        if step:
+            return self.with_context(transition_id=step.id)._prepare_transition_action()
+
+        # No step leads there (for example Applicant to Offboarding). The card
+        # stays, and the notice names the steps the card does offer, so the user
+        # sees the way forward instead of only a refusal.
+        from_name = self.state_id.name or _("Not Started")
+        to_name = self.env["riverflow.state"].browse(to_state_id).name or _("Not Started")
+        message = _("No step leads from %(from_state)s to %(to_state)s.", from_state=from_name, to_state=to_name)
+        if buttons:
+            message += " " + _(
+                "Steps from %(from_state)s: %(steps)s.",
+                from_state=from_name,
+                steps=", ".join(button["caption"] for button in buttons),
+            )
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {"message": message, "type": "warning", "sticky": False},
+        }
 
     def write(self, vals):
         self._sync_workflow_with_state(vals)

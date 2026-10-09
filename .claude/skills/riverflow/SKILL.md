@@ -190,6 +190,15 @@ Transitions define allowed state changes. Key fields:
 
 **Footgun — a non-end transition with no `to_responsible_team_id` BLANKS the team.** The transition wizard writes `responsible_team_id = transition.to_responsible_team_id` for any **non-end-state** target (the field is editable when `to_state.is_end_state` is False; `update_write_values` in `riverflow_transition_wizard.py`). If the transition leaves `to_responsible_team_id` unset, the wizard writes `False` — silently clearing the responsible team. So **a team-using workflow must set `to_responsible_team_id` on EVERY non-end-state transition** (end-state transitions suppress the team field, so they omit it). To keep a team constant across a workflow (e.g. always Human Resources), set the same team on every non-end transition — the established pattern in `cuneus_de_employee_workflow.xml` and `mfnl_workflow.xml`. A bare direct `write({"state_id": …})` does NOT have this behavior (it only touches what you pass); the blanking is wizard-only.
 
+### A Kanban Drop Is a Step
+
+A state changes only through a step, because the step screen does the step's work (a contract started, a date asked, a note required). A kanban grouped by a workflow state therefore never writes `state_id` when a card is dropped in another column. The drop opens the step screen of the first transition, by sequence, from the card's state to the column's state, chosen from the transitions the record's own button strip offers (so bot claim and work steps stay hidden from a person, as on the buttons). OK runs the step and the board reloads; Discard changes nothing. When no transition leads there, a notice names the steps that exist from the card's state and the card stays. A drop on a card whose state changed since the board loaded is refused like a stale button. This holds for every board grouped by `state_id` to `riverflow.state`, so a consuming app needs no setting per board and must not set `records_draggable="false"` to protect the state (radar pipeline applicants plan, decision 127; the radar Employees board wrote the state directly before, 19.0.1.1311).
+
+- Server: `riverflow.state.mixin.action_kanban_drop(from_state_id, to_state_id)` in `models/riverflow_state_mixin.py` returns the step screen (`_prepare_transition_action` with the chosen `transition_id`) or a `display_notification` warning.
+- Browser: `static/src/patch/kanban_renderer_patch.js` patches `KanbanRenderer.sortRecordDrop`; it calls the method instead of saving the field and reloads the board when the screen closes. A drop inside one column keeps Odoo's behaviour.
+- Limit: the patch keys on the field, not on the model. A model with a `state_id` to `riverflow.state` but without the mixin (`riverflow.state.record`, radar's `crewradar.plan.item`) answers a drop with a "method does not exist" error and writes nothing; neither has a kanban.
+- Tests: `tests/test_kanban_drop.py`, hoot `static/tests/kanban_drop.test.js`.
+
 ### Transition Actions
 
 Actions executed when a transition occurs:
@@ -1177,6 +1186,7 @@ riverflow/
 ├── static/src/patch/
 │   ├── many2many_binary_upload_patch.js  # Every many2many_binary upload (email sender, ticket wizards, credential uploads) blocks the UI until the file is linked; a late upload into a closed dialog warns instead of crashing with "Component is destroyed". Stock Odoo bug, upstream fix odoo/odoo#286831
 │   ├── date_field_format_patch.js        # Date display format patch
+│   ├── kanban_renderer_patch.js          # A drop on a board grouped by state opens the step (action_kanban_drop), never saves state_id; see "A Kanban Drop Is a Step"
 │   └── list_renderer_patch.js            # List renderer patch
 
 │   ├── state_record_calendar/     # Custom calendar for radar screen

@@ -1094,6 +1094,28 @@ re-resolves `most_fitting_log_entry` marker services (e.g. the AB Appointment
 under a Work Permit). This kept `-u` at ~27s instead of 3+ min on a ~100k-row
 service table.
 
+### A dependency path needs a reverse field at every hop, or the ORM searches
+
+When a field changes, the ORM walks every `@api.depends` path back to the
+records that must recompute. At each many2one hop it reads the reverse one2many
+from the cache when one exists. When none exists, it runs
+`search([(hop, "in", ids)])` — once per change, with a flush, and without an
+index this reads the whole table. A non-stored related many2one never has a
+usable reverse, so `"supply_order_service_id.deadline"` (related to
+`supply_leg_id.service_id`) searched once per changed service.
+
+- Depend on the stored path the related field stands for:
+  `"supply_leg_id.service_id.deadline"`. The trigger then follows `leg_ids` and
+  stops at once for a record without legs.
+- Give a hot many2one a reverse one2many, even when nothing reads it
+  (`riverflow.service.leg.supply_service_ids`). The ORM keeps its cache in step
+  on every write of the many2one, also inside a compute.
+
+Find these with a patched `BaseModel.search` that counts calls whose caller
+frame is `_modified_triggers`, keyed on `(model, domain field)`. The planning
+save of 10 log entries had 2,899 + 536 such searches (8.9 s of 24 s) on
+9-Oct-2026: crewradar-development `references/planning-save-performance.md`.
+
 ## Active Field Handling
 
 ### The active_test Context Problem

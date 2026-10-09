@@ -579,6 +579,12 @@ class Service(models.Model):
         help="Links back to the 'taxi booking' leg that generated this leg-info service",
     )
 
+    # Depend on "supply_leg_id.service_id.<field>", not on
+    # "supply_order_service_id.<field>": this related field is not stored, so a
+    # change of <field> on any service makes the ORM search the services that
+    # point to it, one search per change (2,899 searches in one planning save of
+    # 10 log entries, 9-Oct-2026). The stored path follows leg_ids from the cache
+    # and stops at once for the many services without a supply leg.
     supply_order_service_id = fields.Many2one(
         "riverflow.service",
         "Supply Order",
@@ -809,8 +815,8 @@ class Service(models.Model):
         "root_id.deadline",
         "root_id.supply_actual_date",
         "root_id",
-        "supply_order_service_id.deadline",
-        "supply_order_service_id.supply_actual_date",
+        "supply_leg_id.service_id.deadline",
+        "supply_leg_id.service_id.supply_actual_date",
     )
     def _compute_project_deadline(self):
         for service in self:
@@ -880,7 +886,7 @@ class Service(models.Model):
         "days_relative_to_project",
         "use_project_deadline_from",
         "is_days_relative_to_project_applicable",
-        "supply_order_service_id.deadline",
+        "supply_leg_id.service_id.deadline",
         "weekend_deadline_rule",
     )
     def _compute_deadline(self):
@@ -1281,7 +1287,7 @@ class Service(models.Model):
             recipients = recipients.union(self.supplier_partner_id)
         return recipients
 
-    @api.depends("supply_order_service_id.company_id")
+    @api.depends("supply_leg_id.service_id.company_id")
     def _compute_company_id(self):
         """Default company is the current user's company, unless overridden"""
         for record in self:
@@ -2438,6 +2444,12 @@ class ServiceLeg(models.Model):
         index=True,
         help="Supply Order",
     )
+
+    # The reverse of riverflow.service.supply_leg_id. Nothing reads it; it lets the
+    # ORM find the services that depend on a changed leg from its cache, instead
+    # of one search per change on the unindexed supply_leg_id column (536
+    # searches, 3.8 s in one planning save of 10 log entries, 9-Oct-2026).
+    supply_service_ids = fields.One2many("riverflow.service", "supply_leg_id", string="Leg Services")
 
     sequence = fields.Integer(default=10)
     supply_from = fields.Char("From")

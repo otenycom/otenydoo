@@ -31,6 +31,17 @@ WHERE module = 'crewradar' AND name = 'workflow_tft_contract';
 
 Verified cases from the 2026-08-10 workflow icon audit (checked on crmain and cr-test): `crewradar.workflow_tft_contract` (`service_workflow_tft.xml`) and `crewradar_cuneus_sign.workflow_auv_contract` (`auv_workflow.xml`) — neither file is `noupdate` today, but both rows carry `noupdate=true` from their creation context, so their icon changes needed a post-migrate. Conversely `crewradar.log_entry_workflow_to_be_planned`'s records (Needs Planning / Needs Crew) have `noupdate=false` file AND rows, so their fix needed no migration.
 
+## A new record in a `noupdate="1"` file is created on update
+
+The skip applies to an XML id that **exists**. For a `<record>` whose id is not yet
+in `ir.model.data`, `_tag_record` falls through to a normal create on `-u`
+(`forcecreate` defaults to true; `odoo/tools/convert.py`, the `noupdate` branch).
+So a new transition, state or rule added to a `noupdate` workflow file reaches
+existing databases without a migration. Only new **fields** and changed
+**values** on existing records need a post-migrate. Proven by radar crewradar
+19.0.11.17 (`transition_site_revert_to_prospect` in the noupdate
+`site_workflow_lifecycle.xml`, created on crmain by `-u crewradar`).
+
 ## Best practice for new fields on `noupdate="1"` records
 
 1. **Canonical XML**: Add the field on the **same** `<record id="…">` in the original data file so **new databases** get a complete row from one definition.

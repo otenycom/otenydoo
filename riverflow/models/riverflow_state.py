@@ -9,6 +9,13 @@ from odoo import _, api, fields, models
 STEP_DEADLINE_KEYS = ("clear_deadline", "set_deadline_to_today", "followup_in_days", "set_deadline_relative")
 # The task fields a deadline setting writes.
 DEADLINE_FIELDS = ("use_project_deadline_from", "project_deadline", "days_relative_to_project")
+# The named values that link a parent service's state to the transitions of its
+# child services: a state with execute_child_transitions "cancel" makes every
+# open child service below it execute its transition marked
+# execute_on_parent_transitions "cancel". A named value, not an on/off flag, so
+# one mechanism can carry another meaning later and a transition answers only
+# the value it names.
+CHILD_TRANSITION_SIGNALS = [("cancel", "Cancel the child services that are not started")]
 
 
 class RiverflowWorkflowState(models.Model):
@@ -188,6 +195,27 @@ class RiverflowWorkflowState(models.Model):
         "the whole subtree is walked (e.g. cancelling a work permit case drops "
         "the taxis booked under its AB appointment).",
         default=False,
+    )
+    # A parent service's state that ends the case says so to the child services
+    # below it, and each child service closes through its OWN transition (radar
+    # pipeline applicants plan, Q162). The parent decides WHEN: only a state whose
+    # end means "the case is over" sets it, because an end state such as "Sent"
+    # of an e-mail or "Application Sent" of an A1 means "my part is done" while
+    # the child services below are follow-up work. The child service's workflow
+    # decides HOW: it marks the transition that closes a service that is not
+    # started (Cancel, Not Needed), so the transition wizard, its note and its
+    # side effects run as when a person clicks it. A started child service has no
+    # such transition from its state and stays open.
+    execute_child_transitions = fields.Selection(
+        CHILD_TRANSITION_SIGNALS,
+        string="Execute Child Transitions",
+        help="When a service enters this state, every open child service below "
+        "it that has a transition marked with the same value (Execute On Parent "
+        "Transitions) from its current state executes that transition, as if a "
+        "person clicked it. The whole tree below is walked. A child service that "
+        "is already started has no such transition, so it stays open, with the "
+        "child services below it, for a person to decide. Set it only on a state "
+        "that ends the case.",
     )
 
     # The deadline of a task follows the step that brings it into its state

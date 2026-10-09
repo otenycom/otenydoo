@@ -114,6 +114,7 @@ States are the stages in a workflow. Key fields:
 | `hide_in_statusbar` | Don't show in status bar |
 | `auto_progress_on_children_done` | When set, services in this state auto-progress to the next sequential workflow state once all active child services reach an end state. Used with `create_on_state_id` deferred children for parallel task patterns (e.g. parallel email-sending services). |
 | `auto_done_children_on_enter` | Mirror of `auto_progress_on_children_done` in the opposite direction. When a service enters this state, all active non-end-state children are moved to the first non-cancelled end state of their own workflow (by sequence). Used on parent terminal states whose semantics imply child sub-tasks are also complete (e.g. AUV Done means the OPS Review-AUV child is moot). Children already in an end state are skipped (idempotent). |
+| `execute_child_transitions` | Named value (`cancel`). When a service enters this state, every open child service below it executes its own transition marked `execute_on_parent_transitions` with the same value from its current state, through that transition's wizard. Set it only on a state that ends the case. See [Execute Child Transitions](#execute-child-transitions-the-parent-ends-the-case-1901320). |
 | `is_owned_by_bot` | Marks a state worked by an **automated agent** (a bot like Barney), not a human. Ownership lives in the STATE, so the bot polls `is_owned_by_bot=True` for its queue and a human review filter excludes it with `is_owned_by_bot=False`. |
 | `bot_login_hold` | A login-hold state. Register Login (queue + SLA) and Relogin occupy the one live slot. A SLA-less park does not occupy. Drain may resume a fresh SLA-less park via `_bot_resume_login_park`. Set this in the **workflow XML**. |
 
@@ -184,6 +185,7 @@ Transitions define allowed state changes. Key fields:
 | `to_state_id` | Target state |
 | `action_id` | Transition action to execute |
 | `action_context` | Python dict literal with configuration keys for the wizard (e.g. deadline overrides) |
+| `execute_on_parent_transitions` | Named value (`cancel`): this transition executes by itself when the parent service enters a state whose `execute_child_transitions` has the same value and the service is in this transition's from-state. Mark the transition that closes a service that is not started. |
 | `sequence` | Button order (restart at 10 per from_state) |
 | `icon` | FontAwesome icon for button — FA **4.7** classes only, same constraint as the workflow icon (guarded by `test_workflow_icons.py`; see [Choosing the workflow icon](#choosing-the-workflow-icon)) |
 | `to_responsible_team_id` | Team assignment after transition |
@@ -527,6 +529,21 @@ When the state entered carries `auto_done_children_on_enter` **and** `is_cancell
 **What it does not do**: cancelling a taxi/train/hotel service records the cancellation in Radar; the booking still has to be cancelled with the supplier by hand. Say so in the cancel wizard's UI.
 
 Tests: `riverflow/tests/test_auto_done_children.py` (cancel-variant cases at the end of the class).
+
+### Execute Child Transitions: the Parent Ends the Case (19.0.1.1320)
+
+A parent service whose case is over closes the child services that are not started **through their own transition** (radar pipeline applicants plan, Q162; Ries, 10-Oct-2026). Two named values, one shared Selection (`CHILD_TRANSITION_SIGNALS` in `riverflow_state.py`, first value `cancel`):
+
+- `riverflow.state.execute_child_transitions` on the **parent's** state decides **when**. Only a state that means "the case is over" sets it. An end state that only ends the parent's own part must not: a Send Email in Done can hold a follow-up taxi, an A1 in "Application Sent" holds the A1 forwarding services, and AUV Not Needed / Cancelled keep the OPS service "Check if AUV is Received" open for the fallout. So the decision sits on the parent, not on the child.
+- `riverflow.transition.execute_on_parent_transitions` on the **child's** transition decides **how**: the workflow marks its own transition that closes a service that is not started. Shipped: the Cancel transition from Not started of Task, Taxi Supply Order and Train Ticket and the Not Needed transition of Send Email (riverflow); Generate Document Cancel (crewradar_sign); Inform Employee Travel Plan Not Needed (crewradar_cuneus_sign). No riverflow state sets the parent side.
+
+`riverflow.service._execute_child_transitions()` walks the tree below the service: an open child service with a marked transition from its current state executes it through its wizard (`_execute_transition_in_code`, opened and saved as the bot does in `_bot_claim_run_wizard`); a closed child service, or one the rule just closed, is descended through; a started one has no marked transition, so it stays open and the walk does not descend into it. The transition wizard calls it after `_cascade_done_to_children`, so a state with `auto_done_children_on_enter` keeps its cascade. **Code that writes such a state without a transition calls it itself** (radar: the weekly work permit bulk upload, `_apply_uploaded_permit_outcome`; the automatic close of holder services, `_auto_complete_holder_credential_services`).
+
+**The context is replaced, not extended.** The rule runs inside the save of the parent's transition, whose context carries that transition's keys (`set_deadline_to_today`, `cancel_children`) and the parent's `default_*` values. `_execute_transition_in_code` builds the child's wizard from the user's `lang` / `tz` / `allowed_company_ids` plus the child transition's own context, as the browser does; extending the context would set the parent's deadline key on every child.
+
+**What it does not do**: a Back from the parent's end state does not reopen a cancelled child service; the walk is not a cascade by state write, so a transition wizard whose save check holds leaves the child open for a person.
+
+Tests: `riverflow/tests/test_execute_child_transitions.py`; radar `crewradar_cuneus_sign/tests/test_permit_case_end_closes_child_services.py` and `test_wp_v2_routing.test_case_end_closes_the_child_services_not_started`.
 
 ### Incomplete Children Warning
 

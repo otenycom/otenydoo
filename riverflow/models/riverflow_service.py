@@ -2070,6 +2070,76 @@ class Service(models.Model):
             end_states + [("is_cancelled_state", "=", True)], order="sequence", limit=1
         ) or State.search(end_states, order="sequence desc", limit=1)
 
+    def _execute_child_transitions(self):
+        """Let the child services below execute their own closing transition
+        when this service entered a state that ends the case
+        (``execute_child_transitions`` on the state; radar pipeline applicants
+        plan, Q162).
+
+        Called after a transition (``riverflow.transition.wizard.action_save``)
+        and by code that moves a service into such a state without a transition
+        (a bulk upload, an automatic close), so every way into the state has the
+        same effect.
+
+        Each open child service whose current state has a transition marked
+        with the same value (``execute_on_parent_transitions``) executes that
+        transition through its own transition wizard: its note, its deadline
+        setting and its side effects run as when a person clicks it, and nothing
+        writes the state directly. The whole tree is walked. A child service
+        that is closed, or that this rule just closed, is descended through,
+        because its open child services belong to the same finished case. A
+        started child service has no marked transition: it stays open and the
+        walk does not descend into it, so the person who works on it also
+        decides about the services below it.
+        """
+        for service in self:
+            signal = service.state_id.execute_child_transitions
+            if signal:
+                service._execute_transitions_on_parent_signal(signal)
+
+    def _execute_transitions_on_parent_signal(self, signal):
+        """The walk of ``_execute_child_transitions`` below this service."""
+        self.ensure_one()
+        for child in self.child_ids.filtered("active"):
+            if not child.state_id.is_end_state:
+                transition = child.state_id.from_transition_ids.filtered(
+                    lambda t, signal=signal: t.active and t.execute_on_parent_transitions == signal
+                ).sorted("sequence")[:1]
+                if not transition:
+                    continue
+                child._execute_transition_in_code(transition)
+                if not child.state_id.is_end_state:
+                    # The transition wizard held the save (a warning that
+                    # nobody can confirm here): the service stays open for a
+                    # person.
+                    continue
+            child._execute_transitions_on_parent_signal(signal)
+
+    def _execute_transition_in_code(self, transition):
+        """Execute a transition through its own transition wizard without a
+        person: open the wizard with the values a click gives, and save it, as
+        the bot does (``_bot_claim_run_wizard``).
+
+        The context is replaced, not extended. The caller is often the save of
+        ANOTHER service's transition, whose context carries that transition's
+        keys (a deadline key, ``cancel_children``) and that service's
+        ``default_*`` values; this wizard must see only the user's settings and
+        its own transition context, as in the browser. A save check that holds
+        leaves the service where it is."""
+        self.ensure_one()
+        user_context = {
+            key: self.env.context[key]
+            for key in ("lang", "tz", "allowed_company_ids")
+            if key in self.env.context
+        }
+        record = self.with_context(dict(user_context, transition_id=transition.id))
+        action = record._prepare_transition_action()
+        wizard_context = dict(user_context)
+        wizard_context.update(action.get("context") or {})
+        wizard_context.update(active_model=self._name, active_id=self.id, active_ids=self.ids)
+        Wizard = self.env[action["res_model"]].with_context(wizard_context)
+        Wizard.create(Wizard.default_get(list(Wizard._fields))).action_save()
+
     def _auto_progress_to_next_state(self):
         """Progress to the next visible workflow state by sequence.
 

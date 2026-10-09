@@ -4,6 +4,7 @@ from . import test_named_domain_rename
 from . import test_weekend_deadline_rule
 from . import test_auto_progress
 from . import test_auto_done_children
+from . import test_execute_child_transitions
 from . import test_deferred_children
 from . import test_supply_time
 from . import test_transition_email_template

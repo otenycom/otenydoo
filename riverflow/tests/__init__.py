@@ -25,3 +25,4 @@ from . import test_service_check_results
 from . import test_tombstone_mixin
 from . import test_service_write_changed
 from . import test_single_open_workflow
+from . import test_hidden_page_animation_frames

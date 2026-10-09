@@ -1968,6 +1968,14 @@ error = _('Product %s out of stock!') % _(product.name)  # useless
 
 Use `%` formatting over `.format()` for single variables, and named parameters `%(name)s` for multiple variables to help translators.
 
+**`_()` inside a nested function logs a WARNING.** Odoo 19's `_()` finds the
+language by walking up the call frames to a `self` or `env`. A helper function
+defined inside a method (a closure, a lambda) has neither, so every call logs
+`odoo.tools.translate: no translation language detected, skipping translation`
+— a WARNING that turns an odoo.sh build red. Use `self.env._(...)` inside such a
+helper, or build the text in the method itself (radar Part E repair text,
+9-Oct-2026: 284 such warnings in one test run).
+
 ## Activating a Language for Translated Names
 
 When code needs translated field values (e.g., German country names via `country.with_context(lang='de_DE').name`), the target language must be activated and its base translations loaded. Odoo ships `res.lang.csv` with all languages but only a few are active by default.
@@ -2116,7 +2124,33 @@ user = self.env["res.users"].create({
 })
 ```
 
+**A compute on a wizard must read related records through `_origin`.** While a
+form is open, Odoo computes its fields on a new record (an onchange), and the
+records of its relational fields are copies (`hr.employee(<NewId origin=202>,)`)
+whose own one2many fields come back empty. A compute that reads, for example,
+`wizard.records_to_transition_ids[:1].log_entry_ids` then sees nothing and shows
+0.0 on the screen, while the same compute on the saved wizard is right. Read the
+real record: `wizard.records_to_transition_ids[:1]._origin` (radar Complete
+Termination vacation balance, 9-Oct-2026).
+
 ## Frontend (OWL) Patterns
+
+### OWL draws only on an animation frame — a hidden page draws nothing
+
+OWL's scheduler renders inside `requestAnimationFrame`, and it captures that
+function once, when `owl.js` loads (`Scheduler.requestAnimationFrame`). A hidden
+page gets no animation frames (0 in 1.5 s, measured 8-Oct-2026), while timers
+and network calls still run: the RPCs finish, but the screen never draws. This
+stalled AI-agent walks in the Claude desktop app's built-in browser whenever the
+pane was hidden behind another panel. Fix, for local development servers only:
+`riverflow/static/src/core/hidden_page_animation_frames.js`, prepended to
+`web._assets_core` (before `owl.js`); on `localhost` / `127.0.0.1` / `::1` a
+frame requested while the page is hidden falls back to a 16 ms timer, and pending
+frames move between the two modes on `visibilitychange`. Production is never
+served from localhost and keeps the browser's behaviour. A patch of
+`window.requestAnimationFrame` that loads after `owl.js` has no effect on OWL.
+Agent procedure (condition waits, no fixed waits): radar
+`.claude/skills/crewradar-development/references/browser-walk.md`.
 
 ### Async work must check the component is still alive
 

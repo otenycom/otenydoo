@@ -449,6 +449,27 @@ Two things to verify first:
 
 **Real example** (`crewradar_creds/migrations/19.0.2.151`): commit `0b847a7f` repointed the stored `riverflow.service.project_deadline` from the window-clamped `renewal_marker_date` to the unclamped `renewal_action_date` (full case in the consuming business's own credential-planning docs). No field was added, so pre-existing `credential_renewal_marker` renewal services kept their old near-today deadlines. The migration sweeps `_compute_project_deadline` across all such services. It lives in `crewradar_creds` — not `rivercreds` where the field's base compute is — because `crewradar_creds` holds the final override (adding the contract-start onboarding fallback for permit-less initial services), which only runs when that module is loaded. Extract the sweep into a named helper (`_recompute_credential_renewal_deadlines(env)`) so a test can drive it (see [testing-guidelines.md — Testing a recompute migration](testing-guidelines.md#testing-a-recompute-migration-the-flush--sql-exception)).
 
+### A Forced Recompute Does Not Move the Fields That Depend on It
+
+`env.add_to_compute(field, records)` (or calling the compute) recomputes that
+field only. The ORM marks the fields that **depend on it** when a dependency is
+*modified* (`modified()` builds the trigger tree at write time), not when a
+value comes out of a recompute. So a post-migrate that forces a recompute must
+mark the dependents itself, for the records whose value changed:
+
+```python
+ships = Site.with_context(active_test=False).search([])
+before = {ship.id: ship.ignore_for_planning for ship in ships}
+env.add_to_compute(Site._fields["ignore_for_planning"], ships)
+changed = ships.filtered(lambda s: s.ignore_for_planning != before[s.id])
+changed.modified(["ignore_for_planning"])   # the plan rows that read it follow
+```
+
+A record that the migration wrote (for example a state change) needs nothing:
+the write already marked the whole tree. Real case: radar crewradar_cuneus_sign
+19.0.6.225 (ship planning visibility, 9-Oct-2026), where the plan rows of Amigo
+would otherwise not have come back.
+
 ### Creating Records
 
 ```python

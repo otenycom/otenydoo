@@ -756,6 +756,38 @@ def _compute_generated_entries(self):
         ...
 ```
 
+### A Field Must Not Depend on the One2many Whose Compute Depends on It
+
+A One2many that a compute fills for its side effects (radar
+`crewradar.site.log_entry_ids`, computed by `_refresh_generated_log_entry_ids`,
+which creates the "To be planned" entries) often depends on flags of its own
+record. When such a flag becomes a compute over that One2many
+(`ignore_for_planning` over `log_entry_ids.is_end_state`), the two fields depend
+on each other: every entry change marks the flag, the flag marks the One2many,
+and its compute creates entries that mark the flag again. Point the One2many's
+`@api.depends` at the flag's own sources instead (here
+`state_id.excluded_from_planning`), and read the flag in the method body only
+where its value cannot come from the One2many (radar crewradar 19.0.11.15).
+
+### A Read-Only Compute Can Keep a Written Value Where It Has No Rule
+
+A stored compute without an inverse may still receive a value in `create()` or
+`write()` from code (fixtures, tests, scripts). Where the compute has no rule
+for a record, assign the field to itself, and the written value stays:
+
+```python
+for ship in self:
+    if not ship.state_id:
+        ship.ignore_for_planning = ship.ignore_for_planning   # no lifecycle: keep what was written
+    ...
+```
+
+The value given to `create()` is in the cache when the compute runs, so this
+holds for new records too (radar test
+`test_a_ship_without_a_lifecycle_state_keeps_its_written_value`; riverflow's
+`_compute_front_office_workflow_id` uses the same pattern). The screens show the
+field read-only; about 300 radar test lines kept working unchanged.
+
 ### Avoid write() and create() Overrides
 
 Instead of overriding `write()` or `create()`, use computed fields:

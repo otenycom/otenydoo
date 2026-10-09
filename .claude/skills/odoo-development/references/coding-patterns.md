@@ -136,6 +136,25 @@ recent_first = entries.sorted('start_date', reverse=True)
 sorted_entries = entries.sorted(lambda e: (e.start_date, e.employee_id.name))
 ```
 
+### "Is under" in a hierarchy: compare the `parent_path` prefix, never search it as text
+
+`parent_path` holds the ids from the top down, each followed by a slash
+(`"68/33/"`). A record sits under `root` when its path **starts with** the
+root's path. A text search for `f"{root.id}/"` also matches a record whose own
+id ends in the root's id: root 33 matches article 133 (`"133/"`). Such a fault
+shows up only when the id sequence reaches that number, so a test fails by
+chance (crewradar_wilma knowledge banner, found by the deploy test gate on
+9-Oct-2026).
+
+```python
+# Right: the prefix of the path
+under_root = record.parent_path.startswith(root.parent_path)
+# Wrong: "33/" in "133/" is True
+under_root = f"{root.id}/" in record.parent_path
+```
+
+In a search, `("id", "child_of", root.id)` does the same and is the safer choice.
+
 ### Overriding an `@api.constrains` method: repeat the decorator
 
 An override of a constraint method **must repeat `@api.constrains` with the full field list** of the base method. Odoo 19 builds `_constraint_methods` from the final class attribute only (`odoo/orm/models.py` `_constraint_methods`: `getmembers(cls, ...)` keeps a member only if it has `_constrains`). An undecorated override therefore hides the base constraint for **every** record of the model, not only for the records the override meant to relax — and nothing warns.

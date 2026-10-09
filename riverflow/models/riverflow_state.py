@@ -1,5 +1,14 @@
-from odoo import models, fields, api
+from datetime import timedelta
 from random import randint
+
+from odoo import _, api, fields, models
+
+# The context keys a step uses to set the deadline itself
+# (riverflow.transition.wizard.action_save). A step with one of them overrides
+# the deadline setting of its target state.
+STEP_DEADLINE_KEYS = ("clear_deadline", "set_deadline_to_today", "followup_in_days", "set_deadline_relative")
+# The task fields a deadline setting writes.
+DEADLINE_FIELDS = ("use_project_deadline_from", "project_deadline", "days_relative_to_project")
 
 
 class RiverflowWorkflowState(models.Model):
@@ -180,6 +189,122 @@ class RiverflowWorkflowState(models.Model):
         "the taxis booked under its AB appointment).",
         default=False,
     )
+
+    # The deadline of a task follows the step that brings it into its state
+    # (radar pipeline applicants plan, release R5c, decisions Q151 and Q156).
+    # Before, the deadline belonged to the task alone: a plain step (Back,
+    # Restart, Resend, "Sent already") carried over whatever date the task had,
+    # and a task added by hand kept the fixed date of its start screen for good,
+    # so a renewal task could sit on a date that no longer followed its permit.
+    # The setting on the state is the default for every step into it and for a
+    # task made in it. A step overrides it only explicitly: its own deadline key
+    # (STEP_DEADLINE_KEYS) or a date the user chooses on its screen. A date typed
+    # or dragged on the task itself stays possible and holds until the next step
+    # into a state with a setting (Q155: the manual override stays). "Keep" is
+    # the default, so a state without a setting behaves as before.
+    deadline_on_entry = fields.Selection(
+        [
+            ("keep", "Keep the task's date"),
+            ("rule", "Follow a rule"),
+            ("followup", "Follow-up after N days"),
+            ("today", "Today"),
+            ("clear", "No deadline"),
+        ],
+        string="Deadline on Entry",
+        default="keep",
+        required=True,
+        help="What a task's deadline becomes when a step brings it into this state, "
+        "or when a task is made in this state. Keep: the task keeps its date. "
+        "Follow a rule: the task follows the Deadline Rule plus the Deadline Days. "
+        "Follow-up: today plus the Deadline Days, as a fixed date. Today: today, as "
+        "a fixed date. No deadline: the date is cleared. A step that sets the "
+        "deadline itself, or a date chosen on the step screen, overrides this.",
+    )
+    deadline_rule_from = fields.Selection(
+        selection="_selection_deadline_rule_from",
+        string="Deadline Rule",
+        help="The source of the date when Deadline on Entry is 'Follow a rule': the "
+        "same choices as Deadline From on a task.",
+    )
+    deadline_days = fields.Integer(
+        "Deadline Days",
+        help="For a rule: the days before (negative) or after the rule's date. "
+        "For a follow-up: the days after the step.",
+    )
+
+    @api.model
+    def _selection_deadline_rule_from(self):
+        """The task's Deadline From choices that follow a source, so modules that
+        add a mode (rivercreds, crewradar) add it here as well. 'Self' and
+        'Creation Date' are fixed dates, which the other kinds already cover."""
+        service_field = self.env["riverflow.service"]._fields["use_project_deadline_from"]
+        return [
+            (value, label)
+            for value, label in service_field._description_selection(self.env)
+            if value not in ("self", "creation")
+        ]
+
+    def _deadline_entry_vals(self):
+        """The deadline values a task takes when it enters this state, or {} when
+        the state keeps the task's date (also for a rule without a source)."""
+        self.ensure_one()
+        today = fields.Date.today()
+        kind = self.deadline_on_entry
+        if kind == "rule" and self.deadline_rule_from:
+            return {
+                "use_project_deadline_from": self.deadline_rule_from,
+                "days_relative_to_project": self.deadline_days,
+            }
+        if kind == "followup":
+            fixed = today + timedelta(days=self.deadline_days)
+        elif kind == "today":
+            fixed = today
+        elif kind == "clear":
+            fixed = False
+        else:
+            return {}
+        return {"use_project_deadline_from": "self", "project_deadline": fixed, "days_relative_to_project": 0}
+
+    def _put_fixed_open_tasks_on_rule(self):
+        """Put the open tasks of this state that sit on a fixed date (Self) back
+        on the state's rule, each with a note that names the old date. Returns
+        the tasks it changed.
+
+        For a migration that gives a state its rule (release R5c, decision Q157):
+        a task added by hand, or carried along by a plain step, kept a fixed
+        date that no longer followed its source (Andres, radar task 32423). Only
+        a rule: a fixed-date setting (follow-up, today) would move every task to
+        the day of the migration. Checks active explicitly: a migration can run
+        with active_test=False."""
+        self.ensure_one()
+        entry_vals = self._deadline_entry_vals()
+        if self.deadline_on_entry != "rule" or not entry_vals:
+            return self.env["riverflow.service"]
+        tasks = self.env["riverflow.service"].search(
+            [
+                ("state_id", "=", self.id),
+                ("is_this_a_template", "=", False),
+                ("use_project_deadline_from", "=", "self"),
+            ]
+        ).filtered(lambda task: task.active and not task.is_end_state)
+        rule_label = dict(self._fields["deadline_rule_from"]._description_selection(self.env)).get(
+            self.deadline_rule_from, self.deadline_rule_from
+        )
+        date_format = self.env["riverflow.service"].DATE_FORMAT
+        for task in tasks:
+            old = task.project_deadline
+            task.write(entry_vals)
+            task.message_post(
+                body=_(
+                    "The deadline follows the rule of the step %(state)s again (%(rule)s). "
+                    "The task had a fixed date: %(old)s.",
+                    state=self.name,
+                    rule=rule_label,
+                    old=old.strftime(date_format) if old else _("none"),
+                ),
+                subtype_xmlid="mail.mt_note",
+            )
+        return tasks
 
     from_transition_ids = fields.One2many(
         "riverflow.transition",

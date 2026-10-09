@@ -21,6 +21,12 @@
                             <field name="workflow_id" readonly="1" />
                             <field name="description" />
                             <field name="color_int" widget="color_picker" />
+                            <!-- The deadline a task takes when a step brings it
+                                 into this state (release R5c). -->
+                            <field name="deadline_on_entry" />
+                            <field name="deadline_rule_from" invisible="deadline_on_entry != 'rule'"
+                                required="deadline_on_entry == 'rule'" />
+                            <field name="deadline_days" invisible="deadline_on_entry not in ('rule', 'followup')" />
                         </group>
                         <group>
                             <field name="is_end_state" />

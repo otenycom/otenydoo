@@ -2,6 +2,8 @@ from datetime import timedelta
 
 from odoo import api, models, fields, Command
 
+from ..models.riverflow_state import STEP_DEADLINE_KEYS
+
 
 class ServiceWizard(models.TransientModel):
     _name = "riverflow.service.wizard"  #
@@ -122,6 +124,19 @@ class ServiceWizard(models.TransientModel):
             defaultValues["use_project_deadline_from_options"] = records_to_transition[
                 0
             ].use_project_deadline_from_options
+        # Propose the target state's deadline setting (release R5c), so the
+        # screen shows the deadline the task will get instead of the task's old
+        # one; the user may still change it. A step with its own deadline key
+        # keeps its own proposal (above).
+        if not any(self.env.context.get(key) for key in STEP_DEADLINE_KEYS):
+            transition = self.env["riverflow.transition"].browse(self.env.context.get("transition_id"))
+            entry_vals = transition.to_state_id._deadline_entry_vals() if transition.to_state_id else {}
+            defaultValues.update(entry_vals)
+            # The dropdown only lists the modes it offers; show the state's rule.
+            options = list(defaultValues.get("use_project_deadline_from_options") or [])
+            mode = entry_vals.get("use_project_deadline_from")
+            if mode and options and mode not in options:
+                defaultValues["use_project_deadline_from_options"] = options + [mode]
 
     def update_write_values(self, service, vals):
         super().update_write_values(service, vals)

@@ -617,6 +617,7 @@ Service deadlines are computed from a `project_deadline` plus an optional `days_
 | `use_project_deadline_from` | Behavior |
 |---|---|
 | `self` | Deadline is the `project_deadline` directly (manual/calendar-set date) |
+| `credential_appointment` | Deadline is the appointment date of the task's newest active credential that has one (`application_appointment_date`; radar: the AT Appointment Book AB records), today when none (rivercreds extension, 19.0.3.318). The work permit's AB Booked state follows it. |
 | `root` | Deadline is computed from the root (top-level) service's deadline + offset |
 | `root_appointment` | Deadline is computed from the root service's `supply_actual_date` (appointment date) + offset. Falls back to root's deadline when no appointment date is set. Used by child services that must track a fixed appointment date even as the root's deadline changes during workflow progression (e.g., AB Appointment under Arrange Work Permit). |
 | `creation` | Template-only: at clone time, `_create_service_member_from_template` materializes `project_deadline = today + days_relative_to_project` and stores the cloned service in `"self"` mode with a concrete date. The template itself keeps no deadline. Used by employee/ship auto-add templates (e.g., `days_relative_to_project=1` gives a next-day deadline). |
@@ -627,6 +628,61 @@ Service deadlines are computed from a `project_deadline` plus an optional `days_
 When `use_project_deadline_from != "self"`, the field `is_days_relative_to_project_applicable` is True and the deadline is computed automatically. Calendar drag-and-drop triggers `_inverse_deadline` which switches to `"self"` mode, preserving the manually chosen date.
 
 **Relative-timing badge prefix**: Each computed mode has a human-readable prefix shown in the service's relative-timing badge (e.g. `Start-30d`, `Appointment+0d`, `Renewal marker+0d`), produced by `relative_to_project_days_prefix()`. Labels: `root` → "Top-level service", `root_appointment` → "Appointment" (riverflow base); `log_entry_start` → "Start", `log_entry_end` → "End" (crewradar); `credential_renewal_marker` → "Renewal marker" (rivercreds). Each module overrides the method for the modes it adds and falls back to `super()` (MRO: crewradar → rivercreds → riverflow). **When adding a new mode, add its label here too** — an unhandled mode renders as `(unknown: use_project_deadline_from)`.
+
+### Deadline on Entry: the State Decides (19.0.1.1316)
+
+**Why.** The deadline used to belong to the task alone. A plain step (Back,
+Restart, Resend, "Sent already") carried over whatever date the task had, and a
+task added by hand on a start step kept the start screen's fixed date (the field
+default `self`) for good. In radar a work permit renewal task then sat for months
+on a date that no longer followed its permit (task 32423, Andres; radar pipeline
+applicants plan, release R5c). Ries, 9-Oct-2026: "the rule and date is driven by
+the transition screens, that should be the leading principle"; the rule sits on
+the state as the default, and the steps align with it unless they explicitly
+override.
+
+**The setting.** `riverflow.state.deadline_on_entry`:
+
+| Value | A task entering the state gets |
+|---|---|
+| `keep` (default) | its own date, as before |
+| `rule` | `use_project_deadline_from = deadline_rule_from`, `days_relative_to_project = deadline_days` |
+| `followup` | a fixed date `today + deadline_days` |
+| `today` | a fixed date today |
+| `clear` | no deadline |
+
+`deadline_rule_from` offers the task's Deadline From values except `self` and
+`creation` (a selection method mirrors `riverflow.service.use_project_deadline_from`,
+so modes added by rivercreds or crewradar appear too).
+
+**Who wins.** In `riverflow.transition.wizard.action_save`, after
+`update_write_values`:
+
+1. A step key (`clear_deadline`, `set_deadline_to_today`, `followup_in_days`,
+   `set_deadline_relative`) wins.
+2. A screen with its own date logic wins: it hides the generic deadline fields
+   (`use_project_deadline_from_invisible` and `project_deadline_invisible`) and
+   writes its own date (an appointment, a ticket, an e-mail follow-up).
+3. On a screen that shows the generic fields, a value the user changed wins. A value
+   equal to the task's own value or to the state's proposal is no choice.
+4. Otherwise the state's setting applies (`_apply_state_deadline_setting`), also on
+   a start step that makes the task.
+
+The task step screen (`riverflow.service.wizard`) proposes the state's setting, so
+it shows the deadline the task will get. A date typed or dragged on the task itself
+still turns it to `self` (the manual override stays) and holds until the next step
+into a state with a setting.
+
+**Setting a state.** Give a state a rule only when every template that starts in
+it carries that same rule; a workflow whose templates start in one state with
+different rules (radar: Send Email, Task, Flight Booking, Journey Invoicing) keeps
+`keep`. States are usually noupdate data, so a new setting needs the XML (fresh
+install) and a post-migrate (existing databases). For open tasks already on a fixed
+date, `riverflow.state._put_fixed_open_tasks_on_rule()` puts them on the state's
+rule with a note that names the old date (rule settings only; a fixed-date setting
+would move every task to the day of the migration).
+
+Tests: `riverflow/tests/test_state_deadline_on_entry.py`.
 
 ### Weekend Deadline Rule
 

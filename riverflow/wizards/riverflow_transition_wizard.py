@@ -3,6 +3,18 @@ from datetime import timedelta
 from odoo import models, fields, api, _, Command
 from odoo.exceptions import UserError, ValidationError
 
+from ..models.riverflow_state import DEADLINE_FIELDS
+
+
+def _normalized(key, value):
+    """One form per deadline value, so a screen value and a record value compare
+    equal: a date string and a date are the same date; an empty value is False."""
+    if key == "project_deadline":
+        return fields.Date.to_date(value) if value else False
+    if key == "days_relative_to_project":
+        return int(value or 0)
+    return value or False
+
 
 class TransitionWizard(models.AbstractModel):
     _name = "riverflow.transition.wizard"
@@ -162,6 +174,11 @@ class TransitionWizard(models.AbstractModel):
                     write_vals["use_project_deadline_from"] = spec["from"]
                     write_vals["days_relative_to_project"] = int(spec["days"])
                     write_vals.pop("project_deadline", None)
+                else:
+                    # No deadline key on the step: the target state's setting
+                    # applies (release R5c), unless the user chose a deadline
+                    # on the step screen.
+                    self._apply_state_deadline_setting(record, transition.to_state_id, write_vals)
 
                 if not createNewRecord:
                     record.write(write_vals)
@@ -254,3 +271,48 @@ class TransitionWizard(models.AbstractModel):
 
     def _is_to_end_state(self):
         return self.transition_id.to_state_id.is_end_state
+
+    def _apply_state_deadline_setting(self, record, state, write_vals):
+        """Give the record the deadline setting of the state it enters.
+
+        The state's setting is the default of every step into it (release R5c):
+        a Back or a Restart into Not Started puts a renewal task on its rule
+        again, and a task made by hand on a start step follows the rule of its
+        first state instead of a fixed date. The user still decides on the
+        screen: a deadline he chose there wins. A screen that only shows the
+        task's own values, or the state's proposal, chose nothing. A screen that
+        writes its own date later (create_related_records, e.g. an appointment)
+        overrides this as before."""
+        if "use_project_deadline_from" not in record._fields or not state:
+            return
+        entry_vals = state._deadline_entry_vals()
+        if not entry_vals or self._deadline_chosen_on_screen(record, write_vals, entry_vals):
+            return
+        for key in DEADLINE_FIELDS:
+            write_vals.pop(key, None)
+        write_vals.update(entry_vals)
+
+    def _deadline_chosen_on_screen(self, record, write_vals, entry_vals):
+        """True when the step screen chose the deadline.
+
+        A screen with its own date logic (an appointment, a ticket, an e-mail
+        follow-up) hides the generic deadline fields and writes its own date:
+        that is always a choice. A screen that shows the generic fields chose
+        only when its values differ from both the record's own values and the
+        state's proposal."""
+        screen = {key: write_vals[key] for key in DEADLINE_FIELDS if key in write_vals}
+        if not screen:
+            return False
+        if getattr(self, "use_project_deadline_from_invisible", True) and getattr(
+            self, "project_deadline_invisible", True
+        ):
+            return True
+
+        def same(values):
+            return all(
+                _normalized(key, values.get(key, record[key])) == _normalized(key, value)
+                for key, value in screen.items()
+            )
+
+        own = {key: record[key] for key in DEADLINE_FIELDS}
+        return not same(entry_vals) and not same(own)

@@ -151,6 +151,27 @@ path. A mid-turn browser row (`linger_until == 0`) is not adoptable.
 </record>
 ```
 
+### Deadline on Entry
+
+A state can carry the deadline a task takes when a step brings it in
+(`deadline_on_entry`: keep, rule, followup, today, clear; with
+`deadline_rule_from` and `deadline_days`). Every step into the state follows it
+unless the step has its own deadline key or its screen sets a date. Set it on the
+first state to the rule the templates carry, and on any state whose incoming steps
+would otherwise disagree (Back, Restart, Resend, "already done"):
+
+```xml
+<record id="state_wp_not_started" model="riverflow.state">
+    ...
+    <!-- Deadline on entry (release R5c): the template's rule. -->
+    <field name="deadline_on_entry">rule</field>
+    <field name="deadline_rule_from">credential_renewal_marker</field>
+    <field name="deadline_days" eval="0" />
+</record>
+```
+
+Details and who wins: SKILL.md, "Deadline on Entry: the State Decides".
+
 ### State Color Reference
 
 | Color Int | Name | Typical Use |

@@ -541,6 +541,8 @@ A parent service whose case is over closes the child services that are not start
 
 **The context is replaced, not extended.** The rule runs inside the save of the parent's transition, whose context carries that transition's keys (`set_deadline_to_today`, `cancel_children`) and the parent's `default_*` values. `_execute_transition_in_code` builds the child's wizard from the user's `lang` / `tz` / `allowed_company_ids` plus the child transition's own context, as the browser does; extending the context would set the parent's deadline key on every child.
 
+**Best practice (Ries, 10-Oct-2026).** A new rule where a parent service's state moves its child services uses this pair; do not add another direct write of a child's state. The older direct writes (`_cascade_done_to_children`, `_cascade_cancel_to_subtree`, `cancel_children`, and the radar computes for the HR info and Travel Leg services) are listed, each with its design question, in [roadmap.md](references/roadmap.md) ("Move the hard-coded moves of child service states").
+
 **What it does not do**: a Back from the parent's end state does not reopen a cancelled child service; the walk is not a cascade by state write, so a transition wizard whose save check holds leaves the child open for a person.
 
 Tests: `riverflow/tests/test_execute_child_transitions.py`; radar `crewradar_cuneus_sign/tests/test_permit_case_end_closes_child_services.py` and `test_wp_v2_routing.test_case_end_closes_the_child_services_not_started`.

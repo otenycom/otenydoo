@@ -456,6 +456,8 @@ When `_create_service_member_from_template()` clones a template service into a c
 
 This hook is the proper extension point for adding template-to-instance field copying. Prefer it over overriding `_create_service_member_from_template()` directly.
 
+**Template notes.** `_create_service_member_from_template()` also copies the template's attachments and each internal note (`mail.mt_note` comment) onto the new service, as an `auto_comment` so it stays out of the top internal notes. Since 19.0.1.1331 (radar pipeline applicants plan, decision 160) the copy is **dated at the copy, by OdooBot** (`base.partner_root`), and its first line is "From the service template". Before, it kept the template note's author, `create_uid` and date, so every new work permit service showed a note "Ries, 6-Oct-2025" that read as an old note of that person. The template note itself does not change; a template note that is wrong is fixed on the template (and, when it matters, on the open copies with a migration, as crewradar_cuneus_sign 19.0.6.245 did for the work permit template). Test: `test_template_note_copy`.
+
 ### Deferred Child Services (`create_on_state_id`)
 
 Template children can be deferred until the parent service reaches a specific state. The `create_on_state_id` field (Many2one to `riverflow.state`) on template children controls this:

@@ -1563,21 +1563,24 @@ class Service(models.Model):
                     )
                     new_attachment_ids.append(new_attachment.id)
 
+            # The copy is dated at the copy, by OdooBot, and says where it comes
+            # from (radar pipeline applicants plan, decision 160). It kept the
+            # template note's author and date, so a service made today showed
+            # "Ries, 6-Oct-2025" and read as an old note of that person.
+            odoobot = self.env.ref("base.partner_root")
             self.env["mail.message"].sudo().create(
                 {
                     "subject": note.subject,
-                    "body": note.body,
+                    "body": Markup("<p><em>%s</em></p>") % self.env._("From the service template") + (note.body or Markup()),
                     # We convert template-notes to auto-comments, because we don't want to see them in the top-3 internal notes
                     # they are just for documentation purposes
                     "message_type": "auto_comment" if note.message_type == "comment" else note.message_type,
                     "subtype_id": note.subtype_id.id,
                     "model": "riverflow.service",
                     "res_id": new_service.id,
-                    "author_id": note.author_id.id,
-                    "email_from": note.email_from,
-                    "create_uid": note.create_uid.id,
+                    "author_id": odoobot.id,
+                    "email_from": odoobot.email_formatted,
                     "parent_id": note.parent_id.id,
-                    "date": note.date,
                     "starred_partner_ids": [(6, 0, note.starred_partner_ids.ids)],
                     "attachment_ids": [(6, 0, new_attachment_ids)],
                 }

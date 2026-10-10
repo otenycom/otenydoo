@@ -1,6 +1,8 @@
 from odoo import models, fields, api
 from markupsafe import escape
 
+from .riverflow_state import CHILD_TRANSITION_SIGNALS
+
 
 class RiverflowTransition(models.Model):
     _name = "riverflow.transition"
@@ -148,6 +150,22 @@ class RiverflowTransition(models.Model):
     )
     action_context = fields.Text(
         "Action context", help="Configuration values for the action screen", copy=True
+    )
+    # The child service side of execute_child_transitions on the parent
+    # service's state (radar pipeline applicants plan, Q162): the workflow marks
+    # which of its own transitions closes a service that is not started, so that
+    # transition executes with its wizard and note instead of a direct write of
+    # the state.
+    execute_on_parent_transitions = fields.Selection(
+        CHILD_TRANSITION_SIGNALS,
+        string="Execute On Parent Transitions",
+        copy=True,
+        help="When the parent service enters a state whose Execute Child "
+        "Transitions has the same value, a child service in this transition's "
+        "from-state executes this transition by itself, as if a person clicked "
+        "it. Mark the transition that closes a service that is not started "
+        "(Cancel, Not Needed); a started service has no marked transition and "
+        "stays open.",
     )
     display_name = fields.Char("Display Name", compute="_compute_display_name", store=True, index="trigram")
 

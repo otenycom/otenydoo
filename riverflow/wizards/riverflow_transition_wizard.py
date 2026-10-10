@@ -205,6 +205,12 @@ class TransitionWizard(models.AbstractModel):
                     # parent auto-progress check, opposite direction).
                     if hasattr(record, "_cascade_done_to_children"):
                         record._cascade_done_to_children()
+                    # A state that ends the case lets the child services that
+                    # are not started execute their own closing transition
+                    # (Q162). Runs after the two cascades above, so a state
+                    # that already closes its children keeps doing so.
+                    if hasattr(record, "_execute_child_transitions"):
+                        record._execute_child_transitions()
                 else:
                     # Merge write_vals into create_vals
                     create_vals.update(write_vals)

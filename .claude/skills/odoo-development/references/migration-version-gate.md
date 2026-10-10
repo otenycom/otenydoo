@@ -146,7 +146,7 @@ The auto-fix is **strictly broadens-correctness, never destroys data**: it only 
 
 ### Logging
 
-Every hook run tees its output to `.git/migration-gate.log` (newest run appended, with an ISO timestamp header). Use `cat .git/migration-gate.log` for post-mortem of "why did my merge produce that commit". The log is git-ignored by virtue of living under `.git/`.
+Every hook run tees its output to `.git/migration-gate.log` of the clone, also from a worktree (newest run appended, with an ISO timestamp header). Use `cat .git/migration-gate.log` for post-mortem of "why did my merge produce that commit". The log is git-ignored by virtue of living under `.git/`.
 
 ---
 
@@ -157,13 +157,25 @@ Every hook run tees its output to `.git/migration-gate.log` (newest run appended
 1. Create the migration at the **next available version** above `dev`'s current manifest. Read the current dev version with `git show dev:<your_module>/__manifest__.py | grep version`. Add `+1` to the last segment.
    - **On a long-lived feature branch, bump the MINOR segment instead** (dev at `19.0.4.26` → use `19.0.5.1`, `19.0.5.2`, …). The pipeline keeps auto-incrementing dev/main's *last* segment while your branch lives; once that ceiling catches up with your folder version, a **local prod restore + `-u` on the branch silently skips your migration** — and no gate layer fires on a local restore (the hook/CI only guard merges into dev/main). A higher minor stays above any last-segment bump for the branch's lifetime; on merge, the gate leaves folders above the ceiling untouched and dev continues from your minor. Case study: a long-lived branch authored a migration at `19.0.4.26`; dev's auto-bumps independently reached `19.0.4.26`, so the 2026-07 prod restore skipped it (the migration never applied). Renumbering to `19.0.5.1–4` fixed it. Full incident documented in the consuming business's own skill bundle.
 2. Bump your feature branch's `__manifest__.py` to the same version. (Optional but recommended; the gate will bump it for you on merge if you forget.)
-3. Push, open a PR. The CI gate will verify on every push.
-4. When merging via `git merge` locally: the local hook does its work silently if you've kept `dev` reasonably up-to-date.
-5. When merging via the GitHub PR "Merge" button: CI is the gate. If it fails, follow the `::error::` annotation's instructions.
+3. Push, open a PR. The CI gate is meant to verify on every push, but it checks nothing today (see the Layer 3 box); do not rely on it.
+4. When merging via `git merge` locally: a merge with no stale folder commits as usual. A merge with stale folders stops before its commit with the diagnosis box; run `git commit` and the hook renumbers inside the merge commit.
+5. Do not merge with the GitHub PR "Merge" button while the CI gate checks nothing: merge locally (or with `merge-branches`), so the local hook gates the merge.
 
 ### When the local hook flags your merge
 
-The hook prints a boxed diagnosis like this:
+Inside `git merge` the hook prints the diagnosis and the auto-fix plan, then stops the merge before its commit:
+
+```
+  ⛔ The merge stops before its commit. Inside `git merge` git has
+     already written the merged files, so a renumber now would
+     miss the merge commit.
+
+  Next:
+
+    git commit          # the gate renumbers, then the merge commits
+```
+
+Git adds "Not committing merge; use 'git commit' to complete the merge." Run `git commit`. The hook runs again in the `pre-commit` stage and prints a boxed diagnosis like this:
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -188,7 +200,7 @@ The hook prints a boxed diagnosis like this:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-This is normal — the hook auto-fixed and the merge commit lands with corrected content. **Do not bypass with `--no-verify`** — there is no scenario where a stale migration is intentional.
+This is normal — the hook auto-fixed and the merge commit lands with corrected content (seen end to end on 2026-10-10: `19.0.11.3` became `19.0.11.30` in the merge commit). **Do not bypass with `--no-verify`** — there is no scenario where a stale migration is intentional.
 
 If the hook emits a fallback message (`⛔ Migration version gate — auto-fix declined`) instead, follow the printed manual command:
 
@@ -262,7 +274,7 @@ Without `--hook-type pre-merge-commit`, the gate doesn't fire on standard `git m
 
 ### What you should NOT do
 
-- **Don't disable the hook** with `git commit --no-verify` or `git merge --no-verify`. CI will still fail and reviewers will ask why.
+- **Don't disable the hook** with `git commit --no-verify` or `git merge --no-verify`. The CI gate is meant to catch it but checks nothing today, so the stale folder would reach `dev` unseen.
 - **Don't manually edit migration folder names** to "fix" the gate's complaint. Use `python -m riverdeploy merge-branches` — it knows the safe rename rules.
 - **Don't delete migrations** because they're "stale". A migration that already shipped to production is part of the audit trail; deleting it leaves dev/main in an inconsistent state.
 - **Don't add a new module's migrations** without verifying `discover_migration_modules` picks it up. The function auto-discovers via working-tree + ref scan, but if your module is in a non-standard location (not a direct child of the radar workspace), the auto-discovery misses it. Open an issue if you hit this.
@@ -278,6 +290,8 @@ Three causes, in likelihood order:
 1. **Fast-forward merge.** No merge commit was created → `pre-merge-commit` doesn't fire. Safe by construction: a fast-forward feature → dev means feature was already up-to-date with dev (you ran `merge-branches` recently to pull dev into feature). Fast-forwards can't introduce stale migrations.
 2. **`pre-merge-commit` hook type not installed.** Check `.git/hooks/pre-merge-commit` exists. If missing, run `pre-commit install --hook-type pre-merge-commit`.
 3. **You're on a feature branch.** The hook is gated to `dev` and `main` only. Merging dev → feature is the safe direction; the hook is a no-op.
+4. **The source is a pipeline branch.** A merge from `dev`, `test1` or `main` (also `origin/<branch>`, as `git pull` and the deploy tool merge) is a promotion and passes without a check. So does a merge in a worktree on a detached HEAD, such as the deploy tool's `~/oteny/radar-deploy`: there is no target branch to gate.
+5. **A hook from before 2026-10-10.** That version looked only for `.git/MERGE_HEAD` and never fired on a plain `git merge`. Pull `dev`.
 
 ### "The hook fired but auto-fix declined — what do I do?"
 

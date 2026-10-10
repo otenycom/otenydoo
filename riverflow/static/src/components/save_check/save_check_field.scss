@@ -1,0 +1,90 @@
+// The confirmation of the warnings is the footer of the yellow box (radar
+// pipeline applicants plan, decision 154; Ries, 10-Oct-2026).
+//
+// The view puts the tick box "I confirm — save with these warnings"
+// (save_check_confirmed) in its own form row below the findings box, so a bot
+// can tick it through oteny.form.session. Odoo draws that row as an ordinary
+// boolean: the label squeezed into the narrow label column, the tick box apart
+// from it. Users read the first OK as "the OK button does not work" (Fred on
+// Cancel Offboarding, Q138 (a)), because nothing tied the tick box to the
+// warnings. These rules join the row to the yellow box, tick box first, in the
+// colours of the box. They select by field name, so every transition wizard
+// with a save check gets them without a change to its view.
+//
+// The colours are the variables that .alert-warning reads, so dark mode
+// follows without a .dark.scss file. The row exists only while the field is
+// visible (save_check_state is "warning"); with errors alone the box keeps its
+// own corners and margin.
+
+.o_form_view .o_inner_group {
+    // The group of the save check, while the confirmation shows: no gap
+    // between the box and its footer.
+    &:has(> .o_wrap_field_boolean [name="save_check_confirmed"]) {
+        row-gap: 0;
+
+        > .o_cell:has(> [name="save_check_findings"]) {
+            margin-bottom: 0 !important;
+
+            > .o_field_widget {
+                margin-bottom: 0;
+            }
+        }
+
+        .o_riverflow_save_check > .alert-warning:last-child {
+            margin-bottom: 0 !important;
+            border-bottom-left-radius: 0;
+            border-bottom-right-radius: 0;
+        }
+    }
+
+    // The confirmation row: the footer of the yellow box, across both columns.
+    > .o_wrap_field_boolean:has([name="save_check_confirmed"]) {
+        display: flex !important;
+        grid-column: 1 / -1;
+        align-items: center;
+        gap: map-get($spacers, 2) * 1.25;
+        padding: map-get($spacers, 2) map-get($spacers, 3);
+        margin-bottom: map-get($spacers, 2);
+        color: var(--warning-text-emphasis);
+        background-color: var(--warning-bg-subtle);
+        border-left: 3px solid var(--warning-border-subtle);
+        border-top: 1px solid var(--warning-border-subtle);
+        border-bottom-left-radius: var(--border-radius);
+        border-bottom-right-radius: var(--border-radius);
+
+        > .o_wrap_input {
+            order: -1 !important;
+            display: flex;
+        }
+
+        > .o_wrap_label {
+            flex-grow: 1 !important;
+            color: inherit !important;
+        }
+
+        .o_form_label {
+            font-weight: $font-weight-semibold;
+            color: inherit;
+            cursor: pointer;
+        }
+
+        .form-check {
+            margin: 0;
+            padding: 0;
+            min-height: 0;
+        }
+
+        .form-check-input {
+            width: 1.125rem;
+            height: 1.125rem;
+            margin: 0;
+            cursor: pointer;
+            border: 1.5px solid var(--warning);
+
+            &:checked {
+                background-color: var(--warning);
+                border-color: var(--warning);
+            }
+        }
+    }
+}

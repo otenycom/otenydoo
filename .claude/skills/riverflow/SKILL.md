@@ -1034,6 +1034,17 @@ anything; it triggers `RIVERFLOW:SAVE_CHECK_HOLD` on `env.bus`.
 `FormController` whose `resModel` / `resId` match, so the box and the
 checkbox show.
 
+`save_check_field.scss` (19.0.1.1328, radar pipeline applicants plan, decision
+154) draws the checkbox row as the **footer of the yellow box**: checkbox
+first, label across both columns, in the `--warning-*` colours that
+`.alert-warning` reads (dark mode follows without a `.dark.scss`). Before it,
+Odoo drew the row as an ordinary boolean, the label squeezed into the 150px
+label column and the checkbox apart from it, and Fred read the first OK on
+Cancel Offboarding as "the OK button does not work" (Q138 (a)). The rules
+select by field name (`[name="save_check_confirmed"]`, `:has()`), so a form
+that carries the three view lines below gets them without a change; the field
+stays a real field node, so a bot still ticks it through `oteny.form.session`.
+
 **Views.** Every transition wizard form carries three lines in a group
 `name="save_check"`, the **last element of the sheet**, so the findings box
 and the confirmation sit right above the OK button (Ries, 2026-10-03: the

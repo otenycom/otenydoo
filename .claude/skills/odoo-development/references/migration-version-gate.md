@@ -71,17 +71,20 @@ Three layers, each catching what the previous layer can't:
 └──────────────────────────────────────────────────────────────────────────┘
                                     ↓
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ Layer 2 — Local hook (.git_hooks/migration_version_gate.py)              │
+│ Layer 2 — Local hook (radar .git_hooks/migration_version_gate.py)        │
 │   Wired in .pre-commit-config.yaml at TWO stages:                        │
-│     * pre-merge-commit  — fires on every `git merge` that produces a     │
-│                            merge commit (no fast-forward, no conflicts). │
-│     * pre-commit        — fires on every `git commit`. The hook         │
-│                            self-detects whether a merge is in progress  │
-│                            (.git/MERGE_HEAD exists) and bails if not.   │
+│     * pre-merge-commit  — inside `git merge`. Git has already written    │
+│                            the merge tree and names the merged commit   │
+│                            in GITHEAD_<sha>; MERGE_HEAD does not exist  │
+│                            yet. With stale migrations the hook STOPS    │
+│                            the commit (exit 1, "Not committing merge"). │
+│     * pre-commit        — inside the `git commit` that finishes the     │
+│                            merge (MERGE_HEAD, found with --git-path).   │
 │                                                                          │
-│   When a merge into dev/main introduces stale migrations, the hook      │
-│   auto-renumbers IN PLACE against the in-progress merge's working tree, │
-│   re-stages, exits 0 → the merge commit lands with corrected content.   │
+│   In the pre-commit stage the hook auto-renumbers IN PLACE against the  │
+│   merge's working tree, re-stages, exits 0 → the merge commit lands     │
+│   with corrected content. A promotion (source dev/test1/main, also      │
+│   origin/<branch>) is never gated. Works the same in a git worktree.    │
 │                                                                          │
 │   Scope: every developer who ran `pre-commit install --hook-type ...`.  │
 └──────────────────────────────────────────────────────────────────────────┘
@@ -97,6 +100,9 @@ Three layers, each catching what the previous layer can't:
 │                                                                          │
 │   Scope: catches GitHub PR Merge button merges, --no-verify bypasses,    │
 │   missing pre-commit install, and any future paths into dev/main.        │
+│   KNOWN FAULT (2026-10-10): the push check takes the old branch tip as   │
+│   the feature side and passes everything; the PR check does not know    │
+│   origin/dev. Open item in radar's cuneus-infrastructure roadmap.        │
 └──────────────────────────────────────────────────────────────────────────┘
                                     ↓
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -303,7 +309,7 @@ Two options:
    ```sh
    python .git_hooks/test_migration_version_gate.py
    ```
-   Five scenarios: clean merge, stale merge auto-fix, non-gated branch, re-entry guard, no-merge-in-progress. All against throwaway temp repos.
+   Thirteen tests against throwaway temp repos: clean merge, stale merge auto-fix, non-gated branch, re-entry guard, no-merge-in-progress, the promotion rule (local `test1`, `origin/test1`, both stages), the stop inside `git merge` (a `GITHEAD_` variable), a merge in a worktree, and `ThroughGitTest`, which installs the hook in the temp repo and runs the real `git merge` and `git commit`. Keep a through-git test for every stage behaviour: the other tests build the merge state by hand and call `main()`, and that is how a hook that never fired on `git merge` stayed green from April to October 2026.
 
 2. Simulate by hand on a throwaway repo. The test file's `_GateHookTestBase` is the template — set up a temp repo with branches `main`/`dev`/`feature/X`, start a merge, invoke `hook_mod.main()` directly.
 
@@ -329,7 +335,15 @@ Not via this gate. The gate's job is purely structural: ensure migration folders
 
 ### "Why does the hook tee to `.git/migration-gate.log`?"
 
-For post-mortem. Hook output goes to stderr, which is captured by the pre-commit framework and shown in the terminal — but if you closed the terminal or scrolled past, the boxed diagnosis is gone. The log preserves every run with an ISO timestamp header. `cat .git/migration-gate.log | tail -100` shows the recent history.
+For post-mortem. Hook output goes to stderr, which is captured by the pre-commit framework and shown in the terminal — but if you closed the terminal or scrolled past, the boxed diagnosis is gone. The log preserves every run with an ISO timestamp header. `cat .git/migration-gate.log | tail -100` shows the recent history. A run in a worktree (the deploy tool merges in `~/oteny/radar-deploy`) writes to the same log: the hook finds it with `git rev-parse --git-common-dir`, because a worktree's `.git` is a file.
+
+### "My `git merge` into dev stopped with "Not committing merge""
+
+The gate found a migration folder at or below the `dev`/`main` version and printed the diagnosis box. Inside `git merge` git has already written the merge tree, so a renumber at that moment would miss the merge commit and stay behind as staged changes (tested on git 2.50, 2026-10-10). Run `git commit`: the same hook runs in the `pre-commit` stage, renumbers, stages, and the merge commit carries the corrected folders. `git merge --abort` drops the merge instead.
+
+### "Why did the hook never renumber anything before 2026-10-10?"
+
+It looked for `.git/MERGE_HEAD`, which git writes only when a merge stops. Inside a clean `git merge` git names the merged commit in `GITHEAD_<sha>` instead, so the hook passed in 0.03 s on every merge. Only a `git merge --no-commit` followed by `git commit` was gated. The stale-folder protection came from `merge-branches` alone. The same fix made the promotion rule live on `dev`: it reached `main` in the merge commit of 2026-09-18 and never went back to `dev`, and without it a detected `test1` → `main` merge is either refused (the analyzer needs a feature side) or, when git names the source `origin/test1`, renumbered (about 60 folders on 2026-10-10).
 
 ### "What about merges into `test1`?"
 
@@ -358,9 +372,11 @@ Removed. `discover_migration_modules` replaced it. Old PRs that mention "added m
 
 ### Layer 2 — Local hook
 
-- **`.git_hooks/migration_version_gate.py`** — the hook script. Exits 0 on no-op or successful auto-fix, non-zero on fallback (which aborts the merge for user action).
+The hook lives in radar only. otenydoo kept an unregistered copy from 2026-09-17 that imported `riverdeploy`, which otenydoo does not have; it was deleted on 2026-10-10.
 
-- **`.git_hooks/test_migration_version_gate.py`** — 5 end-to-end tests against throwaway repos.
+- **`.git_hooks/migration_version_gate.py`** — the hook script. Exits 0 on no-op, a promotion or a successful auto-fix; exits 1 to stop a `git merge` that has stale migrations (finish with `git commit`) and on fallback (which aborts the merge for user action).
+
+- **`.git_hooks/test_migration_version_gate.py`** — 13 tests against throwaway repos, two of them through real `git merge` / `git commit`.
 
 - **`.pre-commit-config.yaml`** — wires the hook at `pre-merge-commit` and `pre-commit` stages.
 

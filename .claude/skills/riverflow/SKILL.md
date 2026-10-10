@@ -712,7 +712,12 @@ different rules (radar: Send Email, Task, Flight Booking, Journey Invoicing) kee
 install) and a post-migrate (existing databases). For open tasks already on a fixed
 date, `riverflow.state._put_fixed_open_tasks_on_rule()` puts them on the state's
 rule with a note that names the old date (rule settings only; a fixed-date setting
-would move every task to the day of the migration).
+would move every task to the day of the migration). **A fixed date can be on purpose:** a
+person who typed it chose it (radar decision 161, 10-Oct-2026: HR decides when a
+crewman can visit the AB, so a typed work permit date stays). So a migration passes
+`only=<the services whose fixed date came by accident>`; the method then changes
+only those, and only while they are still open, in that state and on Self. Without
+`only` it resets every such task of the state (19.0.1.1332).
 
 Tests: `riverflow/tests/test_state_deadline_on_entry.py`.
 

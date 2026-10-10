@@ -293,7 +293,7 @@ class RiverflowWorkflowState(models.Model):
             return {}
         return {"use_project_deadline_from": "self", "project_deadline": fixed, "days_relative_to_project": 0}
 
-    def _put_fixed_open_tasks_on_rule(self):
+    def _put_fixed_open_tasks_on_rule(self, only=None):
         """Put the open tasks of this state that sit on a fixed date (Self) back
         on the state's rule, each with a note that names the old date. Returns
         the tasks it changed.
@@ -303,18 +303,27 @@ class RiverflowWorkflowState(models.Model):
         date that no longer followed its source (Andres, radar task 32423). Only
         a rule: a fixed-date setting (follow-up, today) would move every task to
         the day of the migration. Checks active explicitly: a migration can run
-        with active_test=False."""
+        with active_test=False.
+
+        ``only`` (a recordset of services) limits the reset to those tasks, and
+        only while they are still open, in this state and on Self (radar
+        decision 161, revising Q157): a fixed date can be a date a person typed
+        on purpose, so a migration names the tasks whose fixed date came by
+        accident. Without it, every such task of the state is reset."""
         self.ensure_one()
         entry_vals = self._deadline_entry_vals()
         if self.deadline_on_entry != "rule" or not entry_vals:
             return self.env["riverflow.service"]
-        tasks = self.env["riverflow.service"].search(
-            [
-                ("state_id", "=", self.id),
-                ("is_this_a_template", "=", False),
-                ("use_project_deadline_from", "=", "self"),
-            ]
-        ).filtered(lambda task: task.active and not task.is_end_state)
+        domain = [
+            ("state_id", "=", self.id),
+            ("is_this_a_template", "=", False),
+            ("use_project_deadline_from", "=", "self"),
+        ]
+        if only is not None:
+            domain.append(("id", "in", only.ids))
+        tasks = self.env["riverflow.service"].search(domain).filtered(
+            lambda task: task.active and not task.is_end_state
+        )
         rule_label = dict(self._fields["deadline_rule_from"]._description_selection(self.env)).get(
             self.deadline_rule_from, self.deadline_rule_from
         )

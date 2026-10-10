@@ -178,3 +178,17 @@ class TestStateDeadlineOnEntry(TransactionCase):
         self.assertEqual(on_rule.use_project_deadline_from, "root")
         self.assertEqual(closed.use_project_deadline_from, "self")
         self.assertFalse(self.free._put_fixed_open_tasks_on_rule(), "a state without a rule moves nothing")
+
+    def test_only_resets_the_named_tasks(self):
+        """Radar decision 161: a fixed date can be a date a person typed on
+        purpose, so a migration names the tasks whose date came by accident. A
+        task outside ``only`` keeps its date; a named task that is no longer on
+        Self is left alone."""
+        accidental = self._task(self.waiting)
+        typed = self._task(self.waiting)
+        named_on_rule = self._task(self.waiting, use_project_deadline_from="root", days_relative_to_project=-2)
+        moved = self.waiting._put_fixed_open_tasks_on_rule(only=accidental | named_on_rule)
+        self.assertEqual(moved, accidental)
+        self.assertEqual(accidental.use_project_deadline_from, "root")
+        self.assertEqual(typed.use_project_deadline_from, "self", "a task outside only keeps its date")
+        self.assertFalse(typed.message_ids.filtered(lambda m: "fixed date" in (m.body or "")))

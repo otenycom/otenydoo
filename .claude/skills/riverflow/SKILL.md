@@ -1083,6 +1083,8 @@ the wrapper on the registry class, a clean wizard writes nothing,
 `ir.config_parameter.get_param`, which oteny_shortcut's wide-form toggle
 reads).
 
+**Layout.** The box shows each level (errors red, warnings yellow) in its own alert. Two or more findings of one level are a numbered list, one finding is a plain line (19.0.1.1324, Ries 10-Oct-2026); each item keeps the class `o_riverflow_save_check_error` or `o_riverflow_save_check_warning`.
+
 ### Chatter Mixin (`riverflow.mail.thread.review.mixin`)
 
 The mixin also copies a message from an outside sender into the Responsible team's Discuss channel. A staff user's message to a colleague of another team is copied by a separate `mail.thread` hook (`models/mail_thread.py`) into the colleague's home team channel, on every record with a chatter. Which messages reach which team channel, and why, is in [Team Channels](references/team-channels.md).

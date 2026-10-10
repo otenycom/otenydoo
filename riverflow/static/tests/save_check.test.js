@@ -111,3 +111,33 @@ test("a held OK keeps the form open and shows the warnings with the confirmation
     expect(".alert-danger").toHaveCount(0);
     expect(".o_field_widget[name=save_check_confirmed] input").toHaveCount(1);
 });
+
+test("two or more findings of one level show as a numbered list", async () => {
+    const findings = [
+        { level: "warning", message: "Abao still has 18.0 vacation hours on 09-Oct-26." },
+        { level: "warning", message: "Abao: Waits for the final reconciliation salary of November 2026." },
+        { level: "error", message: "The contract end date is missing." },
+    ];
+    onRpc("action_save", () => {
+        MockServer.env["transition.wizard"].write([1], {
+            save_check_state: "error",
+            save_check_findings: findings,
+            save_check_confirmed: false,
+        });
+        return {
+            type: "ir.actions.client",
+            tag: "riverflow_save_check_hold",
+            params: { res_model: "transition.wizard", res_id: 1, state: "error", findings },
+        };
+    });
+    await mountView({ type: "form", resModel: "transition.wizard", resId: 1 });
+    await contains("button[name=action_save]").click();
+    await animationFrame();
+    // Two warnings: a numbered list. One error: a plain line, no list.
+    expect(".alert-warning ol li.o_riverflow_save_check_warning").toHaveCount(2);
+    expect(".alert-warning ol li:nth-child(2)").toHaveText(
+        "Abao: Waits for the final reconciliation salary of November 2026."
+    );
+    expect(".alert-danger ol").toHaveCount(0);
+    expect(".alert-danger div.o_riverflow_save_check_error").toHaveText("The contract end date is missing.");
+});

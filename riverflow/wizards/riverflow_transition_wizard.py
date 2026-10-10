@@ -52,6 +52,36 @@ class TransitionWizard(models.AbstractModel):
     new_note = fields.Html(string="Internal Note")
     new_note_invisible = fields.Boolean()
 
+    def _save_check(self):
+        """A transition with ``refuse_with_open_services`` refuses while services
+        below a record are still open (radar pipeline applicants plan, decision
+        145): the error names them. What the transition closes by itself does not
+        count (``_open_services_left_by``, the rule of the closing walk). A new
+        record has no services yet."""
+        findings = super()._save_check()
+        transition = self.transition_id or self.env["riverflow.transition"].browse(
+            self.env.context.get("transition_id")
+        )
+        if not transition.refuse_with_open_services:
+            return findings
+        for record in self.records_to_transition_ids:
+            if not hasattr(record, "_open_services_left_by"):
+                continue
+            open_services = record._open_services_left_by(transition)
+            if open_services:
+                findings.append(
+                    {
+                        "level": "error",
+                        "kind": "open_services",
+                        "subject": record.display_name,
+                        "message": _(
+                            "Close the open services first: %(services)s.",
+                            services="; ".join(open_services.mapped("display_name")),
+                        ),
+                    }
+                )
+        return findings
+
     @api.model
     def default_get(self, form_fields):
         defaultValues = super().default_get(form_fields)

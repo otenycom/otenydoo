@@ -29,6 +29,7 @@
                             <field name="to_responsible_team_id" />
                             <field name="action_context" />
                             <field name="execute_on_parent_transitions" />
+                            <field name="refuse_with_open_services" />
                             <field name="mail_template_id" />
                         </group>
                     </group>
@@ -59,6 +60,7 @@
                 <field name="to_responsible_team_id" optional="hide" />
                 <field name="action_context" optional="hide" />
                 <field name="execute_on_parent_transitions" optional="hide" />
+                <field name="refuse_with_open_services" optional="hide" />
                 <field name="mail_template_id" optional="hide" />
                 <field name="description" />
             </list>

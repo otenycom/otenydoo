@@ -196,3 +196,66 @@ class TestExecuteChildTransitions(TransactionCase):
             "riverflow.trans_se_5",
         ):
             self.assertEqual(self.env.ref(xml_id).execute_on_parent_transitions, "cancel", xml_id)
+
+    # --- refuse_with_open_services (radar pipeline applicants plan, decision 145) ---
+
+    def _save(self, service, transition):
+        """Click the transition and save its wizard; returns the wizard and
+        whether the save check held the save."""
+        action = service.with_context(transition_id=transition.id)._prepare_transition_action()
+        wizard = self.env[action["res_model"]].with_context(**action["context"]).create({})
+        result = wizard.with_context(**action["context"]).action_save()
+        held = isinstance(result, dict) and result.get("tag") == "riverflow_save_check_hold"
+        return wizard, held
+
+    def test_a_transition_refuses_while_child_services_stay_open(self):
+        """Close the case refuses and names what stays open: the started child
+        service (with the open one below it, which the person working on it
+        decides about). The services its own closing will cancel do not count:
+        no false alarm for the work the rule of Q162 closes by itself."""
+        self.to_done.refuse_with_open_services = True
+        parent, children = self._case()
+
+        wizard, held = self._save(parent, self.to_done)
+
+        self.assertTrue(held)
+        self.assertEqual(parent.state_id, self.parent_open, "the save is refused")
+        self.assertEqual(wizard.save_check_state, "error")
+        self.assertEqual(parent._open_services_left_by(self.to_done), children["started"])
+        self.assertEqual(
+            wizard.save_check_findings[0]["message"],
+            f"Close the open services first: {children['started'].display_name}.",
+        )
+
+        children["started"].state_id = self.child_done
+        wizard, held = self._save(parent, self.to_done)
+        self.assertFalse(held, wizard.save_check_findings)
+        self.assertEqual(parent.state_id, self.parent_done)
+        self.assertEqual(children["not_started"].state_id, self.child_cancelled)
+        self.assertEqual(children["below_started"].state_id, self.child_cancelled, "below a closed one: cancelled")
+
+    def test_without_a_closing_value_every_open_child_service_counts(self):
+        """Send carries no value, so it closes nothing: every open child service
+        counts, also one below a closed child service; a transition without the
+        setting never refuses."""
+        parent, children = self._case()
+        self.assertEqual(
+            parent._open_services_left_by(self.to_sent),
+            children["not_started"] | children["started"] | children["below_closed"],
+        )
+        _wizard, held = self._save(parent, self.to_sent)
+        self.assertFalse(held, "the setting is off")
+
+    def test_the_older_cascades_close_what_they_close(self):
+        """cancel_children on the transition, or a cancelled target state with
+        the Done cascade, cancel the whole tree: nothing counts. The Done cascade
+        of a state that is not cancelled closes the direct child services only."""
+        parent, children = self._case()
+        self.to_sent.action_context = "{'cancel_children': True}"
+        self.assertFalse(parent._open_services_left_by(self.to_sent))
+        self.to_sent.action_context = False
+        self.parent_sent.auto_done_children_on_enter = True
+        self.assertEqual(
+            parent._open_services_left_by(self.to_sent),
+            children["below_not_started"] | children["below_started"] | children["below_closed"],
+        )

@@ -167,6 +167,18 @@ class RiverflowTransition(models.Model):
         "(Cancel, Not Needed); a started service has no marked transition and "
         "stays open.",
     )
+    # A transition that ends a case refuses while services below the record are
+    # still open, so no work is forgotten (radar pipeline applicants plan,
+    # decision 145; first user: Complete Termination of the employee). Services
+    # that this transition closes by itself do not count: the refusal reads the
+    # same rule as the closing walk (riverflow.state.mixin._open_services_left_by).
+    refuse_with_open_services = fields.Boolean(
+        string="Refuse With Open Services",
+        copy=True,
+        help="The transition screen refuses with an error that names the open services below the record: "
+        "for a service its child services, for another record the services whose subject it is, with their "
+        "child services. Services that this transition closes by itself do not count.",
+    )
     display_name = fields.Char("Display Name", compute="_compute_display_name", store=True, index="trigram")
 
     # Per-transition email template override. When set, the Send Email wizard

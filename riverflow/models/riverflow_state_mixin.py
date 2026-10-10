@@ -472,3 +472,65 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
             else:
                 # Odoo requires compute methods to set the field, or else it will disable the compute
                 record.front_office_workflow_id = record.front_office_workflow_id
+
+    # --- Child services of a record in a workflow (radar pipeline applicants
+    # plan, decisions 145-147) ---------------------------------------------------
+    #
+    # One meaning of "child services" for every record with a workflow: for a
+    # service its child services (riverflow.service overrides the method); for
+    # any other record (an employee, a log entry, a ship) the services whose
+    # subject it is. The closing walk of Q162 and the refusal of decision 145
+    # both read it, so a state that ends an employee's employment can close his
+    # services that are not started, and a transition can refuse while his
+    # services are still open.
+
+    def _workflow_child_services(self):
+        """The services whose subject is this record. A service whose parent has
+        the same subject is reached through that parent. Checks active and the
+        tombstone explicitly: a transition can run with active_test=False."""
+        self.ensure_one()
+        services = self.env["riverflow.service"].search(
+            [("res_model", "=", self._name), ("res_id", "=", self.id), ("is_this_a_template", "=", False)]
+        )
+        return services.filtered(
+            lambda service: service.active
+            and not service.to_be_deleted
+            and not (service.parent_id.res_model == self._name and service.parent_id.res_id == self.id)
+        )
+
+    def _execute_child_transitions(self):
+        """Let the child services below execute their own closing transition
+        when this record entered a state that ends the case
+        (``execute_child_transitions`` on the state; radar pipeline applicants
+        plan, Q162; for any record with a workflow since decision 147).
+
+        Called after a transition (``riverflow.transition.wizard.action_save``)
+        and by code that moves a record into such a state without a transition
+        (a bulk upload, an automatic close), so every way into the state has the
+        same effect.
+
+        Each open child service whose current state has a transition marked
+        with the same value (``execute_on_parent_transitions``) executes that
+        transition through its own transition wizard: its note, its deadline
+        setting and its side effects run as when a person clicks it, and nothing
+        writes the state directly. The whole tree is walked. A child service
+        that is closed, or that this rule just closed, is descended through,
+        because its open child services belong to the same finished case. A
+        started child service has no marked transition: it stays open and the
+        walk does not descend into it, so the person who works on it also
+        decides about the services below it.
+        """
+        for record in self:
+            signal = record.state_id.execute_child_transitions
+            if signal:
+                record._workflow_child_services()._execute_signal_down(signal)
+
+    def _open_services_left_by(self, transition):
+        """The open child services of this record that stay open when
+        ``transition`` saves (decision 145): what the transition closes by
+        itself does not count. Reads the same rule as the closing walk
+        (``_open_services_left`` mirrors ``_execute_signal_down``), so the
+        refusal and the walk never disagree."""
+        self.ensure_one()
+        signal = transition.to_state_id.execute_child_transitions
+        return self._workflow_child_services()._open_services_left(signal)

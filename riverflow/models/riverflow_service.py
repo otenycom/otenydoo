@@ -2073,41 +2073,33 @@ class Service(models.Model):
             end_states + [("is_cancelled_state", "=", True)], order="sequence", limit=1
         ) or State.search(end_states, order="sequence desc", limit=1)
 
-    def _execute_child_transitions(self):
-        """Let the child services below execute their own closing transition
-        when this service entered a state that ends the case
-        (``execute_child_transitions`` on the state; radar pipeline applicants
-        plan, Q162).
+    def _workflow_child_services(self):
+        """A service's child services (decision 147: the meaning of "child
+        services" for a service; another record uses the services whose subject
+        it is, riverflow.state.mixin)."""
+        self.ensure_one()
+        return self.child_ids.filtered(lambda child: child.active and not child.to_be_deleted)
 
-        Called after a transition (``riverflow.transition.wizard.action_save``)
-        and by code that moves a service into such a state without a transition
-        (a bulk upload, an automatic close), so every way into the state has the
-        same effect.
-
-        Each open child service whose current state has a transition marked
-        with the same value (``execute_on_parent_transitions``) executes that
-        transition through its own transition wizard: its note, its deadline
-        setting and its side effects run as when a person clicks it, and nothing
-        writes the state directly. The whole tree is walked. A child service
-        that is closed, or that this rule just closed, is descended through,
-        because its open child services belong to the same finished case. A
-        started child service has no marked transition: it stays open and the
-        walk does not descend into it, so the person who works on it also
-        decides about the services below it.
-        """
-        for service in self:
-            signal = service.state_id.execute_child_transitions
-            if signal:
-                service._execute_transitions_on_parent_signal(signal)
+    def _closing_transition_for(self, signal):
+        """The transition this service executes when its parent enters a state
+        that sends ``signal`` (Q162): the first active transition from its
+        current state marked with that value. The closing walk and the refusal
+        of decision 145 both read it."""
+        self.ensure_one()
+        return self.state_id.from_transition_ids.filtered(
+            lambda t: t.active and t.execute_on_parent_transitions == signal
+        ).sorted("sequence")[:1]
 
     def _execute_transitions_on_parent_signal(self, signal):
         """The walk of ``_execute_child_transitions`` below this service."""
         self.ensure_one()
-        for child in self.child_ids.filtered("active"):
+        self._workflow_child_services()._execute_signal_down(signal)
+
+    def _execute_signal_down(self, signal):
+        """The walk of ``_execute_child_transitions`` over these child services."""
+        for child in self.filtered("active"):
             if not child.state_id.is_end_state:
-                transition = child.state_id.from_transition_ids.filtered(
-                    lambda t, signal=signal: t.active and t.execute_on_parent_transitions == signal
-                ).sorted("sequence")[:1]
+                transition = child._closing_transition_for(signal)
                 if not transition:
                     continue
                 child._execute_transition_in_code(transition)
@@ -2117,6 +2109,45 @@ class Service(models.Model):
                     # person.
                     continue
             child._execute_transitions_on_parent_signal(signal)
+
+    def _open_services_left(self, signal, close_all=False):
+        """Of these child services, the open ones that stay open when their
+        parent enters a state (decision 145). The mirror of
+        ``_execute_signal_down``: a service closes when it is in an end state,
+        when its state has the transition marked for ``signal``, or, with
+        ``close_all``, by the Done cascade; a closed service is descended
+        through, an open one that stays open is counted and not descended into
+        (the person who works on it decides about the services below it)."""
+        left = self.browse()
+        for service in self.filtered(lambda s: s.active and not s.to_be_deleted):
+            closes = (
+                service.state_id.is_end_state
+                or close_all
+                or bool(signal and service._closing_transition_for(signal))
+            )
+            if not closes:
+                left |= service
+                continue
+            left |= service._workflow_child_services()._open_services_left(signal)
+        return left
+
+    def _open_services_left_by(self, transition):
+        """A service also closes its children by the older cascades: the
+        transition's ``cancel_children`` and a cancelled target state with
+        ``auto_done_children_on_enter`` cancel the whole tree below it; another
+        target state with that flag closes the direct child services
+        (``_cascade_done_to_children``) and leaves what lies below them."""
+        self.ensure_one()
+        to_state = transition.to_state_id
+        if self._prepare_action_context(transition).get("cancel_children") or (
+            to_state.auto_done_children_on_enter and to_state.is_cancelled_state
+        ):
+            return self.browse()
+        if to_state.auto_done_children_on_enter:
+            return self._workflow_child_services()._open_services_left(
+                to_state.execute_child_transitions, close_all=True
+            )
+        return super()._open_services_left_by(transition)
 
     def _execute_transition_in_code(self, transition):
         """Execute a transition through its own transition wizard without a

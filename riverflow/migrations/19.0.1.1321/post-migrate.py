@@ -33,4 +33,4 @@ def migrate(cr, version):
         if transition and transition.execute_on_parent_transitions != "cancel":
             transition.execute_on_parent_transitions = "cancel"
             marked.append(xml_id)
-    _logger.info("19.0.1.1320: transitions marked to execute when the parent's case ends: %s", marked)
+    _logger.info("19.0.1.1321: transitions marked to execute when the parent's case ends: %s", marked)

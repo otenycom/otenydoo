@@ -114,7 +114,7 @@ States are the stages in a workflow. Key fields:
 | `hide_in_statusbar` | Don't show in status bar |
 | `auto_progress_on_children_done` | When set, services in this state auto-progress to the next sequential workflow state once all active child services reach an end state. Used with `create_on_state_id` deferred children for parallel task patterns (e.g. parallel email-sending services). |
 | `auto_done_children_on_enter` | Mirror of `auto_progress_on_children_done` in the opposite direction. When a service enters this state, all active non-end-state children are moved to the first non-cancelled end state of their own workflow (by sequence). Used on parent terminal states whose semantics imply child sub-tasks are also complete (e.g. AUV Done means the OPS Review-AUV child is moot). Children already in an end state are skipped (idempotent). |
-| `execute_child_transitions` | Named value (`cancel`). When a service enters this state, every open child service below it executes its own transition marked `execute_on_parent_transitions` with the same value from its current state, through that transition's wizard. Set it only on a state that ends the case. See [Execute Child Transitions](#execute-child-transitions-the-parent-ends-the-case-1901320). |
+| `execute_child_transitions` | Named value (`cancel`). When a service enters this state, every open child service below it executes its own transition marked `execute_on_parent_transitions` with the same value from its current state, through that transition's wizard. Set it only on a state that ends the case. See [Execute Child Transitions](#execute-child-transitions-the-parent-ends-the-case-1901321). |
 | `is_owned_by_bot` | Marks a state worked by an **automated agent** (a bot like Barney), not a human. Ownership lives in the STATE, so the bot polls `is_owned_by_bot=True` for its queue and a human review filter excludes it with `is_owned_by_bot=False`. |
 | `bot_login_hold` | A login-hold state. Register Login (queue + SLA) and Relogin occupy the one live slot. A SLA-less park does not occupy. Drain may resume a fresh SLA-less park via `_bot_resume_login_park`. Set this in the **workflow XML**. |
 
@@ -530,7 +530,7 @@ When the state entered carries `auto_done_children_on_enter` **and** `is_cancell
 
 Tests: `riverflow/tests/test_auto_done_children.py` (cancel-variant cases at the end of the class).
 
-### Execute Child Transitions: the Parent Ends the Case (19.0.1.1320)
+### Execute Child Transitions: the Parent Ends the Case (19.0.1.1321)
 
 A parent service whose case is over closes the child services that are not started **through their own transition** (radar pipeline applicants plan, Q162; Ries, 10-Oct-2026). Two named values, one shared Selection (`CHILD_TRANSITION_SIGNALS` in `riverflow_state.py`, first value `cancel`):
 

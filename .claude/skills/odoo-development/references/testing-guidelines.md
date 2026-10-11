@@ -462,6 +462,19 @@ self.assertEqual(service.project_deadline, expected) # migration healed it
 
 **Why the `flush_all()` first**: without it, creating the record leaves `project_deadline` queued for recompute (or dirty-but-unflushed). The raw `UPDATE` writes the column, but the next read sees the field is still to-compute and **recomputes it, overwriting your planted value** — the precondition assert then fails reading the correct value instead of the stale one. Flushing first clears the queue so the column read is authoritative. Cover both branches of the compute (e.g. permit-backed → renewal point, and permit-less → contract-start fallback).
 
+### Testing a Non-Stored Compute That Reads Other Records
+
+A non-stored compute whose value comes from **other** records, without an
+`@api.depends` path to them (a label on a plan row that counts blocked rows of
+other subjects), is computed once per transaction and stays in the cache. In a
+web request that is right: every request starts with an empty cache. In a test,
+a later read in the same test returns the first value, so an assert after a
+change fails although the screen would be right. Do not invalidate the cache
+(the rule above): assert the **rule** that the compute reads (the helper method)
+after the change, and the field's text only in the first state. Radar example:
+rivercreds `blocks_label` and `_get_rows_blocked_by` in
+`tests/test_credential_dependency.py` (11-Oct-2026).
+
 ### Testing a Query Count (the cold-cache exception)
 
 A test that guards against an **N+1 regression** is the second sanctioned exception to the no-invalidate rule. Every RPC starts with an empty ORM cache, so the test must clear the cache to read as cold as a real request does. `self.env.invalidate_all()` also flushes pending writes first, so no flush call is needed.

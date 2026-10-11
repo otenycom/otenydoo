@@ -18,3 +18,19 @@
 
 `oteny_backup_trigger` and `odoo_parallel_tests` are small enough that their
 `README.md` and the `odoo-development` references cover them.
+
+## Where knowledge goes
+
+The skill bundles follow the module layers (Ries, 11-Oct-2026). A rule, term or
+pattern lives in the skill of the lowest layer that owns its concept: the Odoo
+craft in `odoo-development`, a generic concept (services, states, transitions,
+check results, the Radar) in the skill of its module here. A business repository
+(radar) links to these skills and never copies them; its own skills hold only
+what its own modules add. `AGENTS.md` holds only how agents work and may point
+to a skill in one line.
+
+Before you answer, design or write, search the skill of the concept and the
+layers below it, and extend the section that exists instead of starting a
+second copy. A rule written in the wrong place is not found by the next agent,
+and two copies drift apart. Radar's version of this rule, with its layer table:
+`radar/.claude/skills/SKILL.MD`, "Where Knowledge Goes".

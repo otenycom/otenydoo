@@ -420,6 +420,18 @@ def migrate(cr, version):
 
 See [Coding Patterns - registry.loaded Guard](coding-patterns.md#registryloaded-guard-and-migration-pattern) for more details.
 
+**When `_impl` itself reads a guarded field, use `end-migrate.py`.** The `_impl`
+call bypasses only its own guard. If it reads another computed field whose
+compute also returns while the registry loads (a non-stored One2many such as a
+subject's `service_ids`), Odoo stops the upgrade with *"Compute method failed to
+assign <records>.<field>"*. Odoo runs the `end` stage of every module after it
+sets `registry.loaded = True` (`odoo/modules/loading.py`, STEP 3.5), so put that
+step in `migrations/<version>/end-migrate.py`, next to the post-migrate of the
+same version: there every compute runs. Found on the production copy of a radar
+release (riverflow service checks that read `crewradar.site.service_ids`,
+crewradar_cuneus_sign `migrations/19.0.6.216/end-migrate.py`, 11-Oct-2026). An
+end script runs only on `-u`, in version order like the other stages.
+
 ### Recomputing a Stored Field After Its Formula Changes
 
 Odoo recomputes a **stored** computed field on upgrade only when the field is **newly added** to the model, or when a dependency's stored value actually changes. Changing **only the compute body or the `@api.depends` list** does **not** re-trigger it — every existing row keeps the value the old formula stored.

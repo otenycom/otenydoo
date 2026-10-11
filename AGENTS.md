@@ -4,6 +4,11 @@
 [`.claude/skills/SKILL.MD`](.claude/skills/SKILL.MD), then the skill of the
 module you touch.
 
+Knowledge goes into the skill of the module that owns the concept, not into
+this file: this file holds only how agents work. Search that skill and the
+layers below it before you answer, design or write ([`.claude/skills/SKILL.MD`](.claude/skills/SKILL.MD),
+"Where knowledge goes").
+
 ## What this repository is
 
 Oteny's generic Odoo 19 modules and the Talents a bot reads to work them. The

@@ -597,8 +597,13 @@ belong in riverflow; an app only produces checks):
   adds other anchors (log entry, employee, ship) routes those itself and calls `super()`
   for the rest.
 - `riverflow.service` inherits `riverflow.check.results.mixin` and has a stored
-  `check_result_ids` (`models/riverflow_service_check_results.py`), shown as tags at the
-  top of the service form, hidden when empty.
+  `check_result_ids` (`models/riverflow_service_check_results.py`), shown on the service
+  form as the regular field Issues after Tags, hidden when empty, as on the log entry
+  form (19.0.1.1338; until then a line at the top of the page). Every list of services
+  shows them as an optional Issues column, shown by default: the services list, the
+  supply order list, the child services on the form, and the apps' Services tabs
+  (radar credential dependencies follow-up, Ries 11-Oct-2026). A new list of services
+  gets the same column.
 - An app produces checks through three hooks: `_get_services_with_checks` (the services it
   claims — the compute does nothing, and never searches, for a service no producer
   claims), `_get_service_check_types` (the types the sync owns; it never touches another
@@ -612,6 +617,36 @@ belong in riverflow; an app only produces checks):
   `_compute_check_result_ids_impl()` directly.
 - First producer: `crewradar_creds` `placement_already_covered` (One per Placement).
   Tests: `tests/test_service_check_results.py` (hooks patched).
+
+### Writing Check Results and Screen Texts
+
+Rules for every module that produces check results or shows warnings (moved here
+from the radar CLAUDE.md on 11-Oct-2026: they belong to the concept, not to the
+agent rules).
+
+- **A screen reads the check result; it never repeats its rule** (Ries,
+  10-Oct-2026). When a transition wizard, a save check or a view needs a fact that
+  a check result on the record already states (radar example: "Final Salary
+  Before Termination" on the employee), look up that check result
+  (`check_result_ids`, by `check_type`, `active` and not `to_be_deleted`) and use
+  its severity and text. Do not call or copy the rule behind it: one rule, one
+  text, and the screen and the Issues never disagree.
+- **Texts on screen are short and general** (Ries, 10-Oct-2026). A warning or an
+  error states the rule and the way out in one or two sentences. It never names a
+  context that the system cannot see (a country's law, where an employee goes, why
+  he leaves), because the text then reads wrong in the other cases.
+- **The topic comes first** (Ries, 11-Oct-2026). A short Issues column cuts the
+  end of a tag, so the subject of the issue leads: "Rijnvaartverklaring is
+  blocking", not "Blocked by Rijnvaartverklaring"; "A1 is blocked", not "Blocks
+  A1". A filter name may keep the long form ("Blocked by Dependency"): a filter
+  menu has room.
+- **A release that changes a check's rule or text recomputes the stored results**
+  (Ries, 11-Oct-2026). Check results are stored, and many have no trigger of
+  their own, so without a recompute they keep the old text until the next daily
+  job, which is off on a neutralized copy. The release's migration recomputes
+  them in its `end-migrate.py` (after the registry is loaded; odoo-development
+  `migrations.md`), so a deploy and a restore show the current texts at once.
+  Radar example: crewradar_creds `migrations/19.0.2.305/end-migrate.py`.
 
 ### Tombstones: Retire Instead of Delete in a Compute (19.0.1.1299)
 

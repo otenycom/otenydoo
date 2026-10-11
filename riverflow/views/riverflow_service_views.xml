@@ -31,9 +31,6 @@
                         invisible="not is_root_a_template" />
                     <widget name="web_ribbon" title="Archived" bg_color="text-bg-danger"
                         invisible="active" />
-                    <!-- The service's Issues (check results), as on the other forms with Issues. -->
-                    <field name="check_result_ids" widget="many2many_tags" options="{'color_field': 'color'}"
-                        readonly="1" nolabel="1" invisible="not check_result_ids" />
                     <div class="oe_title">
                         <label for="name" />
                         <h2>
@@ -50,6 +47,10 @@
                             <field name="responsible_team_id" />
                             <field name="tag_ids" widget="many2many_tags"
                                 options="{'color_field': 'color', 'no_create_edit': True}" />
+                            <!-- The service's Issues (check results): a regular field, shown only
+                                 when the service has one, as Issues on the log entry form. -->
+                            <field name="check_result_ids" string="Issues" widget="many2many_tags"
+                                options="{'color_field': 'color'}" readonly="1" invisible="not check_result_ids" />
                             <field name="supply_order_service_id" invisible="not supply_order_service_id" />
                             <field name="internal_notes_summary" invisible="not internal_notes_summary" readonly="1" />
                             <field name="external_messages_summary" invisible="not external_messages_summary" readonly="1" />
@@ -165,6 +166,7 @@
                                     <field name="end_date" optional="hide" />
                                     <field name="tag_ids" widget="many2many_tags" options="{'color_field': 'color'}" readonly="1" optional="show" />
                                     <field name="responsible_team_id" string="Responsible" width="120px" optional="show" />
+                                    <field name="check_result_ids" string="Issues" widget="many2many_tags" options="{'color_field': 'color'}" readonly="1" optional="show" />
                                     <field name="write_uid" string="Updated By" optional="hide" />
                                     <field name="write_date" string="Updated On" optional="hide" />
                                     <field name="front_office_workflow_id" optional="hide" />
@@ -291,6 +293,9 @@
                 <field name="display_name" optional="hide" width="300px" />
                 <field name="tag_ids" widget="many2many_tags" options="{'color_field': 'color'}" readonly="1" optional="show" width="140px" />
                 <field name="responsible_team_id" string="Responsible" width="120px" optional="show" />
+                <!-- The service's Issues (check results), as on its form and in the Radar's Issues column. -->
+                <field name="check_result_ids" string="Issues" widget="many2many_tags" options="{'color_field': 'color'}"
+                    readonly="1" optional="show" />
                 <field name="transition_buttons_json" widget="transition_buttons" width="240px" optional="show" />
                 <field name="state_id" optional="hide" decoration-success="is_end_state" width="140px" />
                 <field name="timing_json" widget="timing_widget" optional="hide" width="150px" />
@@ -484,6 +489,7 @@
                 <field name="supplier_partner_id" optional="show" />
                 <field name="tag_ids" widget="many2many_tags" options="{'color_field': 'color'}" readonly="1" optional="show" width="140px" />
                 <field name="responsible_team_id" string="Responsible" width="120px" optional="show" />
+                <field name="check_result_ids" string="Issues" widget="many2many_tags" options="{'color_field': 'color'}" readonly="1" optional="show" />
                 <field name="transition_buttons_json" widget="transition_buttons" width="240px" optional="hide" />
                 <field name="state_id" optional="show" decoration-success="is_end_state" width="140px" />
                 <field name="supply_unit_price" optional="hide" />

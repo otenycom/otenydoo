@@ -49,6 +49,13 @@ existing databases without a migration. Only new **fields** and changed
 
 Avoid duplicate definitions (same field on the canonical record **and** a second “patch” file) unless transitioning — it is redundant on fresh install.
 
+**A test database that is only updated misses the value too.** `cr-test` after
+`-u` keeps the old rows, and the release migration of a version it already has
+does not run there, so a test that reads the new field fails although the code
+is right (radar, 11-Oct-2026: the A1 states lacked `subject_to_credential_dependency`).
+Reinstall the test database ([fresh-db-install.md](fresh-db-install.md)); a
+fresh install reads the canonical XML. Do not adapt the test.
+
 ## Changing an existing field value on a `noupdate` record
 
 The best practice above covers **new** fields (idempotent guards like `WHERE field IS NULL`). Changing a field that already **holds** a shipped value needs a different guard: the post-migrate updates only when the row still carries the originally shipped value, so a database-specific manual override survives the migration:

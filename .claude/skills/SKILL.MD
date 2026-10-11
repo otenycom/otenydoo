@@ -28,6 +28,10 @@ check results, the Radar) in the skill of its module here. A business repository
 (radar) links to these skills and never copies them; its own skills hold only
 what its own modules add. `AGENTS.md` holds only how agents work and may point
 to a skill in one line.
+A skill here never links a file of a business repository: it names it in
+plain text. The Knowledge sync of a business that does not have that file
+cannot resolve the link and logs a warning (seen on radar's test1,
+11-Oct-2026, `xml-data-noupdate.md` → `fresh-db-install.md`).
 
 Before you answer, design or write, search the skill of the concept and the
 layers below it, and extend the section that exists instead of starting a

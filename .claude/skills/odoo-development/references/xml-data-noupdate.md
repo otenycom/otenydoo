@@ -53,8 +53,10 @@ Avoid duplicate definitions (same field on the canonical record **and** a second
 `-u` keeps the old rows, and the release migration of a version it already has
 does not run there, so a test that reads the new field fails although the code
 is right (radar, 11-Oct-2026: the A1 states lacked `subject_to_credential_dependency`).
-Reinstall the test database ([fresh-db-install.md](fresh-db-install.md)); a
-fresh install reads the canonical XML. Do not adapt the test.
+Reinstall the test database with the full module list of the business (a
+business repository keeps its own recipe; radar: crewradar-development,
+`fresh-db-install.md`); a fresh install reads the canonical XML. Do not adapt
+the test.
 
 ## Changing an existing field value on a `noupdate` record
 

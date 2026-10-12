@@ -1,6 +1,8 @@
 import logging
 import os
 
+from werkzeug.exceptions import NotFound
+
 from odoo import api, fields, models
 from odoo.http import Stream
 from odoo.tools import config
@@ -190,6 +192,10 @@ class IrAttachment(models.Model):
             and not os.path.exists(self._full_path(self.store_fname))
         ):
             data = self._file_read(self.store_fname)
+            if not data and self.file_size:
+                # The bucket failed or lost the object. An empty 200 with the real
+                # etag could be cached and stay blank after the bucket recovers.
+                raise NotFound()
             return Stream(
                 type="data",
                 data=data,

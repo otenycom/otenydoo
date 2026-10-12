@@ -94,6 +94,35 @@ class TestCloudFilestoreHttp(CloudFilestoreReadMixin, HttpCase):
         self._patch_cloud_filestore()
         attachment = self._bucket_only_attachment(b"streamed from the bucket")
         self.authenticate("admin", "admin")
-        response = self.url_open(f"/web/content/{attachment.id}?download=true")
+        with patch.object(self.fake, "get", wraps=self.fake.get) as get:
+            response = self.url_open(f"/web/content/{attachment.id}?download=true")
+        get.assert_called()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content, b"streamed from the bucket")
+
+    def test_http_stream_bucket_failure_is_404(self):
+        """An empty body must never be sent with the real etag: a cache would keep it."""
+        self._patch_cloud_filestore()
+        attachment = self._bucket_only_attachment(b"streamed from the bucket")
+        self.authenticate("admin", "admin")
+        logger = "odoo.addons.oteny_cloud_filestore.models.ir_attachment"
+        self.fake.objects.clear()
+        response = self.url_open(f"/web/content/{attachment.id}?download=true")
+        self.assertEqual(response.status_code, 404)
+        self.fake.objects[attachment.store_fname] = b"streamed from the bucket"
+        self.fake.down = True
+        with self.assertLogs(logger, level="WARNING"):
+            response = self.url_open(f"/web/content/{attachment.id}?download=true")
+        self.assertEqual(response.status_code, 404)
+
+    def test_http_stream_genuinely_empty_file_is_200(self):
+        self._patch_cloud_filestore()
+        # Odoo keeps no store_fname for empty content, so build the case by hand.
+        attachment = self._bucket_only_attachment(b"x")
+        # write() ignores file_size, so set it in SQL; the HTTP worker has its own cache.
+        self.env.cr.execute("UPDATE ir_attachment SET file_size = 0 WHERE id = %s", [attachment.id])
+        self.fake.objects[attachment.store_fname] = b""
+        self.authenticate("admin", "admin")
+        response = self.url_open(f"/web/content/{attachment.id}?download=true")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"")

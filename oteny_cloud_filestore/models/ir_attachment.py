@@ -1,7 +1,11 @@
+import logging
+
 from odoo import api, models
 from odoo.tools import config
 
 from ..tools.cloud_store import CloudStore
+
+_logger = logging.getLogger(__name__)
 
 PARAM_PREFIX = "oteny_cloud_filestore."
 
@@ -51,6 +55,11 @@ class IrAttachment(models.Model):
         else:
             access_key_id = self._cloud_filestore_param("read_access_key_id")
             secret_access_key = self._cloud_filestore_param("read_secret_access_key")
+        if not (access_key_id and secret_access_key):
+            # Empty keys would let boto3 fall back to ambient credentials
+            # (environment, ~/.aws, instance profile): never use those.
+            _logger.warning("Cloud filestore: no complete access key for mode %s, store disabled", mode)
+            return None
         settings = (
             self._cloud_filestore_param("endpoint_url"),
             self._cloud_filestore_param("region"),

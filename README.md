@@ -12,6 +12,7 @@ in `.git_hooks/` holds it on every commit.
 |---|---|---|
 | `oteny_shortcut` | `web` | Shortcuts and filters on any model's views. |
 | `oteny_audit` | `base`, `mail` | The audit trail: who changed which field when, on any model. |
+| `oteny_cloud_filestore` | `base`, `mail`, `web` | File contents in an S3-compatible bucket: production writes, a clone reads with a read-only key. |
 | `oteny_backup_trigger` | `base` | Trigger an Odoo.sh backup from a button or a cron. |
 | `oteny_bot` | `base`, `mail`, `web` | The bridge between an Oteny business bot and this Odoo: the Discuss channel, the activity log, the form session, and the work contract the platform calls. |
 | `oteny_knowledge_sync` | `base`, `mail`, `knowledge` | Publish every configured repository's `.claude/skills` as locked Knowledge articles, one tree per root. A markdown skill path is resolved across every configured root, so a CrewRadar article can name an Otenydoo skill. |
@@ -50,8 +51,8 @@ parallel runner on a test database:
 ```zsh
 ~/odoo/venv/bin/python3 ~/odoo/odoo19/odoo-bin --stop-after-init --test-enable \
   --addons-path=~/odoo/odoo19/addons,~/odoo/enterprise19,~/oteny/otenydoo \
-  -d cr-test -u oteny_shortcut,oteny_audit,oteny_bot,riverflow,oteny_knowledge_sync,odoo_parallel_tests \
-  --test-tags=oteny_shortcut,oteny_audit,oteny_bot,riverflow,oteny_knowledge_sync,odoo_parallel_tests
+  -d cr-test -u oteny_shortcut,oteny_audit,oteny_cloud_filestore,oteny_bot,riverflow,oteny_knowledge_sync,odoo_parallel_tests \
+  --test-tags=oteny_shortcut,oteny_audit,oteny_cloud_filestore,oteny_bot,riverflow,oteny_knowledge_sync,odoo_parallel_tests
 ```
 
 The GitHub workflow `tests.yml` runs the community-only modules on the official

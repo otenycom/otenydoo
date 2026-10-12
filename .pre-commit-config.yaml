@@ -6,7 +6,7 @@ repos:
         name: One business is never the template (Otenydoo rule)
         entry: .git_hooks/customer_template_gate.py
         language: system
-        files: '^(oteny_shortcut|oteny_audit|oteny_backup_trigger|oteny_bot|riverflow|odoo_parallel_tests|oteny_knowledge_sync|talents)/'
+        files: '^(oteny_shortcut|oteny_audit|oteny_backup_trigger|oteny_bot|riverflow|odoo_parallel_tests|oteny_knowledge_sync|oteny_cloud_filestore|talents)/'
         verbose: true
       - id: customer-template-gate-whole-tree
         name: Customer-template gate, whole tree, before the push

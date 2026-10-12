@@ -13,6 +13,7 @@ from botocore.exceptions import (
 
 from odoo.tests import BaseCase, tagged
 
+from ..tools import cloud_store
 from ..tools.cloud_store import CloudStore, CloudStoreError, CloudStoreUnavailable
 
 
@@ -110,3 +111,40 @@ class TestCloudStoreErrors(BaseCase):
         with self.assertRaises(CloudStoreError) as caught:
             store.put("ab/abc", b"x")
         self.assertNotIsInstance(caught.exception, CloudStoreUnavailable)
+
+    def test_store_wide_refusals_are_access_errors(self):
+        """A key, rights or bucket fault concerns every file: it must alert."""
+        cases = (
+            (403, "AccessDenied"),
+            (403, "InvalidAccessKeyId"),
+            (403, "SignatureDoesNotMatch"),
+            (404, "NoSuchBucket"),
+            (401, "Unauthorized"),
+            (400, "InvalidBucketName"),
+            (400, "AllAccessDisabled"),
+        )
+        for status, code in cases:
+            error = _client_error(status, code)
+            store = self._store(put_object=error, get_object=error, head_object=error, delete_object=error)
+            for call in (
+                lambda: store.put("ab/abc", b"x"),
+                lambda: store.get("ab/abc"),
+                lambda: store.head("ab/abc"),
+                lambda: store.delete("ab/abc"),
+            ):
+                with self.assertRaises(cloud_store.CloudStoreAccessError, msg=code) as caught:
+                    call()
+                self.assertNotIsInstance(caught.exception, CloudStoreUnavailable)
+
+    def test_missing_key_stays_none_next_to_access_errors(self):
+        store = self._store(
+            get_object=_client_error(404, "NoSuchKey"), head_object=_client_error(404, "NoSuchKey")
+        )
+        self.assertIsNone(store.get("ab/abc"))
+        self.assertIsNone(store.head("ab/abc"))
+
+    def test_per_object_refusal_is_a_plain_error(self):
+        store = self._store(put_object=_client_error(400, "EntityTooLarge"))
+        with self.assertRaises(CloudStoreError) as caught:
+            store.put("ab/abc", b"x")
+        self.assertNotIsInstance(caught.exception, (cloud_store.CloudStoreAccessError, CloudStoreUnavailable))

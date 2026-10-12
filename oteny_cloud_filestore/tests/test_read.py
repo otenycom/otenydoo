@@ -6,6 +6,8 @@ from unittest.mock import patch
 from odoo.exceptions import UserError
 from odoo.tests import HttpCase, TransactionCase, tagged
 
+from ..tools import cloud_store
+from ..tools.cloud_store import CloudStoreError
 from .common import FakeCloudStore
 
 LOGGER = "odoo.addons.oteny_cloud_filestore.models.ir_attachment"
@@ -71,19 +73,34 @@ class TestCloudFilestoreRead(CloudFilestoreReadMixin, TransactionCase):
         with patch.object(type(attachment), "_cloud_filestore_alert"), self.assertLogs(LOGGER, "WARNING"):
             self.assertEqual(attachment._file_read(attachment.store_fname), b"")
 
-    def test_read_missing_object_warns_and_alerts_in_production(self):
-        """A wrong bucket or key_prefix must be visible, not a silent empty file."""
+    def test_read_missing_object_only_logs(self):
+        """A lost object is not an outage: it must never open or close the alert."""
         attachment = self._bucket_only_attachment()
         self.fake.objects.clear()
-        with patch.object(type(attachment), "_cloud_filestore_alert") as alert, self.assertLogs(
-            LOGGER, "WARNING"
-        ) as logs:
+        for mode in ("production", "clone"):
+            self.mode = mode
+            with patch.object(type(attachment), "_cloud_filestore_alert") as alert, self.assertLogs(
+                LOGGER, "WARNING"
+            ) as logs:
+                self.assertEqual(attachment._file_read(attachment.store_fname), b"")
+            self.assertIn("not in the bucket", logs.output[0])
+            alert.assert_not_called()
+
+    def test_read_access_error_alerts_in_production(self):
+        attachment = self._bucket_only_attachment()
+        refusal = cloud_store.CloudStoreAccessError("get_object: store refused (403 AccessDenied)")
+        with patch.object(self.fake, "get", side_effect=refusal), patch.object(
+            type(attachment), "_cloud_filestore_alert"
+        ) as alert, self.assertLogs(LOGGER, "WARNING"):
             self.assertEqual(attachment._file_read(attachment.store_fname), b"")
-        self.assertIn("not in the bucket", logs.output[0])
         self.assertEqual(alert.call_args.args[0], "_bucket_failed")
-        self.mode = "clone"
-        alert_patch = patch.object(type(attachment), "_cloud_filestore_alert")
-        with alert_patch as alert, self.assertLogs(LOGGER, "WARNING"):
+
+    def test_read_per_file_refusal_only_logs(self):
+        attachment = self._bucket_only_attachment()
+        refusal = CloudStoreError("get_object: store refused (400 Whatever)")
+        with patch.object(self.fake, "get", side_effect=refusal), patch.object(
+            type(attachment), "_cloud_filestore_alert"
+        ) as alert, self.assertLogs(LOGGER, "WARNING"):
             self.assertEqual(attachment._file_read(attachment.store_fname), b"")
         alert.assert_not_called()
 
@@ -98,6 +115,28 @@ class TestCloudFilestoreRead(CloudFilestoreReadMixin, TransactionCase):
                 attachment.copy()
         self.fake.down = False
         self.assertEqual(attachment.copy().raw, b"bucket content")
+
+    def test_copy_missing_object_copies_empty(self):
+        """A file that is gone for good copies empty, as plain Odoo does."""
+        attachment = self._bucket_only_attachment()
+        attachment.invalidate_recordset(["raw"])
+        self.fake.objects.clear()
+        with patch.object(type(attachment), "_cloud_filestore_alert") as alert, self.assertLogs(
+            LOGGER, "WARNING"
+        ):
+            copy = attachment.copy()
+        self.assertFalse(copy.raw)
+        alert.assert_not_called()
+
+    def test_copy_refuses_when_store_refuses_access(self):
+        attachment = self._bucket_only_attachment()
+        attachment.invalidate_recordset(["raw"])
+        refusal = cloud_store.CloudStoreAccessError("get_object: store refused (403 AccessDenied)")
+        with patch.object(self.fake, "get", side_effect=refusal), patch.object(
+            type(attachment), "_cloud_filestore_alert"
+        ), self.assertLogs(LOGGER, "WARNING"):
+            with self.assertRaises(UserError):
+                attachment.copy()
 
     def test_read_failure_returns_empty_and_alerts(self):
         attachment = self._bucket_only_attachment()

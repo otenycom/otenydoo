@@ -44,9 +44,12 @@ production save keeps the file local.
 
 ## Setup
 
-1. Make a bucket at an S3-compatible provider. On Odoo.sh, add `boto3` to
-   the `requirements.txt` of the business repository before you install the
-   module. Without it, the module cannot be installed.
+1. Make a bucket at an S3-compatible provider. On Odoo.sh, add
+   `boto3>=1.36` to the `requirements.txt` of the business repository before
+   you install the module. Without it, the module cannot be installed. The
+   module needs botocore 1.36 or newer for the checksum options. With an
+   older botocore, the store fails to build. That only logs a warning and
+   posts the alert, and the files stay local.
 2. Make a write key with put, get, head and delete rights on the bucket.
 3. Make a read key with only `s3:GetObject`.
 4. Set these system parameters (all prefixed `oteny_cloud_filestore.`):
@@ -78,7 +81,9 @@ attachment (for example `ab/ab12...`).
   so the same content is one object.
 - **A read**: if the local file exists, Odoo reads it. If not, the module
   reads the object from the bucket. A bucket error never raises: the caller
-  gets empty bytes, as Odoo gives for a missing local file.
+  gets empty bytes, as Odoo gives for a missing local file. In production, a
+  store that cannot be used posts the alert. An object that is missing, or a
+  refusal of one file, only logs a warning.
 - **A download in the browser**: Odoo reads the bytes from the bucket and
   sends them itself. The browser never sees the bucket. A file that is
   missing in the bucket gives a 404 and never an empty 200 that a browser
@@ -108,11 +113,21 @@ The next run continues. The same job does the first migration of an
 existing database: install the module, set the parameters and the write key,
 and the job moves the old files in batches.
 
+A refusal that concerns the whole store counts as an outage. This is an HTTP
+401 or 403, or one of the error codes `AccessDenied`, `InvalidAccessKeyId`,
+`SignatureDoesNotMatch`, `NoSuchBucket`, `AllAccessDisabled` and
+`InvalidBucketName`. Examples are a write key without the right to put, a
+revoked key and a bucket that does not exist. The file stays local, the
+admins get one alert, and the cron job stops its run. The alert text never
+holds a key.
+
 A refusal of one file (for example `400 EntityTooLarge`) is not an outage.
 The file stays local, the log shows a warning `upload of ... refused`, and
 no alert is posted. A save and the cron job skip that file and continue.
-This also means that a key without the right to put (`403 AccessDenied`)
-shows only in the log: the files stay local and no alert is posted.
+
+An object that is missing in the bucket is not an outage either. A read
+logs a warning and gives empty bytes. It never opens or closes the alert,
+so a lost object cannot make the alert open and close again and again.
 
 ## Files That Stay Local
 
@@ -176,19 +191,16 @@ one of these two conditions is true:
 
 - A download holds the whole file in memory while Odoo sends it. Large files
   need the chunked streaming of plan 2.
-- `head` on a missing bucket returns None. The module counts that as "not
-  confirmed", so the local file stays. This is safe, and it means a wrong
-  bucket name shows as files that never leave the local filestore.
 - A clone reads every file from the bucket each time. A read cache comes in
   plan 2 (D21).
 - During an outage, a download of a file that is only in the bucket answers
   404, and an image shows as broken. There is no placeholder. A copy of a
   record with such a file (a duplicate, a forwarded mail) fails with "The
   file is temporarily unavailable; try again later.", so no empty copy is
-  made.
-- A file that is not local and not in the bucket logs a warning, and in
-  production it posts the outage alert. A wrong `bucket` or `key_prefix`
-  shows this way.
+  made. This holds when the store cannot be used. A file that is gone for
+  good copies empty, as plain Odoo does.
+- A file that is not local and not in the bucket logs a warning and posts no
+  alert. A wrong `bucket` or `key_prefix` shows this way, so watch the log.
 - Bucket deletes run inside the garbage collection lock of Odoo, one request
   at a time. Plan 2 batches them, before the first delete markers reach the
   hold time (R13).

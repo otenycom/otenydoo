@@ -22,6 +22,15 @@ class CloudStoreUnavailable(CloudStoreError):
     """
 
 
+class CloudStoreAccessError(CloudStoreError):
+    """The store refuses the key or the bucket for every file.
+
+    Examples: a key without the right, a revoked key, a missing bucket. This
+    is a fault of the whole store, not of one file, so callers treat it like
+    an outage. The text of this error never holds a key.
+    """
+
+
 # The whole connection family (SSL, proxy, endpoint, connect timeout, ...)
 # plus the read-side failures: all mean "cannot reach the store right now".
 _UNAVAILABLE_ERRORS = (
@@ -33,6 +42,15 @@ _UNAVAILABLE_ERRORS = (
 # Codes that mean "this key does not exist". NoSuchBucket is deliberately
 # absent: a mistyped bucket must never look like an empty store.
 _MISSING_KEY_CODES = {"NoSuchKey", "NotFound", "404"}
+# Codes that mean "the key or the bucket is refused", whatever the HTTP status.
+_ACCESS_ERROR_CODES = {
+    "AccessDenied",
+    "InvalidAccessKeyId",
+    "SignatureDoesNotMatch",
+    "NoSuchBucket",
+    "AllAccessDisabled",
+    "InvalidBucketName",
+}
 
 
 class CloudStore:
@@ -80,7 +98,7 @@ class CloudStore:
         return self.key_prefix + name
 
     def _call(self, method, name, missing_ok=False, **kwargs):
-        """Run one client call and map every failure to our two exceptions.
+        """Run one client call and map every failure to our exceptions.
 
         With missing_ok, a missing key gives None instead of an error. Only
         get, head and delete may pass it: a put to a missing key or bucket
@@ -95,6 +113,8 @@ class CloudStore:
                 raise CloudStoreUnavailable(f"{method}: store answered {status}") from error
             if missing_ok and code in _MISSING_KEY_CODES:
                 return None
+            if status in (401, 403) or code in _ACCESS_ERROR_CODES:
+                raise CloudStoreAccessError(f"{method}: store refused ({status} {code})") from error
             raise CloudStoreError(f"{method}: store refused ({status} {code})") from error
         except _UNAVAILABLE_ERRORS as error:
             raise CloudStoreUnavailable(f"{method}: store unreachable") from error

@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 from odoo.tests import TransactionCase, tagged
 
 from ..models import ir_attachment as ir_attachment_module
+from ..tools import cloud_store
 from ..tools.cloud_store import CloudStoreError, CloudStoreUnavailable
 from .common import FakeCloudStore
 
@@ -180,6 +181,17 @@ class TestCloudFilestoreJobs(TransactionCase):
         self.assertEqual(self.attachment._cloud_filestore_upload_pending(), 1)
         self.assertIn(attachment.store_fname, self.fake.objects)
         self.assertFalse(self._local_exists(attachment.store_fname))
+
+    def test_upload_access_error_stops_and_alerts(self):
+        self._save_local(b"first")
+        self._save_local(b"second")
+        alert = self.startPatcher(patch.object(type(self.attachment), "_cloud_filestore_alert"))
+        refusal = cloud_store.CloudStoreAccessError("put_object: store refused (403 AccessDenied)")
+        with patch.object(self.fake, "put", side_effect=refusal) as put:
+            with self.assertLogs(LOGGER, "WARNING"):
+                self.assertEqual(self.attachment._cloud_filestore_upload_pending(), 0)
+        self.assertEqual(put.call_count, 1)
+        self.assertEqual([call.args[0] for call in alert.call_args_list], ["_bucket_failed"])
 
     def test_upload_skips_refused_file_and_continues(self):
         refused = self._save_local(b"too large")

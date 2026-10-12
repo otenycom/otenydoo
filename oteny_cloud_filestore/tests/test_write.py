@@ -6,6 +6,7 @@ from unittest.mock import patch
 from odoo.tests import TransactionCase, tagged
 from odoo.tools import config
 
+from ..tools import cloud_store
 from ..tools.cloud_store import CloudStoreError, CloudStoreUnavailable
 from .common import FakeCloudStore
 
@@ -174,5 +175,17 @@ class TestCloudFilestoreWrite(TransactionCase):
         with self.assertLogs("odoo.addons.oteny_cloud_filestore.models.ir_attachment", "WARNING"):
             self._save(b"file one")
             self._save(b"file two")
+        self.assertTrue(self.params.get_param("oteny_cloud_filestore.outage_since"))
+        self.assertEqual(len(self._alert_messages()), 1)
+
+    def test_store_wide_refusal_stays_local_and_alerts_once(self):
+        """A write key without put rights is a store fault, not a per-file refusal."""
+        refusal = cloud_store.CloudStoreAccessError("put_object: store refused (403 AccessDenied)")
+        self.startPatcher(patch.object(self.fake, "put", side_effect=refusal))
+        with self.assertLogs("odoo.addons.oteny_cloud_filestore.models.ir_attachment", "WARNING"):
+            first = self._save(b"file one")
+            second = self._save(b"file two")
+        self.assertTrue(self._local_exists(first))
+        self.assertTrue(self._local_exists(second))
         self.assertTrue(self.params.get_param("oteny_cloud_filestore.outage_since"))
         self.assertEqual(len(self._alert_messages()), 1)

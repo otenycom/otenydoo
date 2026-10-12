@@ -12,7 +12,7 @@ from odoo.exceptions import UserError
 from odoo.http import Stream
 from odoo.tools import config, split_every
 
-from ..tools.cloud_store import CloudStore, CloudStoreError, CloudStoreUnavailable
+from ..tools.cloud_store import CloudStore, CloudStoreAccessError, CloudStoreError, CloudStoreUnavailable
 
 _logger = logging.getLogger(__name__)
 
@@ -33,6 +33,16 @@ UPLOAD_TIME_BUDGET_SECONDS = 240
 # client every time, and a settings change builds a new one. The keys of
 # this dict hold secrets: never log or print them.
 _STORE_CACHE = {}
+
+
+def _cloud_filestore_store_unusable(error):
+    """True when the error says the whole store cannot be used.
+
+    An outage (unreachable, HTTP 5xx) and a store-wide refusal (key, rights,
+    bucket) both mean that every file fails, so they alert the admins. Any
+    other CloudStoreError is a refusal of one file: it is only logged.
+    """
+    return isinstance(error, (CloudStoreUnavailable, CloudStoreAccessError))
 
 
 class IrAttachment(models.Model):
@@ -172,11 +182,11 @@ class IrAttachment(models.Model):
             return fname
         try:
             store.put(fname, bin_value)
-        except CloudStoreUnavailable as error:
-            _logger.warning("Cloud filestore: upload of %s failed, file stays local: %s", fname, error)
-            self._cloud_filestore_alert("_bucket_failed", str(error))
-            return fname
         except CloudStoreError as error:
+            if _cloud_filestore_store_unusable(error):
+                _logger.warning("Cloud filestore: upload of %s failed, file stays local: %s", fname, error)
+                self._cloud_filestore_alert("_bucket_failed", str(error))
+                return fname
             # The store refused this one file (for example 400 EntityTooLarge).
             # That is not an outage: no alert, so the next good save does not
             # end an outage that never was. The file stays local.
@@ -192,49 +202,63 @@ class IrAttachment(models.Model):
         self._cloud_filestore_alert("_bucket_ok")
         return fname
 
-    def _file_read(self, fname, size=None):
-        """Read the local file; when it is not there, read it from the bucket.
+    def _cloud_filestore_read(self, fname, size=None):
+        """Read like `_file_read`; return (data, store_unusable).
 
-        A bucket error never raises: the caller gets empty bytes, as Odoo
-        returns for a missing local file. In production the admins get an
-        alert; a clone only logs.
+        `store_unusable` is True when the read failed because the store
+        cannot be used (outage or store-wide refusal). Empty data with False
+        means the object is gone or the store refused this one file.
+        In production, an unusable store alerts the admins; a missing object
+        or a per-file refusal only logs, because neither is an outage.
         """
         mode = self._cloud_filestore_mode()
         if mode == "off" or os.path.exists(self._full_path(fname)):
-            return super()._file_read(fname, size=size)
+            return super()._file_read(fname, size=size), False
         store = self._cloud_filestore_store()
         if store is None:
-            return b""
+            return b"", True
         try:
             data = store.get(fname)
         except CloudStoreError as error:
             _logger.warning("Cloud filestore: read of %s failed: %s", fname, error)
-            if mode == "production":
+            unusable = _cloud_filestore_store_unusable(error)
+            if unusable and mode == "production":
                 self._cloud_filestore_alert("_bucket_failed", str(error))
-            return b""
+            return b"", unusable
         if data is None:
             if any(attachment.file_size for attachment in self if attachment.store_fname == fname):
                 # A file with content that is neither local nor in the bucket
-                # most likely means a wrong bucket or key_prefix: make it visible.
+                # most likely means a wrong bucket or key_prefix: make it
+                # visible in the log. It is not an outage, so no alert: an
+                # alert here would open and close with every good save.
                 _logger.warning("Cloud filestore: %s is not local and not in the bucket", fname)
-                if mode == "production":
-                    self._cloud_filestore_alert("_bucket_failed", f"{fname} is missing in the bucket")
-            return b""
-        return data[:size] if size is not None else data
+            return b"", False
+        return (data[:size] if size is not None else data), False
+
+    def _file_read(self, fname, size=None):
+        """Read the local file; when it is not there, read it from the bucket.
+
+        A bucket error never raises: the caller gets empty bytes, as Odoo
+        returns for a missing local file.
+        """
+        return self._cloud_filestore_read(fname, size=size)[0]
 
     def copy_data(self, default=None):
         """Refuse to copy a file whose content cannot be read now.
 
-        Odoo copies the content through `raw`, and a bucket error reads as
-        empty bytes. Without this check, a duplicated record or a forwarded
-        mail would get a valid-looking empty file while the bucket is down.
+        Odoo copies the content through `raw`, and a store that cannot be
+        used reads as empty bytes. Without this check, a duplicated record or
+        a forwarded mail would get a valid-looking empty file while the
+        bucket is down. A file that is gone for good copies empty, as plain
+        Odoo does, so a record with a lost file can still be duplicated.
         """
         vals_list = super().copy_data(default=default)
         if (default or {}).keys() & {"datas", "db_datas", "raw"} or self._cloud_filestore_mode() == "off":
             return vals_list
         for attachment, vals in zip(self, vals_list):
-            if attachment.file_size and not vals.get("raw"):
-                raise UserError(self.env._("The file is temporarily unavailable; try again later."))
+            if attachment.file_size and not vals.get("raw") and attachment.store_fname:
+                if attachment._cloud_filestore_read(attachment.store_fname)[1]:
+                    raise UserError(self.env._("The file is temporarily unavailable; try again later."))
         return vals_list
 
     def _to_http_stream(self):
@@ -440,12 +464,12 @@ class IrAttachment(models.Model):
                 try:
                     store.put(name, data)
                     size = store.head(name)
-                except CloudStoreUnavailable as error:
-                    _logger.warning("Cloud filestore: upload job stopped at %s: %s", name, error)
-                    self._cloud_filestore_alert("_bucket_failed", str(error))
-                    failed = True
-                    break
                 except CloudStoreError as error:
+                    if _cloud_filestore_store_unusable(error):
+                        _logger.warning("Cloud filestore: upload job stopped at %s: %s", name, error)
+                        self._cloud_filestore_alert("_bucket_failed", str(error))
+                        failed = True
+                        break
                     # A refusal of one file (for example too large) is not an outage.
                     refused += 1
                     _logger.warning(

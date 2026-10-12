@@ -1,17 +1,22 @@
 import logging
 import os
+import re
+import time
 
 from werkzeug.exceptions import NotFound
 
 from odoo import api, fields, models
 from odoo.http import Stream
-from odoo.tools import config
+from odoo.tools import config, split_every
 
 from ..tools.cloud_store import CloudStore, CloudStoreError
 
 _logger = logging.getLogger(__name__)
 
 PARAM_PREFIX = "oteny_cloud_filestore."
+
+DEFAULT_HOLD_DAYS = 365
+SECONDS_PER_DAY = 86400
 
 # One CloudStore per full set of settings, so a read does not build a boto3
 # client every time, and a settings change builds a new one. The keys of
@@ -207,6 +212,105 @@ class IrAttachment(models.Model):
                 size=len(data),
             )
         return super()._to_http_stream()
+
+    def _mark_for_gc(self, fname):
+        """Mark the name as Odoo does; in production the marker age restarts now.
+
+        The hold time counts from the last delete, so a name that was reused
+        and removed again gets a fresh marker time.
+        """
+        super()._mark_for_gc(fname)
+        if self._cloud_filestore_mode() != "production":
+            return
+        marker = os.path.join(self._full_path("checklist"), re.sub("[.:]", "", fname).strip("/\\"))
+        try:
+            os.utime(marker)
+        except OSError as error:
+            _logger.warning("Cloud filestore: marker time not updated: %s", error)
+
+    @api.model
+    def _cloud_filestore_hold_days(self):
+        """Return the hold time in days; a bad value never shortens it."""
+        value = self._cloud_filestore_param("hold_days", str(DEFAULT_HOLD_DAYS))
+        try:
+            days = int(value)
+        except ValueError:
+            days = 0
+        if days <= 0:
+            _logger.warning(
+                "Cloud filestore: hold_days %r is not a positive whole number, using %s",
+                value,
+                DEFAULT_HOLD_DAYS,
+            )
+            return DEFAULT_HOLD_DAYS
+        return days
+
+    def _gc_file_store_unsafe(self):
+        """Garbage-collect the filestore; in production delete bucket objects only after the hold time.
+
+        The checklist walk and the whitelist query are reproduced from Odoo,
+        because Odoo's version deletes at once and has no place to wait. The
+        marker files stay the master list of pending bucket deletes: a marker
+        younger than the hold time is kept for the next run. A restore sets
+        every marker to the restore date, and a lost checklist means no
+        bucket delete at all, so both failures are safe.
+        """
+        if self._cloud_filestore_mode() != "production":
+            return super()._gc_file_store_unsafe()
+
+        checklist = {}
+        for dirpath, _dirnames, filenames in os.walk(self._full_path("checklist")):
+            dirname = os.path.basename(dirpath)
+            for filename in filenames:
+                checklist["%s/%s" % (dirname, filename)] = os.path.join(dirpath, filename)
+
+        store = self._cloud_filestore_store()
+        hold_seconds = self._cloud_filestore_hold_days() * SECONDS_PER_DAY
+        now = time.time()
+        store_failed = False
+        local_removed = bucket_deleted = kept = 0
+        for names in split_every(self.env.cr.IN_MAX, checklist):
+            self.env.cr.execute("SELECT store_fname FROM ir_attachment WHERE store_fname IN %s", [names])
+            whitelist = set(row[0] for row in self.env.cr.fetchall())
+
+            for fname in names:
+                marker = checklist[fname]
+                if fname not in whitelist:
+                    try:
+                        os.unlink(self._full_path(fname))
+                        local_removed += 1
+                    except FileNotFoundError:
+                        pass
+                    except OSError as error:
+                        _logger.warning("Cloud filestore: local file not removed: %s", error)
+                    try:
+                        is_old = now - os.path.getmtime(marker) > hold_seconds
+                    except OSError:
+                        is_old = False
+                    if not (is_old and store is not None and not store_failed):
+                        kept += 1
+                        continue
+                    try:
+                        store.delete(fname)
+                        bucket_deleted += 1
+                    except CloudStoreError as error:
+                        # One failure likely means the bucket is down: stop deleting in this run.
+                        store_failed = True
+                        kept += 1
+                        _logger.warning("Cloud filestore: bucket delete failed, markers kept: %s", error)
+                        self._cloud_filestore_alert("_bucket_failed", str(error))
+                        continue
+                try:
+                    os.unlink(marker)
+                except OSError:
+                    pass
+        _logger.info(
+            "Cloud filestore gc: %d checked, %d local removed, %d bucket deleted, %d kept",
+            len(checklist),
+            local_removed,
+            bucket_deleted,
+            kept,
+        )
 
     def _cloud_filestore_alert(self, method, *args):
         """Call an alert method; a failing alert never fails the user's save."""

@@ -252,13 +252,20 @@ class IrAttachment(models.Model):
         bucket is down. A file that is gone for good copies empty, as plain
         Odoo does, so a record with a lost file can still be duplicated.
         """
-        vals_list = super().copy_data(default=default)
         if (default or {}).keys() & {"datas", "db_datas", "raw"} or self._cloud_filestore_mode() == "off":
-            return vals_list
-        for attachment, vals in zip(self, vals_list):
-            if attachment.file_size and not vals.get("raw") and attachment.store_fname:
-                if attachment._cloud_filestore_read(attachment.store_fname)[1]:
+            return super().copy_data(default=default)
+        # The content is read once, here, and handed to Odoo as `raw`: a
+        # second read to learn why the first was empty could succeed and
+        # turn the copy into a valid-looking empty file.
+        vals_list = []
+        for attachment in self:
+            attachment_default = default
+            if attachment.store_fname and attachment.file_size:
+                data, store_unusable = attachment._cloud_filestore_read(attachment.store_fname)
+                if store_unusable:
                     raise UserError(self.env._("The file is temporarily unavailable; try again later."))
+                attachment_default = {**(default or {}), "raw": data}
+            vals_list += super(IrAttachment, attachment).copy_data(default=attachment_default)
         return vals_list
 
     def _to_http_stream(self):

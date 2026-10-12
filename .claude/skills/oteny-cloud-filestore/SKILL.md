@@ -117,7 +117,8 @@ A refusal that concerns the whole store counts as an outage. This is an HTTP
 401 or 403, or one of the error codes `AccessDenied`, `InvalidAccessKeyId`,
 `SignatureDoesNotMatch`, `NoSuchBucket`, `AllAccessDisabled` and
 `InvalidBucketName`. Examples are a write key without the right to put, a
-revoked key and a bucket that does not exist. The file stays local, the
+revoked key and a bucket that does not exist (for a put and a get;
+see Known Limits for head). The file stays local, the
 admins get one alert, and the cron job stops its run. The alert text never
 holds a key.
 
@@ -191,6 +192,11 @@ one of these two conditions is true:
 
 - A download holds the whole file in memory while Odoo sends it. Large files
   need the chunked streaming of plan 2.
+- `head` on a missing bucket returns None. A HEAD answer has no body, so the
+  error code is only `404`, and the module reads that as "no such key". This
+  is safe. The upload job puts first, and a put to a missing bucket raises
+  `NoSuchBucket`, so the job stops and posts the alert. A None from `head`
+  counts as "not confirmed", so the local file stays.
 - A clone reads every file from the bucket each time. A read cache comes in
   plan 2 (D21).
 - During an outage, a download of a file that is only in the bucket answers
@@ -200,7 +206,9 @@ one of these two conditions is true:
   made. This holds when the store cannot be used. A file that is gone for
   good copies empty, as plain Odoo does.
 - A file that is not local and not in the bucket logs a warning and posts no
-  alert. A wrong `bucket` or `key_prefix` shows this way, so watch the log.
+  alert. A wrong `key_prefix` shows this way, so watch the log. A wrong
+  `bucket` is different: a put or a get raises `NoSuchBucket`, and in
+  production that posts the alert.
 - Bucket deletes run inside the garbage collection lock of Odoo, one request
   at a time. Plan 2 batches them, before the first delete markers reach the
   hold time (R13).

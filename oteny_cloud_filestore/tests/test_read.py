@@ -128,6 +128,24 @@ class TestCloudFilestoreRead(CloudFilestoreReadMixin, TransactionCase):
         self.assertFalse(copy.raw)
         alert.assert_not_called()
 
+    def test_copy_reads_the_bucket_once(self):
+        """If the only read fails, a later good read must not turn the copy into an empty file."""
+        attachment = self._bucket_only_attachment()
+        attachment.invalidate_recordset(["raw"])
+        real_get = self.fake.get
+        results = [cloud_store.CloudStoreUnavailable("down")]
+
+        def get_once_down(name):
+            if results:
+                raise results.pop()
+            return real_get(name)
+
+        with patch.object(self.fake, "get", side_effect=get_once_down), patch.object(
+            type(attachment), "_cloud_filestore_alert"
+        ), self.assertLogs(LOGGER, "WARNING"):
+            with self.assertRaises(UserError):
+                attachment.copy()
+
     def test_copy_refuses_when_store_refuses_access(self):
         attachment = self._bucket_only_attachment()
         attachment.invalidate_recordset(["raw"])

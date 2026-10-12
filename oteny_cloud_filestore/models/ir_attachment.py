@@ -2,6 +2,7 @@ import logging
 import os
 
 from odoo import api, fields, models
+from odoo.http import Stream
 from odoo.tools import config
 
 from ..tools.cloud_store import CloudStore, CloudStoreError
@@ -150,6 +151,56 @@ class IrAttachment(models.Model):
             _logger.warning("Cloud filestore: local copy of %s not removed: %s", fname, error)
         self._cloud_filestore_alert("_bucket_ok")
         return fname
+
+    def _file_read(self, fname, size=None):
+        """Read the local file; when it is not there, read it from the bucket.
+
+        A bucket error never raises: the caller gets empty bytes, as Odoo
+        returns for a missing local file. In production the admins get an
+        alert; a clone only logs.
+        """
+        mode = self._cloud_filestore_mode()
+        if mode == "off" or os.path.exists(self._full_path(fname)):
+            return super()._file_read(fname, size=size)
+        store = self._cloud_filestore_store()
+        if store is None:
+            return b""
+        try:
+            data = store.get(fname)
+        except CloudStoreError as error:
+            _logger.warning("Cloud filestore: read of %s failed: %s", fname, error)
+            if mode == "production":
+                self._cloud_filestore_alert("_bucket_failed", str(error))
+            return b""
+        if data is None:
+            return b""
+        return data[:size] if size is not None else data
+
+    def _to_http_stream(self):
+        """Stream a file that exists only in the bucket through Odoo.
+
+        The standard method stats a path in the local filestore and fails for
+        a bucket-only file. The browser never sees the bucket: the bytes are
+        read here and sent by Odoo. The whole file is held in memory.
+        """
+        self.ensure_one()
+        if (
+            self.store_fname
+            and self._cloud_filestore_mode() != "off"
+            and not os.path.exists(self._full_path(self.store_fname))
+        ):
+            data = self._file_read(self.store_fname)
+            return Stream(
+                type="data",
+                data=data,
+                mimetype=self.mimetype,
+                download_name=self.name,
+                etag=self.checksum,
+                public=self.public,
+                last_modified=self.write_date,
+                size=len(data),
+            )
+        return super()._to_http_stream()
 
     def _cloud_filestore_alert(self, method, *args):
         """Call an alert method; a failing alert never fails the user's save."""

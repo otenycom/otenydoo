@@ -1,0 +1,127 @@
+import os
+import shutil
+import tempfile
+from unittest.mock import patch
+
+from odoo.tests import TransactionCase, tagged
+
+from ..tools.cloud_store import CloudStoreUnavailable
+from .common import FakeCloudStore
+
+LOGGER = "odoo.addons.oteny_cloud_filestore.models.ir_attachment"
+
+
+@tagged("oteny_cloud_filestore", "post_install", "-at_install")
+class TestCloudFilestoreJobs(TransactionCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.attachment = cls.env["ir.attachment"]
+        cls.channel = cls.env["discuss.channel"].create({"name": "Cloud filestore alerts"})
+        cls.params = cls.env["ir.config_parameter"].sudo()
+        cls.params.set_param("oteny_cloud_filestore.alert_channel_id", str(cls.channel.id))
+        cls.params.set_param("oteny_cloud_filestore.outage_since", "")
+
+    def setUp(self):
+        super().setUp()
+        # The separate cursor of the alert shares the test transaction.
+        self.env.flush_all()
+        self.registry_enter_test_mode(register_cleanup=True)
+        # The jobs walk the whole filestore: use an empty one of this test only.
+        filestore = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, filestore, ignore_errors=True)
+        model = type(self.attachment)
+        self.startPatcher(patch.object(model, "_filestore", return_value=filestore))
+        self.fake = FakeCloudStore()
+        self.mode = "production"
+        # The ORM scans model attributes for ondelete hooks and calls a Mock with the recordset.
+        self.startPatcher(patch.object(model, "_cloud_filestore_mode", side_effect=lambda *args: self.mode))
+        self.startPatcher(patch.object(model, "_cloud_filestore_store", return_value=self.fake))
+        self.startPatcher(patch.object(model, "_storage", return_value="file"))
+
+    def _save_local(self, raw, **vals):
+        """Save a file while the bucket is down, so it stays in the local filestore."""
+        self.fake.down = True
+        if vals.get("cloud_local_only"):
+            # A local-only file never meets the bucket, so nothing is logged.
+            attachment = self.attachment.create({"name": "user.bin", "raw": raw, **vals})
+        else:
+            with self.assertLogs(LOGGER, "WARNING"):
+                attachment = self.attachment.create({"name": "user.bin", "raw": raw, **vals})
+        self.fake.down = False
+        return attachment
+
+    def _local_exists(self, fname):
+        return os.path.exists(self.attachment._full_path(fname))
+
+    def test_upload_pending_moves_local_files(self):
+        first = self._save_local(b"file one")
+        second = self._save_local(b"file two")
+        self.assertTrue(self.params.get_param("oteny_cloud_filestore.outage_since"))
+        self.assertEqual(self.attachment._cloud_filestore_upload_pending(), 2)
+        self.assertEqual(self.fake.objects[first.store_fname], b"file one")
+        self.assertEqual(self.fake.objects[second.store_fname], b"file two")
+        self.assertFalse(self._local_exists(first.store_fname))
+        self.assertFalse(self._local_exists(second.store_fname))
+        self.assertFalse(self.params.get_param("oteny_cloud_filestore.outage_since"))
+
+    def test_upload_skips_local_only(self):
+        kept = self._save_local(b"module file", cloud_local_only=True)
+        pending = self._save_local(b"user file")
+        self.attachment._cloud_filestore_upload_pending()
+        self.assertNotIn(kept.store_fname, self.fake.objects)
+        self.assertTrue(self._local_exists(kept.store_fname))
+        self.assertIn(pending.store_fname, self.fake.objects)
+
+    def test_upload_respects_limit(self):
+        for raw in (b"one", b"two", b"three"):
+            self._save_local(raw)
+        self.assertEqual(self.attachment._cloud_filestore_upload_pending(limit=2), 2)
+        self.assertEqual(len(self.fake.objects), 2)
+        self.assertEqual(self.attachment._cloud_filestore_upload_pending(limit=2), 1)
+        self.assertEqual(len(self.fake.objects), 3)
+
+    def test_upload_not_confirmed_keeps_local(self):
+        attachment = self._save_local(b"half written")
+        with patch.object(self.fake, "head", return_value=3):
+            with self.assertLogs(LOGGER, "WARNING"):
+                self.assertEqual(self.attachment._cloud_filestore_upload_pending(), 0)
+        self.assertTrue(self._local_exists(attachment.store_fname))
+
+    def test_upload_store_error_stops_and_alerts(self):
+        self._save_local(b"first")
+        self._save_local(b"second")
+        alert = self.startPatcher(patch.object(type(self.attachment), "_cloud_filestore_alert"))
+        with patch.object(self.fake, "put", side_effect=CloudStoreUnavailable("down")) as put:
+            with self.assertLogs(LOGGER, "WARNING"):
+                self.assertEqual(self.attachment._cloud_filestore_upload_pending(), 0)
+        self.assertEqual(put.call_count, 1)
+        self.assertEqual([call.args[0] for call in alert.call_args_list], ["_bucket_failed"])
+
+    def test_download_all_restores_local_files(self):
+        attachment = self.attachment.create({"name": "user.bin", "raw": b"bucket only"})
+        fname = attachment.store_fname
+        self.assertEqual(self.fake.objects[fname], b"bucket only")
+        self.assertFalse(self._local_exists(fname))
+        self.assertGreaterEqual(self.attachment._cloud_filestore_download_all(), 1)
+        with open(self.attachment._full_path(fname), "rb") as local_file:
+            self.assertEqual(local_file.read(), b"bucket only")
+
+    def test_download_never_overwrites_local(self):
+        attachment = self._save_local(b"local copy")
+        self.fake.objects[attachment.store_fname] = b"other bytes"
+        self.attachment._cloud_filestore_download_all()
+        with open(self.attachment._full_path(attachment.store_fname), "rb") as local_file:
+            self.assertEqual(local_file.read(), b"local copy")
+
+    def test_jobs_do_nothing_in_wrong_mode(self):
+        pending = self._save_local(b"pending file")
+        bucket_only = self.attachment.create({"name": "other.bin", "raw": b"bucket only"})
+        puts_before = list(self.fake.puts)
+        self.mode = "clone"
+        self.assertEqual(self.attachment._cloud_filestore_upload_pending(), 0)
+        self.assertEqual(self.fake.puts, puts_before)
+        self.assertTrue(self._local_exists(pending.store_fname))
+        self.mode = "off"
+        self.assertEqual(self.attachment._cloud_filestore_download_all(), 0)
+        self.assertFalse(self._local_exists(bucket_only.store_fname))

@@ -312,6 +312,144 @@ class IrAttachment(models.Model):
             kept,
         )
 
+    @api.model
+    def _cloud_filestore_local_names(self):
+        """Return the sorted names of the files in the local filestore.
+
+        Only the two-level names `xx/<sha>` count. The checklist folder holds
+        the delete markers and is skipped, and so is anything else that Odoo
+        did not write.
+        """
+        root = self._filestore()
+        names = []
+        for folder in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+            folder_path = os.path.join(root, folder)
+            if folder == "checklist" or not os.path.isdir(folder_path):
+                continue
+            for filename in sorted(os.listdir(folder_path)):
+                if os.path.isfile(os.path.join(folder_path, filename)):
+                    names.append("%s/%s" % (folder, filename))
+        return names
+
+    @api.model
+    def _cloud_filestore_upload_pending(self, limit=500):
+        """Move local user files to the bucket; return the number of confirmed uploads.
+
+        This one job covers the first migration of an existing database and
+        the catch-up after a bucket outage. A file is pending when at least
+        one attachment that is not local-only uses its name. The local copy
+        is removed only after the bucket reports the same size, so a lost or
+        short object never costs the only copy. A run stops at the first
+        bucket error, because the next file would most likely fail as well.
+        """
+        if self._cloud_filestore_mode() != "production":
+            return 0
+        store = self._cloud_filestore_store()
+        if store is None:
+            return 0
+        uploaded = not_confirmed = 0
+        failed = False
+        names = self._cloud_filestore_local_names()
+        for batch in split_every(self.env.cr.IN_MAX, names):
+            if failed or uploaded >= limit:
+                break
+            self.env.cr.execute(
+                "SELECT DISTINCT store_fname FROM ir_attachment WHERE store_fname IN %s AND NOT cloud_local_only",
+                [tuple(batch)],
+            )
+            pending = set(row[0] for row in self.env.cr.fetchall())
+            for name in batch:
+                if name not in pending:
+                    continue
+                if uploaded >= limit:
+                    break
+                path = self._full_path(name)
+                try:
+                    with open(path, "rb") as local_file:
+                        data = local_file.read()
+                except OSError as error:
+                    _logger.warning("Cloud filestore: local file %s not read: %s", name, error)
+                    continue
+                try:
+                    store.put(name, data)
+                    size = store.head(name)
+                except CloudStoreError as error:
+                    _logger.warning("Cloud filestore: upload job stopped at %s: %s", name, error)
+                    self._cloud_filestore_alert("_bucket_failed", str(error))
+                    failed = True
+                    break
+                if size != len(data):
+                    # None can also mean a missing bucket: the local file is the only safe copy.
+                    not_confirmed += 1
+                    _logger.warning("Cloud filestore: upload of %s not confirmed, file stays local", name)
+                    continue
+                try:
+                    os.unlink(path)
+                except OSError as error:
+                    _logger.warning("Cloud filestore: local copy of %s not removed: %s", name, error)
+                uploaded += 1
+        _logger.info(
+            "Cloud filestore upload job: %d uploaded, %d not confirmed, %d files checked%s",
+            uploaded,
+            not_confirmed,
+            len(names),
+            ", stopped by a bucket error" if failed else "",
+        )
+        if uploaded:
+            self._cloud_filestore_alert("_bucket_ok")
+        return uploaded
+
+    @api.model
+    def _cloud_filestore_download_all(self, limit=500):
+        """Bring files from the bucket back to the local filestore; return the number written.
+
+        This is the reverse migration, started by hand. It never overwrites a
+        local file, and it stops at the first bucket error. A run with a
+        limit can be repeated: files that are local already are skipped.
+        """
+        if self._cloud_filestore_mode() == "off":
+            return 0
+        store = self._cloud_filestore_store()
+        if store is None:
+            return 0
+        self.env.flush_all()
+        self.env.cr.execute("SELECT DISTINCT store_fname FROM ir_attachment WHERE store_fname IS NOT NULL")
+        names = sorted(row[0] for row in self.env.cr.fetchall())
+        written = missing = 0
+        for name in names:
+            if written >= limit:
+                break
+            path = self._full_path(name)
+            if os.path.exists(path):
+                continue
+            try:
+                data = store.get(name)
+            except CloudStoreError as error:
+                _logger.warning("Cloud filestore: download job stopped at %s: %s", name, error)
+                break
+            if data is None:
+                missing += 1
+                _logger.warning("Cloud filestore: %s is not in the bucket, skipped", name)
+                continue
+            try:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                # Mode "x" fails when the file appeared meanwhile: never overwrite.
+                with open(path, "xb") as local_file:
+                    local_file.write(data)
+            except FileExistsError:
+                continue
+            except OSError as error:
+                _logger.warning("Cloud filestore: local file %s not written: %s", name, error)
+                break
+            written += 1
+        _logger.info(
+            "Cloud filestore download job: %d written, %d missing in the bucket, %d names checked",
+            written,
+            missing,
+            len(names),
+        )
+        return written
+
     def _cloud_filestore_alert(self, method, *args):
         """Call an alert method; a failing alert never fails the user's save."""
         try:

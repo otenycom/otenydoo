@@ -10,7 +10,7 @@
     "author": "Oteny",
     "depends": ["base", "mail", "web"],
     "external_dependencies": {"python": ["boto3"]},
-    "data": ["data/ir_config_parameter.xml"],
+    "data": ["data/ir_config_parameter.xml", "data/ir_cron.xml"],
     "post_init_hook": "post_init_hook",
     "installable": True,
     "application": False,

@@ -107,19 +107,35 @@ these files too.
 
 ## The Reverse Migration
 
-To move the files back to the local filestore, run this in `odoo-bin shell`
-on a database that is in production or clone mode:
+To move the files back to the local filestore, do these steps in this order.
+The order matters. In production mode the upload cron runs every 10 minutes,
+and every save removes its local copy after the put. Both would undo a
+download.
 
-```python
-env["ir.attachment"]._cloud_filestore_download_all(limit=500)
-env.cr.commit()
-```
+1. Remove the two write options
+   (`cloud_filestore_write_access_key_id` and
+   `cloud_filestore_write_secret_access_key`) from `odoo.conf` of the
+   production server, and restart Odoo. Odoo is now in clone mode. New saves
+   stay on the local disk, the upload cron does nothing, and reads still come
+   from the bucket with the read key.
+2. Run this in `odoo-bin shell`, and commit after each run:
 
-The method returns the number of files written. Run it again until it
-returns 0. It never overwrites a local file, it checks that the bytes match
-the content-hash name, and it stops at the first bucket error. After the
-last run, clear `oteny_cloud_filestore.endpoint_url` to switch the module
-off.
+   ```python
+   env["ir.attachment"]._cloud_filestore_download_all(limit=500)
+   env.cr.commit()
+   ```
+
+   The method returns the number of files written. It never overwrites a
+   local file, and it checks that the bytes match the content-hash name.
+   Repeat the run. Stop only when a run writes 0 files AND its summary log
+   line (`Cloud filestore download job: ... written, ... missing in the
+   bucket, ...`) shows 0 missing objects AND the log has no warning
+   `download job stopped at`. A return value of 0 alone is not enough. The
+   method also returns 0 after a bucket error, and when every remaining
+   object is missing or damaged.
+3. Only then clear the system parameter `oteny_cloud_filestore.endpoint_url`
+   (or `bucket`). Odoo is now in off mode and works as plain Odoo on its
+   local filestore.
 
 ## Known Limits
 

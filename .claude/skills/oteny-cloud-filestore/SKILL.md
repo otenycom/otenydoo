@@ -44,19 +44,26 @@ production save keeps the file local.
 
 ## Setup
 
-1. Make a bucket at an S3-compatible provider.
+1. Make a bucket at an S3-compatible provider. On Odoo.sh, add `boto3` to
+   the `requirements.txt` of the business repository before you install the
+   module. Without it, the module cannot be installed.
 2. Make a write key with put, get, head and delete rights on the bucket.
 3. Make a read key with only `s3:GetObject`.
 4. Set these system parameters (all prefixed `oteny_cloud_filestore.`):
    `endpoint_url`, `region`, `bucket`, `addressing_style` (default `path`),
    `key_prefix` (default empty), `read_access_key_id`,
-   `read_secret_access_key`, `hold_days` (default `365`) and
+   `read_secret_access_key`, `hold_days` (default `365`, minimum `120`) and
    `alert_channel_id` (the id of the `discuss.channel` for outage messages).
    `outage_since` is internal state: do not edit it.
-5. Put the write key in `odoo.conf` of the production server only:
+5. Set `alert_channel_id`. The Discuss alert needs it. Without it, an outage
+   shows only in the log.
+6. Put the write key in `odoo.conf` of the production server only:
    `cloud_filestore_write_access_key_id` and
    `cloud_filestore_write_secret_access_key`.
-6. Restart Odoo, so the options are read.
+7. Restart Odoo, so the options are read. At every start, Odoo logs an
+   "unknown option ... stored as-is" warning for each of the two options.
+   This is expected: Odoo does not know the options, and the module reads
+   them.
 
 The write key lives only in `odoo.conf`, so a database copy cannot carry it.
 The read key is in a system parameter, so a clone has it from the copy.
@@ -81,7 +88,9 @@ attachment (for example `ab/ab12...`).
   (`hold_days`, default 365). The hold time counts from the last delete of
   that name. A name that is used again before the hold time ends keeps its
   object. A clone never deletes in the bucket. A bad `hold_days` value never
-  shortens the hold time.
+  shortens the hold time. A value below 120 days is replaced by 120 with a
+  warning, because Odoo.sh keeps backups for 3 to 4 months, and a backup
+  must never point to a deleted object.
 
 ## When the Bucket Is Down
 
@@ -93,9 +102,17 @@ again. Several workers at the same time still post once.
 A cron job, "Cloud filestore: upload local files to the bucket", runs every
 10 minutes. It uploads the local user files in batches of 500 and removes
 the local copy only after the bucket reports the same size. It stops at the
-first bucket error. The same job does the first migration of an existing
-database: install the module, set the parameters and the write key, and the
-job moves the old files in batches.
+first outage error (no connection, a timeout, an HTTP 5xx), and it stops
+after 240 seconds, so a run stays below the time limit of an Odoo.sh cron.
+The next run continues. The same job does the first migration of an
+existing database: install the module, set the parameters and the write key,
+and the job moves the old files in batches.
+
+A refusal of one file (for example `400 EntityTooLarge`) is not an outage.
+The file stays local, the log shows a warning `upload of ... refused`, and
+no alert is posted. A save and the cron job skip that file and continue.
+This also means that a key without the right to put (`403 AccessDenied`)
+shows only in the log: the files stay local and no alert is posted.
 
 ## Files That Stay Local
 
@@ -104,6 +121,13 @@ module is installed or updated never go to the bucket. Odoo rebuilds a
 bundle at any time, and a module file comes back from its module. The field
 `cloud_local_only` on the attachment records this, so the catch-up job skips
 these files too.
+
+The install of the module also flags the files that existed before. The
+images of records that a real module created stay local, for example the
+company logo and the avatar of the admin user. They stay local also after a
+later change of that image. The images of imported records (xmlid module
+`__import__` or `__export__`) are user data and go to the bucket. Every
+other existing file is a user file.
 
 ## The Reverse Migration
 
@@ -129,13 +153,24 @@ download.
    local file, and it checks that the bytes match the content-hash name.
    Repeat the run. Stop only when a run writes 0 files AND its summary log
    line (`Cloud filestore download job: ... written, ... missing in the
-   bucket, ...`) shows 0 missing objects AND the log has no warning
-   `download job stopped at`. A return value of 0 alone is not enough. The
-   method also returns 0 after a bucket error, and when every remaining
-   object is missing or damaged.
+   bucket, ...`) shows 0 missing objects AND the log has no warning with
+   "stopped" of any kind (`download job stopped at`, `stopped by an error`)
+   AND no warning `not written`. A return value of 0 alone is not enough.
+   The method also returns 0 after a bucket error, after a local disk error,
+   and when every remaining object is missing or damaged.
 3. Only then clear the system parameter `oteny_cloud_filestore.endpoint_url`
    (or `bucket`). Odoo is now in off mode and works as plain Odoo on its
    local filestore.
+
+## Rollout Condition
+
+Do not put the write key in the `odoo.conf` of a production database before
+one of these two conditions is true:
+
+- A second copy of the bucket exists (plan 2, the bucket copy).
+- The owners accept two facts. First, the bucket is the only copy of the
+  files once the Odoo.sh backups that still hold them expire (after 3 to 4
+  months). Second, reads are slower until the read cache of plan 2 exists.
 
 ## Known Limits
 
@@ -146,6 +181,17 @@ download.
   bucket name shows as files that never leave the local filestore.
 - A clone reads every file from the bucket each time. A read cache comes in
   plan 2 (D21).
+- During an outage, a download of a file that is only in the bucket answers
+  404, and an image shows as broken. There is no placeholder. A copy of a
+  record with such a file (a duplicate, a forwarded mail) fails with "The
+  file is temporarily unavailable; try again later.", so no empty copy is
+  made.
+- A file that is not local and not in the bucket logs a warning, and in
+  production it posts the outage alert. A wrong `bucket` or `key_prefix`
+  shows this way.
+- Bucket deletes run inside the garbage collection lock of Odoo, one request
+  at a time. Plan 2 batches them, before the first delete markers reach the
+  hold time (R13).
 - Plan 2 also builds the command `odoo-bin cloud_dump` (D9, D26) and the
   copy of the bucket (D16, D22, D23, D27).
 

@@ -209,6 +209,13 @@ one of these two conditions is true:
   alert. A wrong `key_prefix` shows this way, so watch the log. A wrong
   `bucket` is different: a put or a get raises `NoSuchBucket`, and in
   production that posts the alert.
+- A user file that a module update (`-u`) writes again stays local, because
+  writes during a module install or update stay local. The attachment is
+  still a user file, so the next upload run moves it. Seen once on a
+  production copy: a `sign.document` PDF.
+- The first push of a database is slow per file: about 104 ms per file, so
+  about 42 minutes for 24,000 files in one run, or about 8 hours through the
+  cron ([lab-results.md](references/lab-results.md)).
 - Bucket deletes run inside the garbage collection lock of Odoo, one request
   at a time. Plan 2 batches them, before the first delete markers reach the
   hold time (R13).
@@ -248,3 +255,22 @@ limits are described in [test-store.md](references/test-store.md).
 - [design-decisions.md](references/design-decisions.md): D1 to D27.
 - [Plan 1: core module](plans/2026-10-12-plan-1-core-module.md).
 - [test-store.md](references/test-store.md): the live test store.
+- [lab-results.md](references/lab-results.md): measured latency and the
+  first push of a production copy.
+
+## Roadmap
+
+**Status key:** `[x]` done · `[~]` in progress · `[ ]` not started
+
+- [x] Plan 1, the core module: modes, upload on save, read and streaming,
+  hold time, catch-up and reverse jobs, alert, live tests.
+- [ ] Plan 2: the read cache (D21). The lab shows a read from the bucket is
+  more than 100 times slower than a local read.
+- [ ] Plan 2: streaming in chunks for large files (D18), `odoo-bin
+  cloud_dump` (D9, D26), the copy of the bucket (D16, D22, D23, D27), and
+  bucket deletes in batches (R13).
+- [ ] Plan 2 candidate: a faster first push. Upload several files at the same
+  time, or confirm an upload from the answer of the put instead of a
+  separate `head`. Measured cost today: about 104 ms per file.
+- [ ] Measure once from an Odoo.sh branch against the production bucket
+  before the rollout.

@@ -52,16 +52,31 @@ class CloudFilestoreAlert(models.AbstractModel):
 
     @api.model
     def _switch(self, outage_since, expect_open, message):
-        with self.env.registry.cursor() as cr:
-            env = api.Environment(cr, SUPERUSER_ID, {})
-            params = env["ir.config_parameter"]
-            # Re-read in the new cursor: another worker may have switched already.
-            if bool(params.get_param(PARAM_PREFIX + "outage_since", "")) != expect_open:
-                return
-            params.set_param(PARAM_PREFIX + "outage_since", outage_since)
-            channel_id = int(params.get_param(PARAM_PREFIX + "alert_channel_id", "0") or 0)
-            channel = env["discuss.channel"].browse(channel_id).exists()
-            if channel:
-                channel.message_post(body=message, message_type="comment", subtype_xmlid="mail.mt_comment")
-            else:
-                _logger.warning("Cloud filestore: no alert channel to post to: %s", message)
+        """Switch the outage state once, even with several workers and saves at the same time.
+
+        The state row is read and locked with SQL in the alert cursor: the
+        parameter cache is process-wide and the user's cursor has an old
+        snapshot, so neither shows the committed state. A lock that is not
+        available means another worker is switching the state now. Any error
+        is logged and swallowed, because an alert must never fail a save.
+        """
+        key = PARAM_PREFIX + "outage_since"
+        try:
+            with self.env.registry.cursor() as cr:
+                # The channel row can be locked by the user's own transaction; never wait for it.
+                cr.execute("SET LOCAL lock_timeout = '2s'")
+                cr.execute("SELECT value FROM ir_config_parameter WHERE key = %s FOR UPDATE", [key])
+                row = cr.fetchone()
+                if row is None or bool(row[0]) != expect_open:
+                    return
+                cr.execute("UPDATE ir_config_parameter SET value = %s WHERE key = %s", [outage_since, key])
+                env = api.Environment(cr, SUPERUSER_ID, {})
+                channel_id = int(env["ir.config_parameter"].get_param(PARAM_PREFIX + "alert_channel_id", "0") or 0)
+                channel = env["discuss.channel"].browse(channel_id).exists()
+                if channel:
+                    channel.message_post(body=message, message_type="comment", subtype_xmlid="mail.mt_comment")
+                else:
+                    _logger.warning("Cloud filestore: no alert channel to post to: %s", message)
+            self.env.registry.clear_cache("stable")
+        except Exception as error:  # noqa: BLE001
+            _logger.warning("Cloud filestore: alert not posted: %s", type(error).__name__)

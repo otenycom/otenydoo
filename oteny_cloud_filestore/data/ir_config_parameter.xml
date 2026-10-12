@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+    <!-- The outage state always exists as a row, so the alert can lock it with plain SQL. -->
+    <record id="param_outage_since" model="ir.config_parameter">
+        <field name="key">oteny_cloud_filestore.outage_since</field>
+        <field name="value" eval="''"/>
+    </record>
+</odoo>

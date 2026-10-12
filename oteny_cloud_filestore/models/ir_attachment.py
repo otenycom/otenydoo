@@ -131,7 +131,6 @@ class IrAttachment(models.Model):
         fname = super()._file_write(bin_value, checksum)
         if self._cloud_filestore_mode() != "production" or self._cloud_filestore_is_local_only():
             return fname
-        alert = self.env["oteny.cloud.filestore.alert"]
         store = self._cloud_filestore_store()
         try:
             if store is None:
@@ -140,11 +139,21 @@ class IrAttachment(models.Model):
             store.put(fname, bin_value)
         except CloudStoreError as error:
             _logger.warning("Cloud filestore: upload of %s failed, file stays local: %s", fname, error)
-            alert._bucket_failed(str(error))
+            self._cloud_filestore_alert("_bucket_failed", str(error))
             return fname
         try:
             os.unlink(self._full_path(fname))
         except FileNotFoundError:
             pass
-        alert._bucket_ok()
+        except OSError as error:
+            # The upload is confirmed; a local copy that stays is only wasted disk space.
+            _logger.warning("Cloud filestore: local copy of %s not removed: %s", fname, error)
+        self._cloud_filestore_alert("_bucket_ok")
         return fname
+
+    def _cloud_filestore_alert(self, method, *args):
+        """Call an alert method; a failing alert never fails the user's save."""
+        try:
+            getattr(self.env["oteny.cloud.filestore.alert"], method)(*args)
+        except Exception as error:  # noqa: BLE001
+            _logger.warning("Cloud filestore: alert %s failed: %s", method, type(error).__name__)

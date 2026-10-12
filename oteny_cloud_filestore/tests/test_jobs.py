@@ -98,6 +98,50 @@ class TestCloudFilestoreJobs(TransactionCase):
         self.assertEqual(put.call_count, 1)
         self.assertEqual([call.args[0] for call in alert.call_args_list], ["_bucket_failed"])
 
+    def test_upload_failure_after_success_does_not_report_ok(self):
+        self._save_local(b"first")
+        self._save_local(b"second")
+        alert = self.startPatcher(patch.object(type(self.attachment), "_cloud_filestore_alert"))
+        real_put = self.fake.put
+        calls = []
+
+        def put_once(name, data):
+            calls.append(name)
+            if len(calls) > 1:
+                raise CloudStoreUnavailable("down")
+            real_put(name, data)
+
+        with patch.object(self.fake, "put", side_effect=put_once):
+            with self.assertLogs(LOGGER, "WARNING"):
+                self.assertEqual(self.attachment._cloud_filestore_upload_pending(), 1)
+        self.assertEqual([call.args[0] for call in alert.call_args_list], ["_bucket_failed"])
+
+    def test_upload_ignores_leftover_temp_file(self):
+        attachment = self._save_local(b"real file")
+        leftover = os.path.join(os.path.dirname(self.attachment._full_path(attachment.store_fname)), ".cfs-leftover")
+        with open(leftover, "wb") as temp_file:
+            temp_file.write(b"partial")
+        self.assertEqual(self.attachment._cloud_filestore_upload_pending(), 1)
+        self.assertEqual(list(self.fake.objects), [attachment.store_fname])
+        self.assertTrue(os.path.exists(leftover))
+
+    def test_download_interrupted_write_leaves_nothing(self):
+        attachment = self.attachment.create({"name": "user.bin", "raw": b"bucket only"})
+        fname = attachment.store_fname
+        with patch("os.fsync", side_effect=OSError("disk full")):
+            with self.assertLogs(LOGGER, "WARNING"):
+                self.assertEqual(self.attachment._cloud_filestore_download_all(), 0)
+        self.assertFalse(self._local_exists(fname))
+        self.assertEqual(os.listdir(os.path.dirname(self.attachment._full_path(fname))), [])
+
+    def test_download_skips_bytes_that_do_not_match_the_name(self):
+        attachment = self.attachment.create({"name": "user.bin", "raw": b"bucket only"})
+        fname = attachment.store_fname
+        self.fake.objects[fname] = b"corrupt bytes"
+        with self.assertLogs(LOGGER, "WARNING"):
+            self.assertEqual(self.attachment._cloud_filestore_download_all(), 0)
+        self.assertFalse(self._local_exists(fname))
+
     def test_download_all_restores_local_files(self):
         attachment = self.attachment.create({"name": "user.bin", "raw": b"bucket only"})
         fname = attachment.store_fname

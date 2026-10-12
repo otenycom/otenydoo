@@ -1,6 +1,8 @@
+import hashlib
 import logging
 import os
 import re
+import tempfile
 import time
 
 from werkzeug.exceptions import NotFound
@@ -395,9 +397,38 @@ class IrAttachment(models.Model):
             len(names),
             ", stopped by a bucket error" if failed else "",
         )
-        if uploaded:
+        if uploaded and not failed:
+            # After a failed run the outage stays open: the bucket is not working.
             self._cloud_filestore_alert("_bucket_ok")
         return uploaded
+
+    @api.model
+    def _cloud_filestore_write_new_file(self, path, data):
+        """Write a file complete or not at all; return False when the file exists already.
+
+        The bytes go to a temporary file in the same folder first, and the
+        final name appears only through a hard link, so a crash or a full
+        disk never leaves a partial file under a content-hash name, and an
+        existing file is never overwritten.
+        """
+        folder = os.path.dirname(path)
+        os.makedirs(folder, exist_ok=True)
+        file_descriptor, temp_path = tempfile.mkstemp(dir=folder, prefix=".cfs-")
+        try:
+            with os.fdopen(file_descriptor, "wb") as temp_file:
+                temp_file.write(data)
+                temp_file.flush()
+                os.fsync(temp_file.fileno())
+            try:
+                os.link(temp_path, path)
+            except FileExistsError:
+                return False
+            return True
+        finally:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
 
     @api.model
     def _cloud_filestore_download_all(self, limit=500):
@@ -431,13 +462,14 @@ class IrAttachment(models.Model):
                 missing += 1
                 _logger.warning("Cloud filestore: %s is not in the bucket, skipped", name)
                 continue
-            try:
-                os.makedirs(os.path.dirname(path), exist_ok=True)
-                # Mode "x" fails when the file appeared meanwhile: never overwrite.
-                with open(path, "xb") as local_file:
-                    local_file.write(data)
-            except FileExistsError:
+            if hashlib.sha1(data).hexdigest() != name.split("/")[-1]:
+                # Names are content hashes: other bytes mean a damaged object.
+                missing += 1
+                _logger.warning("Cloud filestore: bytes of %s do not match its name, skipped", name)
                 continue
+            try:
+                if not self._cloud_filestore_write_new_file(path, data):
+                    continue
             except OSError as error:
                 _logger.warning("Cloud filestore: local file %s not written: %s", name, error)
                 break

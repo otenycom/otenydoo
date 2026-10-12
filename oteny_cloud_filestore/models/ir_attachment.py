@@ -1,9 +1,10 @@
 import logging
+import os
 
 from odoo import api, fields, models
 from odoo.tools import config
 
-from ..tools.cloud_store import CloudStore
+from ..tools.cloud_store import CloudStore, CloudStoreError
 
 _logger = logging.getLogger(__name__)
 
@@ -113,3 +114,37 @@ class IrAttachment(models.Model):
                 secret_access_key=secret_access_key,
             )
         return store
+
+    def _set_attachment_data(self, asbytes):
+        """A content change of local-only rows must not reach the bucket either."""
+        if self and all(self.mapped("cloud_local_only")):
+            self = self.with_context(cloud_filestore_local_only=True)
+        return super()._set_attachment_data(asbytes)
+
+    def _file_write(self, bin_value, checksum):
+        """Write the file locally as Odoo does, then upload it in production.
+
+        The user's save never fails because of the bucket: on a bucket error
+        the file stays in the local filestore and the admins get one alert
+        per outage. After a confirmed upload the local copy is removed.
+        """
+        fname = super()._file_write(bin_value, checksum)
+        if self._cloud_filestore_mode() != "production" or self._cloud_filestore_is_local_only():
+            return fname
+        alert = self.env["oteny.cloud.filestore.alert"]
+        store = self._cloud_filestore_store()
+        try:
+            if store is None:
+                # An incomplete key is a failure too, never an ambient-credential fallback.
+                raise CloudStoreError("no complete write key")
+            store.put(fname, bin_value)
+        except CloudStoreError as error:
+            _logger.warning("Cloud filestore: upload of %s failed, file stays local: %s", fname, error)
+            alert._bucket_failed(str(error))
+            return fname
+        try:
+            os.unlink(self._full_path(fname))
+        except FileNotFoundError:
+            pass
+        alert._bucket_ok()
+        return fname

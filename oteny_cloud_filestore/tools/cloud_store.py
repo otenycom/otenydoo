@@ -1,11 +1,12 @@
 import boto3
 from botocore.config import Config
 from botocore.exceptions import (
+    BotoCoreError,
     ClientError,
-    ConnectionClosedError,
-    ConnectTimeoutError,
-    EndpointConnectionError,
+    ConnectionError,
+    IncompleteReadError,
     ReadTimeoutError,
+    ResponseStreamingError,
 )
 
 
@@ -21,13 +22,17 @@ class CloudStoreUnavailable(CloudStoreError):
     """
 
 
+# The whole connection family (SSL, proxy, endpoint, connect timeout, ...)
+# plus the read-side failures: all mean "cannot reach the store right now".
 _UNAVAILABLE_ERRORS = (
-    EndpointConnectionError,
-    ConnectTimeoutError,
+    ConnectionError,
     ReadTimeoutError,
-    ConnectionClosedError,
+    ResponseStreamingError,
+    IncompleteReadError,
 )
-_MISSING_CODES = {"404", "NoSuchKey", "NotFound"}
+# Codes that mean "this key does not exist". NoSuchBucket is deliberately
+# absent: a mistyped bucket must never look like an empty store.
+_MISSING_KEY_CODES = {"NoSuchKey", "NotFound", "404"}
 
 
 class CloudStore:
@@ -67,48 +72,46 @@ class CloudStore:
     def _key(self, name):
         return self.key_prefix + name
 
-    @staticmethod
-    def _is_missing(error):
-        code = str(error.response.get("Error", {}).get("Code", ""))
-        status = error.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-        return status == 404 or code in _MISSING_CODES
-
-    def _call(self, method, **kwargs):
+    def _call(self, method, name, missing_ok=False, **kwargs):
         """Run one client call and map every failure to our two exceptions.
 
-        A missing object is not an error here: the caller gets None.
+        With missing_ok, a missing key gives None instead of an error. Only
+        get, head and delete may pass it: a put to a missing key or bucket
+        must fail, or the caller would think the file is stored.
         """
         try:
-            return getattr(self._client, method)(
-                Bucket=self.bucket, Key=self._key(kwargs.pop("name")), **kwargs
-            )
-        except _UNAVAILABLE_ERRORS as error:
-            raise CloudStoreUnavailable(f"{method}: store unreachable") from error
+            return getattr(self._client, method)(Bucket=self.bucket, Key=self._key(name), **kwargs)
         except ClientError as error:
             status = error.response.get("ResponseMetadata", {}).get("HTTPStatusCode") or 0
+            code = str(error.response.get("Error", {}).get("Code", ""))
             if status >= 500:
                 raise CloudStoreUnavailable(f"{method}: store answered {status}") from error
-            if self._is_missing(error):
+            if missing_ok and code in _MISSING_KEY_CODES:
                 return None
-            code = error.response.get("Error", {}).get("Code")
             raise CloudStoreError(f"{method}: store refused ({status} {code})") from error
+        except _UNAVAILABLE_ERRORS as error:
+            raise CloudStoreUnavailable(f"{method}: store unreachable") from error
+        except BotoCoreError as error:
+            raise CloudStoreError(f"{method}: {type(error).__name__}") from error
 
     def put(self, name, data):
-        self._call("put_object", name=name, Body=data)
+        self._call("put_object", name, Body=data)
 
     def get(self, name):
-        response = self._call("get_object", name=name)
+        response = self._call("get_object", name, missing_ok=True)
         if response is None:
             return None
         try:
             return response["Body"].read()
         except _UNAVAILABLE_ERRORS as error:
             raise CloudStoreUnavailable("get_object: store unreachable") from error
+        except BotoCoreError as error:
+            raise CloudStoreError(f"get_object: {type(error).__name__}") from error
 
     def head(self, name):
-        response = self._call("head_object", name=name)
+        response = self._call("head_object", name, missing_ok=True)
         return None if response is None else response["ContentLength"]
 
     def delete(self, name):
-        # S3 answers 204 for a missing key, so no special case is needed.
-        self._call("delete_object", name=name)
+        # A missing key is silent; a missing bucket still raises.
+        self._call("delete_object", name, missing_ok=True)

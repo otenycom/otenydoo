@@ -69,6 +69,18 @@ class TestCloudStoreLive(BaseCase):
             self.reader.delete("cd/cde")
         self.assertNotIsInstance(delete_error.exception, CloudStoreUnavailable)
 
+    def test_missing_bucket_put_raises(self):
+        store = CloudStore(
+            endpoint_url=self.config["endpoint_url"],
+            region=self.config["region"],
+            bucket=f"no-such-bucket-{uuid4().hex[:12]}",
+            access_key_id=self.config["write_access_key_id"],
+            secret_access_key=self.config["write_secret_access_key"],
+        )
+        with self.assertRaises(CloudStoreError) as caught:
+            store.put("ab/abc", b"x")
+        self.assertNotIsInstance(caught.exception, CloudStoreUnavailable)
+
     def test_unreachable_endpoint_is_unavailable(self):
         store = CloudStore(
             endpoint_url="http://127.0.0.1:9",

@@ -3,9 +3,12 @@ import shutil
 import tempfile
 from unittest.mock import patch
 
+from odoo.exceptions import UserError
 from odoo.tests import HttpCase, TransactionCase, tagged
 
 from .common import FakeCloudStore
+
+LOGGER = "odoo.addons.oteny_cloud_filestore.models.ir_attachment"
 
 
 class CloudFilestoreReadMixin:
@@ -65,7 +68,36 @@ class TestCloudFilestoreRead(CloudFilestoreReadMixin, TransactionCase):
     def test_read_missing_returns_empty(self):
         attachment = self._bucket_only_attachment()
         self.fake.objects.clear()
-        self.assertEqual(attachment._file_read(attachment.store_fname), b"")
+        with patch.object(type(attachment), "_cloud_filestore_alert"), self.assertLogs(LOGGER, "WARNING"):
+            self.assertEqual(attachment._file_read(attachment.store_fname), b"")
+
+    def test_read_missing_object_warns_and_alerts_in_production(self):
+        """A wrong bucket or key_prefix must be visible, not a silent empty file."""
+        attachment = self._bucket_only_attachment()
+        self.fake.objects.clear()
+        with patch.object(type(attachment), "_cloud_filestore_alert") as alert, self.assertLogs(
+            LOGGER, "WARNING"
+        ) as logs:
+            self.assertEqual(attachment._file_read(attachment.store_fname), b"")
+        self.assertIn("not in the bucket", logs.output[0])
+        self.assertEqual(alert.call_args.args[0], "_bucket_failed")
+        self.mode = "clone"
+        alert_patch = patch.object(type(attachment), "_cloud_filestore_alert")
+        with alert_patch as alert, self.assertLogs(LOGGER, "WARNING"):
+            self.assertEqual(attachment._file_read(attachment.store_fname), b"")
+        alert.assert_not_called()
+
+    def test_copy_refuses_unreadable_file(self):
+        """A copy during an outage must not create a valid-looking empty file."""
+        attachment = self._bucket_only_attachment()
+        # The create left the bytes in the cache; a later request reads the bucket.
+        attachment.invalidate_recordset(["raw"])
+        self.fake.down = True
+        with patch.object(type(attachment), "_cloud_filestore_alert"), self.assertLogs(LOGGER, "WARNING"):
+            with self.assertRaises(UserError):
+                attachment.copy()
+        self.fake.down = False
+        self.assertEqual(attachment.copy().raw, b"bucket content")
 
     def test_read_failure_returns_empty_and_alerts(self):
         attachment = self._bucket_only_attachment()
@@ -105,9 +137,11 @@ class TestCloudFilestoreHttp(CloudFilestoreReadMixin, HttpCase):
         self._patch_cloud_filestore()
         attachment = self._bucket_only_attachment(b"streamed from the bucket")
         self.authenticate("admin", "admin")
-        logger = "odoo.addons.oteny_cloud_filestore.models.ir_attachment"
+        # The parent logger: the alert of the HTTP worker logs under models.alert.
+        logger = "odoo.addons.oteny_cloud_filestore"
         self.fake.objects.clear()
-        response = self.url_open(f"/web/content/{attachment.id}?download=true")
+        with self.assertLogs(logger, level="WARNING"):
+            response = self.url_open(f"/web/content/{attachment.id}?download=true")
         self.assertEqual(response.status_code, 404)
         self.fake.objects[attachment.store_fname] = b"streamed from the bucket"
         self.fake.down = True

@@ -59,12 +59,23 @@ class CloudFilestoreAlert(models.AbstractModel):
         snapshot, so neither shows the committed state. A lock that is not
         available means another worker is switching the state now. Any error
         is logged and swallowed, because an alert must never fail a save.
+        A state row that an admin deleted is created again (empty: no
+        outage), or no alert would ever be posted.
         """
         key = PARAM_PREFIX + "outage_since"
         try:
             with self.env.registry.cursor() as cr:
                 # The channel row can be locked by the user's own transaction; never wait for it.
                 cr.execute("SET LOCAL lock_timeout = '2s'")
+                cr.execute(
+                    """
+                    INSERT INTO ir_config_parameter
+                           (key, value, create_uid, create_date, write_uid, write_date)
+                    VALUES (%s, '', %s, now() AT TIME ZONE 'UTC', %s, now() AT TIME ZONE 'UTC')
+                    ON CONFLICT (key) DO NOTHING
+                    """,
+                    [key, SUPERUSER_ID, SUPERUSER_ID],
+                )
                 cr.execute("SELECT value FROM ir_config_parameter WHERE key = %s FOR UPDATE", [key])
                 row = cr.fetchone()
                 if row is None or bool(row[0]) != expect_open:

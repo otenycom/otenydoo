@@ -86,3 +86,32 @@ class TestCloudFilestoreLocalOnly(TransactionCase):
         post_init_hook(self.env)
         self.assertTrue(icon.cloud_local_only)
         self.assertFalse(user_image.cloud_local_only)
+
+    def test_post_init_hook_rules_for_assets_imports_and_null(self):
+        bundle = self._create(url="/web/assets/9/hook.min.js", res_model="ir.ui.view")
+        imported = self.env["res.partner"].create({"name": "Imported partner", "image_1920": TINY_PNG})
+        self.env["ir.model.data"].create(
+            {
+                "module": "__import__",
+                "name": "cloud_filestore_partner",
+                "model": "res.partner",
+                "res_id": imported.id,
+            }
+        )
+        imported_image = self.attachment.search(
+            [("res_model", "=", "res.partner"), ("res_id", "=", imported.id), ("res_field", "=", "image_1920")]
+        )
+        self.assertTrue(imported_image, "the partner image should be an attachment")
+        plain = self._create(res_model="res.partner", res_id=self.partner.id)
+        self.env.flush_all()
+        # The state before the install: a bundle row not flagged, every other row NULL.
+        self.env.cr.execute(SQL("UPDATE ir_attachment SET cloud_local_only = FALSE WHERE id = %s", bundle.id))
+        user_files = tuple((imported_image | plain).ids)
+        self.env.cr.execute(SQL("UPDATE ir_attachment SET cloud_local_only = NULL WHERE id IN %s", user_files))
+        post_init_hook(self.env)
+        self.assertTrue(bundle.cloud_local_only)
+        # Files of imported records are user data.
+        self.assertIs(imported_image.cloud_local_only, False)
+        self.assertIs(plain.cloud_local_only, False)
+        self.env.cr.execute("SELECT count(*) FROM ir_attachment WHERE cloud_local_only IS NULL")
+        self.assertEqual(self.env.cr.fetchone()[0], 0)

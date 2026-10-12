@@ -6,7 +6,7 @@ from unittest.mock import patch
 from odoo.tests import TransactionCase, tagged
 from odoo.tools import config
 
-from ..tools.cloud_store import CloudStoreError
+from ..tools.cloud_store import CloudStoreError, CloudStoreUnavailable
 from .common import FakeCloudStore
 
 
@@ -145,7 +145,8 @@ class TestCloudFilestoreWrite(TransactionCase):
                 },
             )
         )
-        self.startPatcher(patch.object(self.fake, "put", side_effect=CloudStoreError("AccessDenied")))
+        outage = CloudStoreUnavailable("store answered 503")
+        self.startPatcher(patch.object(self.fake, "put", side_effect=outage))
         with self.assertLogs("odoo.addons.oteny_cloud_filestore", level="DEBUG") as logs:
             self._save(b"file")
         texts = [m.body for m in self._alert_messages()] + logs.output
@@ -153,3 +154,25 @@ class TestCloudFilestoreWrite(TransactionCase):
         for text in texts:
             for secret in (read_key, write_key):
                 self.assertNotIn(secret, str(text))
+
+    def test_refused_file_stays_local_without_alert(self):
+        """One file that the bucket refuses (for example too large) is not an outage."""
+        refusal = CloudStoreError("put_object: store refused (400 EntityTooLarge)")
+        self.startPatcher(patch.object(self.fake, "put", side_effect=refusal))
+        with self.assertLogs("odoo.addons.oteny_cloud_filestore.models.ir_attachment", "WARNING") as logs:
+            attachment = self._save(b"too large")
+        self.assertIn("refused", logs.output[0])
+        self.assertTrue(self._local_exists(attachment))
+        self.assertFalse(self.params.get_param("oteny_cloud_filestore.outage_since"))
+        self.assertFalse(self._alert_messages())
+
+    def test_deleted_state_row_still_posts_one_alert(self):
+        """An admin can delete the outage_since parameter; the next outage must still alert."""
+        self.env.cr.execute("DELETE FROM ir_config_parameter WHERE key = 'oteny_cloud_filestore.outage_since'")
+        self.env.registry.clear_cache("stable")
+        self.fake.down = True
+        with self.assertLogs("odoo.addons.oteny_cloud_filestore.models.ir_attachment", "WARNING"):
+            self._save(b"file one")
+            self._save(b"file two")
+        self.assertTrue(self.params.get_param("oteny_cloud_filestore.outage_since"))
+        self.assertEqual(len(self._alert_messages()), 1)

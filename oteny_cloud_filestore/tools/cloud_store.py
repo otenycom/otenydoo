@@ -54,7 +54,9 @@ class CloudStore:
     ):
         self.bucket = bucket
         self.key_prefix = key_prefix
-        self._client = boto3.client(
+        # A client of its own session: the default boto3 session is not
+        # thread-safe, and Odoo serves requests from several threads.
+        self._client = boto3.session.Session().client(
             "s3",
             endpoint_url=endpoint_url,
             region_name=region,
@@ -63,9 +65,14 @@ class CloudStore:
             config=Config(
                 connect_timeout=3,
                 read_timeout=10,
-                retries={"max_attempts": 2},
+                # Two attempts in total; botocore's max_attempts would count retries only.
+                retries={"total_max_attempts": 2},
                 s3={"addressing_style": addressing_style},
                 signature_version="s3v4",
+                # Some S3-compatible stores refuse the flexible checksums that
+                # botocore sends by default; use them only where S3 needs them.
+                request_checksum_calculation="when_required",
+                response_checksum_validation="when_required",
             ),
         )
 

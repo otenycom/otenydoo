@@ -1,11 +1,13 @@
+import itertools
 import os
 import shutil
 import tempfile
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from odoo.tests import TransactionCase, tagged
 
-from ..tools.cloud_store import CloudStoreUnavailable
+from ..models import ir_attachment as ir_attachment_module
+from ..tools.cloud_store import CloudStoreError, CloudStoreUnavailable
 from .common import FakeCloudStore
 
 LOGGER = "odoo.addons.oteny_cloud_filestore.models.ir_attachment"
@@ -169,3 +171,64 @@ class TestCloudFilestoreJobs(TransactionCase):
         self.mode = "off"
         self.assertEqual(self.attachment._cloud_filestore_download_all(), 0)
         self.assertFalse(self._local_exists(bucket_only.store_fname))
+
+    def test_upload_includes_rows_with_null_flag(self):
+        """Rows from before the install hold NULL in cloud_local_only: they are user files."""
+        attachment = self._save_local(b"old file")
+        self.env.flush_all()
+        self.env.cr.execute("UPDATE ir_attachment SET cloud_local_only = NULL WHERE id = %s", [attachment.id])
+        self.assertEqual(self.attachment._cloud_filestore_upload_pending(), 1)
+        self.assertIn(attachment.store_fname, self.fake.objects)
+        self.assertFalse(self._local_exists(attachment.store_fname))
+
+    def test_upload_skips_refused_file_and_continues(self):
+        refused = self._save_local(b"too large")
+        others = self._save_local(b"first") | self._save_local(b"second")
+        alert = self.startPatcher(patch.object(type(self.attachment), "_cloud_filestore_alert"))
+        real_put = self.fake.put
+
+        def refuse_one(name, data):
+            if name == refused.store_fname:
+                raise CloudStoreError("put_object: store refused (400 EntityTooLarge)")
+            real_put(name, data)
+
+        with patch.object(self.fake, "put", side_effect=refuse_one):
+            with self.assertLogs(LOGGER, "WARNING") as logs:
+                self.assertEqual(self.attachment._cloud_filestore_upload_pending(), 2)
+        self.assertIn("refused", "\n".join(logs.output))
+        self.assertEqual(sorted(self.fake.objects), sorted(others.mapped("store_fname")))
+        self.assertTrue(self._local_exists(refused.store_fname))
+        self.assertNotIn("_bucket_failed", [call.args[0] for call in alert.call_args_list])
+
+    def test_upload_stops_after_time_budget(self):
+        for raw in (b"one", b"two", b"three"):
+            self._save_local(raw)
+        # The clock reads 0 at the start and at the first check, then is past the budget.
+        clock = MagicMock()
+        clock.monotonic.side_effect = itertools.chain([0, 0], itertools.repeat(10_000))
+        with patch.object(ir_attachment_module, "time", clock):
+            self.assertEqual(self.attachment._cloud_filestore_upload_pending(), 1)
+        self.assertEqual(len(self.fake.objects), 1)
+        self.assertEqual(self.attachment._cloud_filestore_upload_pending(), 2)
+
+    def test_download_file_has_odoo_file_mode(self):
+        """A restored file must have the rights of a file that Odoo writes itself."""
+        self.mode = "clone"
+        odoo_file = self.attachment.create({"name": "local.bin", "raw": b"written by odoo"})
+        self.mode = "production"
+        restored = self.attachment.create({"name": "user.bin", "raw": b"bucket only"})
+        self.assertFalse(self._local_exists(restored.store_fname))
+        # Names of other attachments of the test database are not in the fake bucket.
+        with self.assertLogs(LOGGER, "WARNING"):
+            self.assertGreaterEqual(self.attachment._cloud_filestore_download_all(), 1)
+        expected = os.stat(self.attachment._full_path(odoo_file.store_fname)).st_mode
+        self.assertEqual(os.stat(self.attachment._full_path(restored.store_fname)).st_mode, expected)
+
+    def test_download_local_error_logs_a_stop(self):
+        self.attachment.create({"name": "user.bin", "raw": b"bucket only"})
+        self.attachment.create({"name": "user.bin", "raw": b"bucket only too"})
+        with patch("os.fsync", side_effect=OSError("disk full")) as fsync:
+            with self.assertLogs(LOGGER, "WARNING") as logs:
+                self.assertEqual(self.attachment._cloud_filestore_download_all(), 0)
+        self.assertEqual(fsync.call_count, 1)
+        self.assertIn("download job stopped at", "\n".join(logs.output))

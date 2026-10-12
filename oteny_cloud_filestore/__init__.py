@@ -10,7 +10,9 @@ def post_init_hook(env):
     Two rules, one UPDATE each: asset bundles by their url, and images of
     records that a module created (a record with an xmlid of a module). Files
     of imported or exported records (xmlid module __import__ or __export__)
-    are user data and are not flagged.
+    are user data and are not flagged. Every other existing row gets an
+    explicit FALSE: Odoo adds the new column with NULL on existing rows, and
+    a NULL would read as neither "user file" nor "local only" in SQL.
     """
     env.cr.execute(SQL("UPDATE ir_attachment SET cloud_local_only = TRUE WHERE url LIKE %s", "/web/assets/%"))
     env.cr.execute(
@@ -26,4 +28,5 @@ def post_init_hook(env):
             """
         )
     )
+    env.cr.execute(SQL("UPDATE ir_attachment SET cloud_local_only = FALSE WHERE cloud_local_only IS NULL"))
     env["ir.attachment"].invalidate_model(["cloud_local_only"])

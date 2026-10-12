@@ -2,23 +2,32 @@ import hashlib
 import logging
 import os
 import re
-import tempfile
 import time
+from uuid import uuid4
 
 from werkzeug.exceptions import NotFound
 
 from odoo import api, fields, models
+from odoo.exceptions import UserError
 from odoo.http import Stream
 from odoo.tools import config, split_every
 
-from ..tools.cloud_store import CloudStore, CloudStoreError
+from ..tools.cloud_store import CloudStore, CloudStoreError, CloudStoreUnavailable
 
 _logger = logging.getLogger(__name__)
 
 PARAM_PREFIX = "oteny_cloud_filestore."
 
 DEFAULT_HOLD_DAYS = 365
+# Odoo.sh keeps backups for 3 to 4 months. A bucket object must outlive every
+# backup that still points to it, so a shorter hold time is never used.
+MIN_HOLD_DAYS = 120
 SECONDS_PER_DAY = 86400
+# The upload job stops after this many seconds, well below the time limit of
+# an Odoo.sh cron run: three timeouts in a row mark the cron as failed. The
+# next run continues where this one stopped, because the walk is sorted and
+# uploaded files are no longer local.
+UPLOAD_TIME_BUDGET_SECONDS = 240
 
 # One CloudStore per full set of settings, so a read does not build a boto3
 # client every time, and a settings change builds a new one. The keys of
@@ -114,15 +123,29 @@ class IrAttachment(models.Model):
         )
         store = _STORE_CACHE.get(settings)
         if store is None:
-            store = _STORE_CACHE[settings] = CloudStore(
-                endpoint_url=settings[0],
-                region=settings[1],
-                bucket=settings[2],
-                addressing_style=settings[3],
-                key_prefix=settings[4],
-                access_key_id=access_key_id,
-                secret_access_key=secret_access_key,
-            )
+            try:
+                store = CloudStore(
+                    endpoint_url=settings[0],
+                    region=settings[1],
+                    bucket=settings[2],
+                    addressing_style=settings[3],
+                    key_prefix=settings[4],
+                    access_key_id=access_key_id,
+                    secret_access_key=secret_access_key,
+                )
+            except Exception as error:  # noqa: BLE001
+                # A bad setting (an endpoint without scheme, an unknown region)
+                # makes boto3 raise here. It must never fail a save or a read:
+                # without a store, production keeps files local and alerts, and
+                # a clone reads empty bytes. Only the type is logged, so no
+                # setting value reaches the log.
+                _logger.warning(
+                    "Cloud filestore: store not built for mode %s, store disabled: %s",
+                    mode,
+                    type(error).__name__,
+                )
+                return None
+            _STORE_CACHE[settings] = store
         return store
 
     def _set_attachment_data(self, asbytes):
@@ -142,14 +165,22 @@ class IrAttachment(models.Model):
         if self._cloud_filestore_mode() != "production" or self._cloud_filestore_is_local_only():
             return fname
         store = self._cloud_filestore_store()
+        if store is None:
+            # An incomplete key or a bad setting is a failure too, never an ambient-credential fallback.
+            _logger.warning("Cloud filestore: no usable store, %s stays local", fname)
+            self._cloud_filestore_alert("_bucket_failed", "no usable store settings")
+            return fname
         try:
-            if store is None:
-                # An incomplete key is a failure too, never an ambient-credential fallback.
-                raise CloudStoreError("no complete write key")
             store.put(fname, bin_value)
-        except CloudStoreError as error:
+        except CloudStoreUnavailable as error:
             _logger.warning("Cloud filestore: upload of %s failed, file stays local: %s", fname, error)
             self._cloud_filestore_alert("_bucket_failed", str(error))
+            return fname
+        except CloudStoreError as error:
+            # The store refused this one file (for example 400 EntityTooLarge).
+            # That is not an outage: no alert, so the next good save does not
+            # end an outage that never was. The file stays local.
+            _logger.warning("Cloud filestore: upload of %s refused, file stays local: %s", fname, error)
             return fname
         try:
             os.unlink(self._full_path(fname))
@@ -182,8 +213,29 @@ class IrAttachment(models.Model):
                 self._cloud_filestore_alert("_bucket_failed", str(error))
             return b""
         if data is None:
+            if any(attachment.file_size for attachment in self if attachment.store_fname == fname):
+                # A file with content that is neither local nor in the bucket
+                # most likely means a wrong bucket or key_prefix: make it visible.
+                _logger.warning("Cloud filestore: %s is not local and not in the bucket", fname)
+                if mode == "production":
+                    self._cloud_filestore_alert("_bucket_failed", f"{fname} is missing in the bucket")
             return b""
         return data[:size] if size is not None else data
+
+    def copy_data(self, default=None):
+        """Refuse to copy a file whose content cannot be read now.
+
+        Odoo copies the content through `raw`, and a bucket error reads as
+        empty bytes. Without this check, a duplicated record or a forwarded
+        mail would get a valid-looking empty file while the bucket is down.
+        """
+        vals_list = super().copy_data(default=default)
+        if (default or {}).keys() & {"datas", "db_datas", "raw"} or self._cloud_filestore_mode() == "off":
+            return vals_list
+        for attachment, vals in zip(self, vals_list):
+            if attachment.file_size and not vals.get("raw"):
+                raise UserError(self.env._("The file is temporarily unavailable; try again later."))
+        return vals_list
 
     def _to_http_stream(self):
         """Stream a file that exists only in the bucket through Odoo.
@@ -245,6 +297,11 @@ class IrAttachment(models.Model):
                 DEFAULT_HOLD_DAYS,
             )
             return DEFAULT_HOLD_DAYS
+        if days < MIN_HOLD_DAYS:
+            _logger.warning(
+                "Cloud filestore: hold_days %s is below the minimum, using %s", days, MIN_HOLD_DAYS
+            )
+            return MIN_HOLD_DAYS
         return days
 
     def _gc_file_store_unsafe(self):
@@ -342,21 +399,26 @@ class IrAttachment(models.Model):
         one attachment that is not local-only uses its name. The local copy
         is removed only after the bucket reports the same size, so a lost or
         short object never costs the only copy. A run stops at the first
-        bucket error, because the next file would most likely fail as well.
+        outage error, because the next file would most likely fail as well.
+        A file that the bucket refuses is skipped, so it cannot block every
+        later run. A run also stops after UPLOAD_TIME_BUDGET_SECONDS.
         """
         if self._cloud_filestore_mode() != "production":
             return 0
         store = self._cloud_filestore_store()
         if store is None:
             return 0
-        uploaded = not_confirmed = 0
-        failed = False
+        started = time.monotonic()
+        uploaded = not_confirmed = refused = 0
+        failed = out_of_time = False
         names = self._cloud_filestore_local_names()
         for batch in split_every(self.env.cr.IN_MAX, names):
-            if failed or uploaded >= limit:
+            if failed or out_of_time or uploaded >= limit:
                 break
+            # IS NOT TRUE, because rows that existed before the install can hold NULL.
             self.env.cr.execute(
-                "SELECT DISTINCT store_fname FROM ir_attachment WHERE store_fname IN %s AND NOT cloud_local_only",
+                "SELECT DISTINCT store_fname FROM ir_attachment"
+                " WHERE store_fname IN %s AND cloud_local_only IS NOT TRUE",
                 [tuple(batch)],
             )
             pending = set(row[0] for row in self.env.cr.fetchall())
@@ -364,6 +426,9 @@ class IrAttachment(models.Model):
                 if name not in pending:
                     continue
                 if uploaded >= limit:
+                    break
+                if time.monotonic() - started > UPLOAD_TIME_BUDGET_SECONDS:
+                    out_of_time = True
                     break
                 path = self._full_path(name)
                 try:
@@ -375,11 +440,18 @@ class IrAttachment(models.Model):
                 try:
                     store.put(name, data)
                     size = store.head(name)
-                except CloudStoreError as error:
+                except CloudStoreUnavailable as error:
                     _logger.warning("Cloud filestore: upload job stopped at %s: %s", name, error)
                     self._cloud_filestore_alert("_bucket_failed", str(error))
                     failed = True
                     break
+                except CloudStoreError as error:
+                    # A refusal of one file (for example too large) is not an outage.
+                    refused += 1
+                    _logger.warning(
+                        "Cloud filestore: upload of %s refused, file stays local: %s", name, error
+                    )
+                    continue
                 if size != len(data):
                     # None can also mean a missing bucket: the local file is the only safe copy.
                     not_confirmed += 1
@@ -391,11 +463,13 @@ class IrAttachment(models.Model):
                     _logger.warning("Cloud filestore: local copy of %s not removed: %s", name, error)
                 uploaded += 1
         _logger.info(
-            "Cloud filestore upload job: %d uploaded, %d not confirmed, %d files checked%s",
+            "Cloud filestore upload job: %d uploaded, %d not confirmed, %d refused, %d files checked%s%s",
             uploaded,
             not_confirmed,
+            refused,
             len(names),
             ", stopped by a bucket error" if failed else "",
+            ", stopped by the time budget" if out_of_time else "",
         )
         if uploaded and not failed:
             # After a failed run the outage stays open: the bucket is not working.
@@ -409,11 +483,15 @@ class IrAttachment(models.Model):
         The bytes go to a temporary file in the same folder first, and the
         final name appears only through a hard link, so a crash or a full
         disk never leaves a partial file under a content-hash name, and an
-        existing file is never overwritten.
+        existing file is never overwritten. The temporary file is created
+        with mode 0o666 like Odoo's own open(), so the process umask gives
+        the file the same rights as a file that Odoo writes (mkstemp would
+        give 0o600, which a web server under another user cannot read).
         """
         folder = os.path.dirname(path)
         os.makedirs(folder, exist_ok=True)
-        file_descriptor, temp_path = tempfile.mkstemp(dir=folder, prefix=".cfs-")
+        temp_path = os.path.join(folder, f".cfs-{uuid4().hex}")
+        file_descriptor = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
         try:
             with os.fdopen(file_descriptor, "wb") as temp_file:
                 temp_file.write(data)
@@ -447,6 +525,7 @@ class IrAttachment(models.Model):
         self.env.cr.execute("SELECT DISTINCT store_fname FROM ir_attachment WHERE store_fname IS NOT NULL")
         names = sorted(row[0] for row in self.env.cr.fetchall())
         written = missing = 0
+        stopped = False
         for name in names:
             if written >= limit:
                 break
@@ -457,6 +536,7 @@ class IrAttachment(models.Model):
                 data = store.get(name)
             except CloudStoreError as error:
                 _logger.warning("Cloud filestore: download job stopped at %s: %s", name, error)
+                stopped = True
                 break
             if data is None:
                 missing += 1
@@ -471,14 +551,19 @@ class IrAttachment(models.Model):
                 if not self._cloud_filestore_write_new_file(path, data):
                     continue
             except OSError as error:
-                _logger.warning("Cloud filestore: local file %s not written: %s", name, error)
+                # A local disk error (full disk, rights) ends the run as a bucket error does.
+                _logger.warning(
+                    "Cloud filestore: download job stopped at %s, local file not written: %s", name, error
+                )
+                stopped = True
                 break
             written += 1
         _logger.info(
-            "Cloud filestore download job: %d written, %d missing in the bucket, %d names checked",
+            "Cloud filestore download job: %d written, %d missing in the bucket, %d names checked%s",
             written,
             missing,
             len(names),
+            ", stopped by an error" if stopped else "",
         )
         return written
 

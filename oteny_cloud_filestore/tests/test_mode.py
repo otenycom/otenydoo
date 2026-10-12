@@ -1,3 +1,6 @@
+import os
+import shutil
+import tempfile
 from unittest.mock import patch
 
 from odoo.tests import TransactionCase, tagged
@@ -100,3 +103,30 @@ class TestCloudFilestoreMode(TransactionCase):
                 self.env["ir.config_parameter"].sudo().set_param("oteny_cloud_filestore.bucket", "other")
                 self.attachment._cloud_filestore_store()
                 self.assertEqual(store_class.call_count, 2)
+
+    def test_bad_endpoint_never_fails_a_save_or_a_read(self):
+        """boto3 raises ValueError for an endpoint without scheme: the store is then disabled."""
+        self._configure_bucket()
+        params = self.env["ir.config_parameter"].sudo()
+        params.set_param("oteny_cloud_filestore.endpoint_url", "fsn1.example.invalid")
+        params.set_param("database.is_neutralized", "")
+        filestore = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, filestore, ignore_errors=True)
+        model = type(self.attachment)
+        self.startPatcher(patch.object(model, "_filestore", return_value=filestore))
+        self.startPatcher(patch.object(model, "_storage", return_value="file"))
+        # The alert runs in its own cursor: keep it out of this test database.
+        alert = self.startPatcher(patch.object(model, "_cloud_filestore_alert"))
+        self.startPatcher(patch.dict(config.options, WRITE_OPTIONS))
+        self.assertEqual(self.attachment._cloud_filestore_mode(), "production")
+        with self.assertLogs("odoo.addons.oteny_cloud_filestore.models.ir_attachment", "WARNING") as logs:
+            attachment = self.attachment.create({"name": "user.bin", "raw": b"stays local"})
+        self.assertIn("ValueError", "\n".join(logs.output))
+        path = attachment._full_path(attachment.store_fname)
+        self.assertTrue(os.path.exists(path))
+        self.assertEqual([call.args[0] for call in alert.call_args_list], ["_bucket_failed"])
+        # A file that is not local reads as empty bytes, never as an exception.
+        os.unlink(path)
+        with self.assertLogs("odoo.addons.oteny_cloud_filestore.models.ir_attachment", "WARNING"):
+            self.assertEqual(attachment._file_read(attachment.store_fname), b"")
+        self.assertEqual(ir_attachment_module._STORE_CACHE, {})

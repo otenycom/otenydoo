@@ -131,3 +131,17 @@ class TestCloudFilestoreGc(TransactionCase):
             self.assertIn(fname, self.fake.objects)
         self._gc()
         self.assertEqual(sorted(self.fake.deletes), sorted(names))
+
+    def test_gc_hold_days_below_minimum_uses_120(self):
+        """Odoo.sh keeps backups 3 to 4 months: an object is never deleted earlier."""
+        within_floor = self._save(b"100 days old")
+        past_floor = self._save(b"130 days old")
+        kept_name = self._unlink_aged(within_floor, 100)
+        deleted_name = self._unlink_aged(past_floor, 130)
+        self.params.set_param("oteny_cloud_filestore.hold_days", "30")
+        with self.assertLogs("odoo.addons.oteny_cloud_filestore.models.ir_attachment", "WARNING") as logs:
+            self.assertEqual(self.attachment._cloud_filestore_hold_days(), 120)
+            self._gc()
+        self.assertIn("below the minimum", logs.output[0])
+        self.assertEqual(self.fake.deletes, [deleted_name])
+        self.assertIn(kept_name, self.fake.objects)

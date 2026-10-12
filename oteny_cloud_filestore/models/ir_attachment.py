@@ -1,6 +1,6 @@
 import logging
 
-from odoo import api, models
+from odoo import api, fields, models
 from odoo.tools import config
 
 from ..tools.cloud_store import CloudStore
@@ -17,6 +17,38 @@ _STORE_CACHE = {}
 
 class IrAttachment(models.Model):
     _inherit = "ir.attachment"
+
+    # Stored, because a later batch job must know which files never go to the
+    # bucket, and the install_mode context of the create is not kept anywhere.
+    cloud_local_only = fields.Boolean(
+        string="Stays Local",
+        readonly=True,
+        copy=False,
+        help="Asset bundles and files that a module installs stay in the local filestore.",
+    )
+
+    @api.model
+    def _cloud_filestore_is_local_only(self):
+        """True while the current write is for a file that never goes to the bucket."""
+        return bool(self.env.context.get("install_mode") or self.env.context.get("cloud_filestore_local_only"))
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        """Flag asset bundles and module files as local-only.
+
+        A bundle is rebuilt by Odoo at any time and a module file is
+        reinstalled from its module, so neither belongs in the bucket.
+        """
+        install_mode = bool(self.env.context.get("install_mode"))
+        vals_list = [dict(vals) for vals in vals_list]
+        for vals in vals_list:
+            is_bundle = (vals.get("url") or "").startswith("/web/assets/")
+            # An explicit True is kept; a vals can never turn a bundle into a bucket file.
+            vals["cloud_local_only"] = bool(is_bundle or install_mode or vals.get("cloud_local_only"))
+        if all(vals["cloud_local_only"] for vals in vals_list):
+            # _file_write only receives the content and its hash, so it reads this context.
+            self = self.with_context(cloud_filestore_local_only=True)
+        return super().create(vals_list)
 
     @api.model
     def _cloud_filestore_param(self, key, default=""):

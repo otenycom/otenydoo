@@ -11,6 +11,7 @@
     "depends": ["base", "mail", "web"],
     "external_dependencies": {"python": ["boto3"]},
     "data": [],
+    "post_init_hook": "post_init_hook",
     "installable": True,
     "application": False,
     "license": "OEEL-1",

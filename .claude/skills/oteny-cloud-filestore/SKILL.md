@@ -220,7 +220,11 @@ OTENY_CLOUD_FILESTORE_TEST_CONFIG=~/.config/oteny/cloud_filestore_test.ini \
 Use `-i` on the first run of a new database. The run passes when the log
 shows `0 failed, 0 error(s)`.
 
+The live test store of the development team (Garage, laptop only) and its
+limits are described in [test-store.md](references/test-store.md).
+
 ## References
 
 - [design-decisions.md](references/design-decisions.md): D1 to D27.
 - [Plan 1: core module](plans/2026-10-12-plan-1-core-module.md).
+- [test-store.md](references/test-store.md): the live test store.

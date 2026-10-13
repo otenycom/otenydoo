@@ -57,7 +57,8 @@ production save keeps the file local.
    `key_prefix` (default empty), `read_access_key_id`,
    `read_secret_access_key`, `hold_days` (default `365`, minimum `120`) and
    `alert_channel_id` (the id of the `discuss.channel` for outage messages).
-   `outage_since` is internal state: do not edit it.
+   `outage_since` and `not_server_wide_alerted` are internal state: do not
+   edit them.
 5. Set `alert_channel_id`. The Discuss alert needs it. Without it, an outage
    shows only in the log.
 6. Put the write key in `odoo.conf` of the production server only:
@@ -71,9 +72,13 @@ production save keeps the file local.
    and a module that loads before this one can read a file that is only in
    the bucket. Without the server-wide line, that read gives empty bytes.
    With the line, the module reads from the bucket from the first moment.
-   If the line is missing in production mode, the module logs a warning and
-   posts one Discuss alert (in the channel `alert_channel_id`) when the
-   database registry loads.
+   If the line is missing in production mode, the module gives two signals.
+   It logs a warning in the server log when the server loads the database.
+   The upload job posts one Discuss alert in the channel `alert_channel_id`,
+   and at most one until the line is fixed. The system parameter
+   `not_server_wide_alerted` holds the time of that alert. When the module
+   is server-wide again, the job clears the parameter, so a later loss of
+   the line alerts again.
 8. Restart Odoo, so the options are read. At every start, Odoo logs an
    "unknown option ... stored as-is" warning for each of the two options.
    This is expected: Odoo does not know the options, and the module reads
@@ -121,7 +126,7 @@ in the local filestore. The module posts one Discuss message in the channel
 again. Several workers at the same time still post once.
 
 A cron job, "Cloud filestore: upload local files to the bucket", runs every
-10 minutes. It uploads the local user files in batches of 500 and removes
+10 minutes. It uploads at most 500 local user files per run and removes
 the local copy only after the bucket reports the same size. It stops at the
 first outage error (no connection, a timeout, an HTTP 5xx), and it stops
 after 240 seconds, so a run stays below the time limit of an Odoo.sh cron.
@@ -157,8 +162,10 @@ these files too.
 A user file and a local-only file can have the same content, so they share
 one name (the content hash). In this case the local copy stays, because the
 local-only row never depends on the bucket. The save path and the catch-up
-job both check this before they remove a local copy, and the job does not
-count such a name as pending.
+job both check this before they remove a local copy. The name stays pending
+for the job, because the user file uses it. Each run asks the bucket for it
+again: one head, and no put when the object is there. The job log counts
+such a name as "already in the bucket", not as "uploaded".
 
 The install of the module also flags the files that existed before. The
 images of records that a real module created stay local, for example the
@@ -212,11 +219,13 @@ true:
   files once the Odoo.sh backups that still hold them expire (after 3 to 4
   months). Second, reads are slower until the read cache of plan 2 exists.
 
+One check is OPEN and must be done on test1 before the rollout. Odoo.sh
+reads `/home/odoo/.config/odoo/odoo.conf`. The check: does a
+`server_wide_modules` line in that file reach the workers, or does the start
+command of Odoo.sh overrule it?
+
 ## Known Limits
 
-- The alert for a module that is not server-wide fires once per database per
-  process. So it fires once per worker and again after each restart, and not
-  once per database. This is a known limit until a follow-up.
 - Odoo's own tests in production mode:
   `TestImage.test_05_web_image_access_token` uses `freeze_time`, so the
   clock stands still at the token expiry time. boto3 signs the S3 request
@@ -313,3 +322,8 @@ limits are described in [test-store.md](references/test-store.md).
   separate `head`. Measured cost today: about 104 ms per file.
 - [ ] Measure once from an Odoo.sh branch against the production bucket
   before the rollout.
+- [ ] Plan 2: the D25 gap. During a module update, a module that loads
+  before this one can create a file. That row gets no `cloud_local_only`
+  flag (NULL), so the upload job treats a module image as a user file and
+  moves it to the bucket. No data is lost: the file only goes to the bucket
+  without need.

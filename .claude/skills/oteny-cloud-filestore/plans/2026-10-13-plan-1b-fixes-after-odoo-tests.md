@@ -1,7 +1,10 @@
 # Cloud Filestore Plan 1b — Fixes after the Odoo attachment tests
 
-> Status: BUILT (13-Oct-2026), commits 4af31d2..b9aaec6 and the
-> documentation commit that follows them.
+> Status: BUILT (13-Oct-2026), commits 4af31d2..b9aaec6, the
+> documentation commits that follow them, and the final review fixes. OPEN
+> before the rollout: the Odoo.sh check on test1 (does a
+> `server_wide_modules` line in `/home/odoo/.config/odoo/odoo.conf` reach the
+> workers?).
 > Spec: [../references/design-decisions.md](../references/design-decisions.md).
 > Follows [plan 1](2026-10-12-plan-1-core-module.md).
 
@@ -162,3 +165,26 @@ The four changes are built in this order, each with its own tests and an
 independent review: 1, 2, 3, 4. After change 3 the module's own suite and
 the 61 Odoo tests run again in production mode against Google `dev/`. The
 branch stays `feat/cloud-filestore`.
+
+## Final review
+
+The final review of plan 1b gave these fixes (13-Oct-2026):
+
+- The upload job no longer skips a name that a user file shares with a
+  local-only file. Since the head before the put, a check of such a name is
+  cheap: one head, and no put when the object is there. The local copy
+  stays for the local-only row. An object that is in the bucket already
+  counts as "already in the bucket" in the job log, not as "uploaded", and
+  not towards the limit of the run.
+- The not-server-wide signal moved. The registry setup only logs a warning.
+  The upload job posts the Discuss alert once, and records it in the system
+  parameter `oteny_cloud_filestore.not_server_wide_alerted`. The job clears
+  the parameter when the module is server-wide again, so a later loss of
+  the line alerts again. The alert no longer repeats per worker and per
+  restart.
+- A unit test covers the read of a registry where this module is not
+  loaded yet: the read uses the module-level mode and store, and a bucket
+  failure only logs.
+- The skill describes the signal once, keeps the Odoo.sh check open, and
+  lists the D25 gap (a file that an earlier module creates during a module
+  update gets no flag) in the roadmap.

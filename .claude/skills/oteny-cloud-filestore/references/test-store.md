@@ -1,4 +1,47 @@
-# Live test store (homelab, not production)
+# Live test stores
+
+## Current: Google Cloud Storage, folder `dev/` (13-Oct-2026)
+
+The live tests run against the folder `dev/` of the bucket
+`cuneus-crewradar-docs` (Google Cloud project `gen-lang-client-0134060903`,
+organization "Crewradar Cuneus", location EU multi-region). The same bucket
+holds the production files in the folder `main/`; `dev/` is for development
+and tests only and stays small.
+
+- **S3 interface:** endpoint `https://storage.googleapis.com`, region `auto`,
+  path-style addressing, HMAC keys. Bucket settings: public access blocked,
+  uniform bucket-level access, soft delete 7 days (a deleted object stays
+  recoverable for 7 days).
+- **Folders:** `dev/` and `main/` are managed folders, so each has its own
+  access rules. A key limited to `dev/` can never touch `main/`; the live
+  test `test_write_key_stays_in_its_folder` proves it.
+- **Keys:** two service accounts, each with one HMAC key.
+  `crewradar-filestore-dev-write` has `roles/storage.objectAdmin` on `dev/`
+  only. `crewradar-filestore-dev-read` has the custom project role
+  `cloudFilestoreObjectGet` (only `storage.objects.get`) on `dev/` only: it
+  reads a known object and cannot list (D27; live test
+  `test_read_key_cannot_list`). A third, inactive HMAC key of the write
+  account is left over from a retried setup run.
+- **Where the secrets are:** 1Password, account `thijs@vriend.studio`, vault
+  Oteny, items "CrewRadar cloud filestore dev write (GCS HMAC)" and "...
+  dev read (GCS HMAC)". The test INI is built from them with `op inject`
+  and the template `~/.config/oteny/cf-lab/cloud_filestore_test.ini.tpl`
+  (`op://` references by item ID, because the titles hold parentheses,
+  which an `op://` path does not accept). The INI sets `key_prefix = dev/`;
+  each run writes under `dev/test-<uuid>/` and deletes its objects.
+- **Key creation is blocked by default.** The organization enforces
+  `iam.disableServiceAccountKeyCreation`, which also blocks HMAC keys. A new
+  key needs a short project-level exception: switch the policy off for the
+  project, create the key, then remove the exception so the project inherits
+  the enforced policy again. Existing keys keep working. The production key
+  for `main/` needs the same step at the rollout.
+- **Tools:** `gcloud` and `op` come from `nix shell nixpkgs#google-cloud-sdk`
+  and `NIXPKGS_ALLOW_UNFREE=1 nix shell --impure nixpkgs#_1password-cli`;
+  `op` needs the 1Password app setting "Integrate with 1Password CLI" and
+  `OP_ACCOUNT` set to the user ID of the vriend.studio account.
+
+## Earlier: Garage on the homelab (disabled 13-Oct-2026)
+
 
 Moved here from radar's cloud filestore plan on 12-Oct-2026: all
 documentation of this module lives in otenydoo. The live tests read

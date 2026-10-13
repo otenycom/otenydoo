@@ -4,8 +4,12 @@ from uuid import uuid4
 
 from odoo.tests import BaseCase, tagged
 
+import boto3
+from botocore.config import Config
+from botocore.exceptions import ClientError
+
 from ..tools.cloud_store import CloudStore, CloudStoreError, CloudStoreUnavailable
-from .common import live_store_config
+from .common import live_run_prefix, live_store_config
 
 
 @tagged("oteny_cloud_filestore", "post_install", "-at_install")
@@ -18,8 +22,9 @@ class TestCloudStoreLive(BaseCase):
         cls.config = live_store_config()
         if cls.config is None:
             raise unittest.SkipTest("OTENY_CLOUD_FILESTORE_TEST_CONFIG is not set")
-        # Each run writes only under its own prefix.
-        cls.key_prefix = f"test-{uuid4().hex}/"
+        # Each run writes only under its own prefix, inside the folder the
+        # test keys are limited to (the INI's optional key_prefix).
+        cls.key_prefix = live_run_prefix(cls.config)
         cls.put_names = set()
         cls.writer = cls._store("write")
         cls.reader = cls._store("read")
@@ -68,6 +73,42 @@ class TestCloudStoreLive(BaseCase):
         with self.assertRaises(CloudStoreError) as delete_error:
             self.reader.delete("cd/cde")
         self.assertNotIsInstance(delete_error.exception, CloudStoreUnavailable)
+
+    def test_read_key_cannot_list(self):
+        # D27: the key every clone carries reads a file whose name it knows,
+        # but it cannot list the bucket, so a leaked database cannot
+        # enumerate or bulk-download the files. The module never lists, so
+        # this calls the S3 API directly.
+        self._put("ef/efg", b"listed?")
+        client = boto3.session.Session().client(
+            "s3",
+            endpoint_url=self.config["endpoint_url"],
+            region_name=self.config["region"],
+            aws_access_key_id=self.config["read_access_key_id"],
+            aws_secret_access_key=self.config["read_secret_access_key"],
+            config=Config(s3={"addressing_style": "path"}, signature_version="s3v4"),
+        )
+        with self.assertRaises(ClientError) as caught:
+            client.list_objects_v2(Bucket=self.config["bucket"], Prefix=self.key_prefix)
+        self.assertEqual(caught.exception.response["ResponseMetadata"]["HTTPStatusCode"], 403)
+
+    def test_write_key_stays_in_its_folder(self):
+        # A test key limited to one folder (for example dev/) must be refused
+        # outside it, so it can never touch the production folder (main/).
+        folder = self.config.get("key_prefix", "")
+        if not folder:
+            self.skipTest("the test INI sets no key_prefix folder")
+        outside = CloudStore(
+            endpoint_url=self.config["endpoint_url"],
+            region=self.config["region"],
+            bucket=self.config["bucket"],
+            access_key_id=self.config["write_access_key_id"],
+            secret_access_key=self.config["write_secret_access_key"],
+            key_prefix=f"outside-{folder.strip('/')}-test-{uuid4().hex}/",
+        )
+        with self.assertRaises(CloudStoreError) as caught:
+            outside.put("ab/abc", b"x")
+        self.assertNotIsInstance(caught.exception, CloudStoreUnavailable)
 
     def test_missing_bucket_put_raises(self):
         store = CloudStore(

@@ -232,7 +232,9 @@ To run them, set the environment variable
 `OTENY_CLOUD_FILESTORE_TEST_CONFIG` to the path of an INI file with a section
 `[s3]` and the keys `endpoint_url`, `region`, `bucket`,
 `write_access_key_id`, `write_secret_access_key`, `read_access_key_id` and
-`read_secret_access_key`. Never print or commit this file. The live tests
+`read_secret_access_key`, and the optional `key_prefix` (the folder the
+test keys may write in, for example `dev/`). Never print or commit this
+file. The live tests
 write under a prefix of their own and delete their objects at the end.
 
 ```zsh

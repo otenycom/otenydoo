@@ -1,14 +1,13 @@
 import os
 import unittest
 from unittest.mock import patch
-from uuid import uuid4
 
 from odoo.tests import TransactionCase, tagged
 from odoo.tools import config
 
 from ..models import ir_attachment as ir_attachment_module
 from ..tools.cloud_store import CloudStore
-from .common import live_store_config
+from .common import live_run_prefix, live_store_config
 
 
 @tagged("oteny_cloud_filestore", "post_install", "-at_install")
@@ -25,7 +24,7 @@ class TestEndToEndLive(TransactionCase):
         if live is None:
             raise unittest.SkipTest("OTENY_CLOUD_FILESTORE_TEST_CONFIG is not set")
         self.live = live
-        self.key_prefix = f"test-{uuid4().hex}/"
+        self.key_prefix = live_run_prefix(live)
         self.created_names = set()
         # The store cache is module-level: start clean and leave it clean.
         ir_attachment_module._STORE_CACHE.clear()

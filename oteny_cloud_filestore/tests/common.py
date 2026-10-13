@@ -1,5 +1,6 @@
 import configparser
 import os
+from uuid import uuid4
 
 from ..tools.cloud_store import CloudStoreUnavailable
 
@@ -57,3 +58,13 @@ def live_store_config():
     if not parser.has_section("s3"):
         return None
     return dict(parser["s3"])
+
+
+def live_run_prefix(config):
+    """The prefix one live test run writes under.
+
+    The optional `key_prefix` of the INI is the folder the test keys may
+    write in (for example `dev/` of a bucket whose `main/` holds production
+    files); each run adds its own `test-<uuid>/` below it, so runs never meet.
+    """
+    return f"{config.get('key_prefix', '')}test-{uuid4().hex}/"

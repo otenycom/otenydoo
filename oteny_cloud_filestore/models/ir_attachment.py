@@ -192,15 +192,33 @@ class IrAttachment(models.Model):
             # end an outage that never was. The file stays local.
             _logger.warning("Cloud filestore: upload of %s refused, file stays local: %s", fname, error)
             return fname
-        try:
-            os.unlink(self._full_path(fname))
-        except FileNotFoundError:
-            pass
-        except OSError as error:
-            # The upload is confirmed; a local copy that stays is only wasted disk space.
-            _logger.warning("Cloud filestore: local copy of %s not removed: %s", fname, error)
+        if not self._cloud_filestore_local_only_uses(fname):
+            try:
+                os.unlink(self._full_path(fname))
+            except FileNotFoundError:
+                pass
+            except OSError as error:
+                # The upload is confirmed; a local copy that stays is only wasted disk space.
+                _logger.warning("Cloud filestore: local copy of %s not removed: %s", fname, error)
         self._cloud_filestore_alert("_bucket_ok")
         return fname
+
+    @api.model
+    def _cloud_filestore_local_only_uses(self, fname):
+        """True when a local-only attachment uses this file name.
+
+        A user file and a local-only file with the same content share one
+        name (the content hash). The local copy must stay for the local-only
+        row, which never depends on the bucket. One SQL query, so rows that
+        the ORM cache does not hold are seen too; pending writes are flushed
+        first so a row created a moment ago is not hidden.
+        """
+        self.flush_model(["store_fname", "cloud_local_only"])
+        self.env.cr.execute(
+            "SELECT 1 FROM ir_attachment WHERE store_fname = %s AND cloud_local_only IS TRUE LIMIT 1",
+            [fname],
+        )
+        return bool(self.env.cr.fetchone())
 
     def _cloud_filestore_read(self, fname, size=None):
         """Read like `_file_read`; return (data, store_unusable).
@@ -449,7 +467,13 @@ class IrAttachment(models.Model):
             # IS NOT TRUE, because rows that existed before the install can hold NULL.
             self.env.cr.execute(
                 "SELECT DISTINCT store_fname FROM ir_attachment"
-                " WHERE store_fname IN %s AND cloud_local_only IS NOT TRUE",
+                " WHERE store_fname IN %s AND cloud_local_only IS NOT TRUE"
+                # A name that a local-only row also uses is not pending: the save path
+                # uploaded it already, and its local file must stay for the local-only
+                # row, so the job would upload it again on every run.
+                " AND NOT EXISTS (SELECT 1 FROM ir_attachment local_row"
+                " WHERE local_row.store_fname = ir_attachment.store_fname"
+                " AND local_row.cloud_local_only IS TRUE)",
                 [tuple(batch)],
             )
             pending = set(row[0] for row in self.env.cr.fetchall())
@@ -488,10 +512,11 @@ class IrAttachment(models.Model):
                     not_confirmed += 1
                     _logger.warning("Cloud filestore: upload of %s not confirmed, file stays local", name)
                     continue
-                try:
-                    os.unlink(path)
-                except OSError as error:
-                    _logger.warning("Cloud filestore: local copy of %s not removed: %s", name, error)
+                if not self._cloud_filestore_local_only_uses(name):
+                    try:
+                        os.unlink(path)
+                    except OSError as error:
+                        _logger.warning("Cloud filestore: local copy of %s not removed: %s", name, error)
                 uploaded += 1
         _logger.info(
             "Cloud filestore upload job: %d uploaded, %d not confirmed, %d refused, %d files checked%s%s",

@@ -57,6 +57,17 @@ class TestCloudFilestoreJobs(TransactionCase):
     def _local_exists(self, fname):
         return os.path.exists(self.attachment._full_path(fname))
 
+    def test_upload_job_keeps_local_file_of_local_only_twin(self):
+        # The user file stays local while the bucket is down; a local-only file has the same bytes.
+        user_file = self._save_local(b"shared bytes")
+        twin = self._save_local(b"shared bytes", cloud_local_only=True)
+        self.assertEqual(user_file.store_fname, twin.store_fname)
+        self.attachment._cloud_filestore_upload_pending()
+        self.assertTrue(self._local_exists(twin.store_fname))
+        self.assertEqual(twin.raw, b"shared bytes")
+        # The name is not uploaded again on every run.
+        self.assertEqual(self.fake.puts, [])
+
     def test_upload_pending_moves_local_files(self):
         first = self._save_local(b"file one")
         second = self._save_local(b"file two")

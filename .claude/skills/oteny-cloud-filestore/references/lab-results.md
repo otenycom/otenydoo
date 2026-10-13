@@ -64,6 +64,31 @@ The fixed cost per file limits the speed, not the bandwidth: an upload (about
 55 to 65 ms), a size check (about 27 ms), the local delete and a database
 query, one file after another.
 
+## Odoo's own attachment tests
+
+On 13-Oct-2026, 61 standard Odoo tests that work with attachments ran against
+Google Cloud Storage (`dev/odoo-base-tests/`). The classes are
+`TestIrAttachment`, `TestPermissions`, `TestMergePartner`, `TestImage`,
+`TestLogsAssetsGenerateTime`, `TestPregenerateTime`, `TestAssetsGenerateTime`,
+`TestLoad`, `TestWebAssetsCursors`, `TestDiscussAttachmentController`,
+`TestMessageController`, `TestMessageLinks` and `TestAvatarAcl`.
+
+- Plain Odoo (module not installed, `-i base,web,mail`): 61 of 61 pass.
+- Module installed, mode off: 61 of 61 pass.
+- Production mode before plan 1b (`-u base,web,mail`): 59 of 61 pass.
+  `test_field_read_permission` failed (a local delete of a name that
+  another attachment shared, and the load order of the modules).
+  `test_05_web_image_access_token` failed (frozen clock). The log held
+  `429 SlowDown` warnings.
+- Production mode after plan 1b, with `--load=base,web,oteny_cloud_filestore`
+  (`-u base,web,mail`): 60 of 61 pass. Only `test_05_web_image_access_token`
+  fails: it freezes the clock, so the S3 signature is refused. The log has
+  no `429`.
+
+Note: Odoo's at_install tests, started without `-i` or `-u`, give order
+errors (`null value in column "notification_type"`). They do not come from
+this module. Compare only runs that were started in the same way.
+
 ## Lab setup on the developer laptop
 
 The Odoo config files of the lab hold the write key, so they are kept with

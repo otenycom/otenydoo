@@ -1,6 +1,7 @@
 # Cloud Filestore Plan 1b — Fixes after the Odoo attachment tests
 
-> Status: PROPOSED (13-Oct-2026), waiting for the Radar dev team's approval.
+> Status: BUILT (13-Oct-2026), commits 4af31d2..b9aaec6 and the
+> documentation commit that follows them.
 > Spec: [../references/design-decisions.md](../references/design-decisions.md).
 > Follows [plan 1](2026-10-12-plan-1-core-module.md).
 

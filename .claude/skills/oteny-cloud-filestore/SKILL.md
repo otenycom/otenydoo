@@ -63,7 +63,18 @@ production save keeps the file local.
 6. Put the write key in `odoo.conf` of the production server only:
    `cloud_filestore_write_access_key_id` and
    `cloud_filestore_write_secret_access_key`.
-7. Restart Odoo, so the options are read. At every start, Odoo logs an
+7. Add the module to the server-wide modules in `odoo.conf`, with the
+   modules that the server already lists:
+   `server_wide_modules = base,web,oteny_cloud_filestore`. Odoo then loads
+   the module when the server starts, before it loads any database. This
+   matters during a module update (`-u`): Odoo loads the modules one by one,
+   and a module that loads before this one can read a file that is only in
+   the bucket. Without the server-wide line, that read gives empty bytes.
+   With the line, the module reads from the bucket from the first moment.
+   If the line is missing in production mode, the module logs a warning and
+   posts one Discuss alert (in the channel `alert_channel_id`) when the
+   database registry loads.
+8. Restart Odoo, so the options are read. At every start, Odoo logs an
    "unknown option ... stored as-is" warning for each of the two options.
    This is expected: Odoo does not know the options, and the module reads
    them.
@@ -76,9 +87,14 @@ attachment (for example `ab/ab12...`).
 ## What Happens
 
 - **A save** (production): Odoo writes the file to the local filestore as
-  usual. Then the module puts the bytes in the bucket. After the put is
-  confirmed, the local copy is removed. The file name is the content hash,
-  so the same content is one object.
+  usual. Then the module asks the bucket for the object (a head request). If
+  the object exists with the same size, the module skips the upload,
+  because the name is the content hash and the object is this file. If not,
+  it puts the bytes. This spares the bucket a write: Google Cloud Storage
+  limits writes to about one per second per object name. After the bucket
+  confirms the object, the local copy is removed. The same content is one
+  object. The catch-up job also asks first, and puts only when the object
+  is missing or has another size.
 - **A read**: if the local file exists, Odoo reads it. If not, the module
   reads the object from the bucket. A bucket error never raises: the caller
   gets empty bytes, as Odoo gives for a missing local file. In production, a
@@ -138,6 +154,12 @@ bundle at any time, and a module file comes back from its module. The field
 `cloud_local_only` on the attachment records this, so the catch-up job skips
 these files too.
 
+A user file and a local-only file can have the same content, so they share
+one name (the content hash). In this case the local copy stays, because the
+local-only row never depends on the bucket. The save path and the catch-up
+job both check this before they remove a local copy, and the job does not
+count such a name as pending.
+
 The install of the module also flags the files that existed before. The
 images of records that a real module created stay local, for example the
 company logo and the avatar of the admin user. They stay local also after a
@@ -181,7 +203,9 @@ download.
 ## Rollout Condition
 
 Do not put the write key in the `odoo.conf` of a production database before
-one of these two conditions is true:
+the line `server_wide_modules = base,web,oteny_cloud_filestore` is in the
+same file (see Setup, step 7), and before one of these two conditions is
+true:
 
 - A second copy of the bucket exists (plan 2, the bucket copy).
 - The owners accept two facts. First, the bucket is the only copy of the
@@ -190,6 +214,16 @@ one of these two conditions is true:
 
 ## Known Limits
 
+- The alert for a module that is not server-wide fires once per database per
+  process. So it fires once per worker and again after each restart, and not
+  once per database. This is a known limit until a follow-up.
+- Odoo's own tests in production mode:
+  `TestImage.test_05_web_image_access_token` uses `freeze_time`, so the clock stands still at the token expiry time.
+  boto3 signs the S3 request with that clock, and the bucket refuses it
+  (`RequestTimeTooSkewed`). The module then answers 404. Any test that
+  freezes the clock and reads a file that is only in the bucket fails the
+  same way. A real server clock never stands still, so this is a property of
+  the test. Results: [lab-results.md](references/lab-results.md).
 - A download holds the whole file in memory while Odoo sends it. Large files
   need the chunked streaming of plan 2.
 - `head` on a missing bucket returns None. A HEAD answer has no body, so the

@@ -218,17 +218,20 @@ true:
   process. So it fires once per worker and again after each restart, and not
   once per database. This is a known limit until a follow-up.
 - Odoo's own tests in production mode:
-  `TestImage.test_05_web_image_access_token` uses `freeze_time`, so the clock stands still at the token expiry time.
-  boto3 signs the S3 request with that clock, and the bucket refuses it
-  (`RequestTimeTooSkewed`). The module then answers 404. Any test that
-  freezes the clock and reads a file that is only in the bucket fails the
-  same way. A real server clock never stands still, so this is a property of
-  the test. Results: [lab-results.md](references/lab-results.md).
+  `TestImage.test_05_web_image_access_token` uses `freeze_time`, so the
+  clock stands still at the token expiry time. boto3 signs the S3 request
+  with that frozen time, which is far from the time of the bucket, so the
+  bucket refuses the request (`RequestTimeTooSkewed`). The module then
+  answers 404. Any test that freezes the clock and reads a file that is only
+  in the bucket fails the same way. A real server clock never stands still,
+  so this is a property of the test. Results:
+  [lab-results.md](references/lab-results.md).
 - A download holds the whole file in memory while Odoo sends it. Large files
   need the chunked streaming of plan 2.
 - `head` on a missing bucket returns None. A HEAD answer has no body, so the
   error code is only `404`, and the module reads that as "no such key". This
-  is safe. The upload job puts first, and a put to a missing bucket raises
+  is safe. The upload job asks first. A None from `head` is not equal to the
+  file size, so the job puts, and a put to a missing bucket raises
   `NoSuchBucket`, so the job stops and posts the alert. A None from `head`
   counts as "not confirmed", so the local file stays.
 - A clone reads every file from the bucket each time. A read cache comes in

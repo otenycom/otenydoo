@@ -1,3 +1,4 @@
+import functools
 import hashlib
 import logging
 import os
@@ -8,6 +9,7 @@ from uuid import uuid4
 from werkzeug.exceptions import NotFound
 
 from odoo import api, fields, models
+from odoo.addons.base.models.ir_attachment import IrAttachment as BaseIrAttachment
 from odoo.exceptions import UserError
 from odoo.http import Stream
 from odoo.tools import config, split_every
@@ -43,6 +45,174 @@ def _cloud_filestore_store_unusable(error):
     other CloudStoreError is a refusal of one file: it is only logged.
     """
     return isinstance(error, (CloudStoreUnavailable, CloudStoreAccessError))
+
+
+# The attribute that marks Odoo's base `_file_read` as wrapped by this module.
+WRAPPED_MARKER = "_oteny_cloud_filestore_wrapped"
+# Databases that were warned in this process that the module is not server-wide.
+_NOT_SERVER_WIDE_WARNED = set()
+
+
+def _cloud_filestore_param(env, key, default=""):
+    return env["ir.config_parameter"].sudo().get_param(PARAM_PREFIX + key, default) or default
+
+
+def cloud_filestore_mode(env):
+    """Return "off", "production" or "clone".
+
+    "off": no endpoint or bucket is set, so Odoo behaves as without the
+    module. "production": the write key is in odoo.conf and the database
+    is not neutralized. Every other case is "clone": a copy of the
+    database must never put or delete objects in the bucket, even if the
+    write key was copied into its odoo.conf.
+
+    A module-level function, because the wrapped base `_file_read` needs it
+    in a registry where this module is not loaded yet (or not installed:
+    the parameters do not exist there, so the mode is "off").
+    """
+    if not (_cloud_filestore_param(env, "endpoint_url") and _cloud_filestore_param(env, "bucket")):
+        return "off"
+    has_write_key = bool(
+        config.get("cloud_filestore_write_access_key_id")
+        and config.get("cloud_filestore_write_secret_access_key")
+    )
+    is_neutralized = bool(env["ir.config_parameter"].sudo().get_param("database.is_neutralized"))
+    if has_write_key and not is_neutralized:
+        return "production"
+    return "clone"
+
+
+def cloud_filestore_store(env):
+    """Return the cached CloudStore for the current mode; None when off."""
+    mode = cloud_filestore_mode(env)
+    if mode == "off":
+        return None
+    if mode == "production":
+        access_key_id = config.get("cloud_filestore_write_access_key_id")
+        secret_access_key = config.get("cloud_filestore_write_secret_access_key")
+    else:
+        access_key_id = _cloud_filestore_param(env, "read_access_key_id")
+        secret_access_key = _cloud_filestore_param(env, "read_secret_access_key")
+    if not (access_key_id and secret_access_key):
+        # Empty keys would let boto3 fall back to ambient credentials
+        # (environment, ~/.aws, instance profile): never use those.
+        _logger.warning("Cloud filestore: no complete access key for mode %s, store disabled", mode)
+        return None
+    settings = (
+        _cloud_filestore_param(env, "endpoint_url"),
+        _cloud_filestore_param(env, "region"),
+        _cloud_filestore_param(env, "bucket"),
+        _cloud_filestore_param(env, "addressing_style", "path"),
+        _cloud_filestore_param(env, "key_prefix"),
+        access_key_id,
+        secret_access_key,
+    )
+    store = _STORE_CACHE.get(settings)
+    if store is None:
+        try:
+            store = CloudStore(
+                endpoint_url=settings[0],
+                region=settings[1],
+                bucket=settings[2],
+                addressing_style=settings[3],
+                key_prefix=settings[4],
+                access_key_id=access_key_id,
+                secret_access_key=secret_access_key,
+            )
+        except Exception as error:  # noqa: BLE001
+            # A bad setting (an endpoint without scheme, an unknown region)
+            # makes boto3 raise here. It must never fail a save or a read:
+            # without a store, production keeps files local and alerts, and
+            # a clone reads empty bytes. Only the type is logged, so no
+            # setting value reaches the log.
+            _logger.warning(
+                "Cloud filestore: store not built for mode %s, store disabled: %s",
+                mode,
+                type(error).__name__,
+            )
+            return None
+        _STORE_CACHE[settings] = store
+    return store
+
+
+def _original_file_read():
+    """Odoo's own `_file_read` of the base class, also after it was wrapped."""
+    method = BaseIrAttachment._file_read
+    return getattr(method, "__wrapped__", method)
+
+
+def cloud_filestore_read(attachment_model, fname, size=None):
+    """Read like `_file_read`; return (data, store_unusable).
+
+    The local file comes first, through Odoo's own method. Else, in
+    production or clone mode, the object comes from the bucket. A bucket
+    error never raises: the data is empty bytes, as Odoo returns for a
+    missing local file. `store_unusable` is True when the read failed
+    because the store cannot be used (outage or store-wide refusal). Empty
+    data with False means the object is gone or the store refused this one
+    file. In production, an unusable store alerts the admins; a missing
+    object or a per-file refusal only logs, because neither is an outage.
+
+    `attachment_model` is an `ir.attachment` recordset of any registry. When
+    this module is loaded in that registry, the mode, the store and the alert
+    come from the model's methods, so an override (or a test patch) applies.
+    Before that (a module update loads the modules one by one), they come
+    from the module-level functions, and a failure is only logged: the alert
+    model does not exist yet.
+    """
+    if os.path.exists(attachment_model._full_path(fname)):
+        return _original_file_read()(attachment_model, fname, size=size), False
+    if hasattr(attachment_model, "_cloud_filestore_mode"):
+        mode = attachment_model._cloud_filestore_mode()
+    else:
+        mode = cloud_filestore_mode(attachment_model.env)
+    if mode == "off":
+        return _original_file_read()(attachment_model, fname, size=size), False
+    if hasattr(attachment_model, "_cloud_filestore_store"):
+        store = attachment_model._cloud_filestore_store()
+    else:
+        store = cloud_filestore_store(attachment_model.env)
+    if store is None:
+        return b"", True
+    try:
+        data = store.get(fname)
+    except CloudStoreError as error:
+        _logger.warning("Cloud filestore: read of %s failed: %s", fname, error)
+        unusable = _cloud_filestore_store_unusable(error)
+        alert = getattr(attachment_model, "_cloud_filestore_alert", None)
+        if unusable and mode == "production" and alert is not None:
+            alert("_bucket_failed", str(error))
+        return b"", unusable
+    if data is None:
+        if any(attachment.file_size for attachment in attachment_model if attachment.store_fname == fname):
+            # A file with content that is neither local nor in the bucket
+            # most likely means a wrong bucket or key_prefix: make it
+            # visible in the log. It is not an outage, so no alert: an
+            # alert here would open and close with every good save.
+            _logger.warning("Cloud filestore: %s is not local and not in the bucket", fname)
+        return b"", False
+    return (data[:size] if size is not None else data), False
+
+
+def wrap_base_file_read():
+    """Make Odoo's base `_file_read` read from the bucket; once per process.
+
+    The registry builds the `ir.attachment` model class of every database
+    with the base class in its MRO, so this one wrapper reaches every
+    registry, also while a module update loads the modules before this one.
+    A second call (the import of the module by a registry load after the
+    server-wide import) changes nothing.
+    """
+    original = BaseIrAttachment._file_read
+    if getattr(original, WRAPPED_MARKER, False):
+        return
+
+    @functools.wraps(original)
+    def _file_read(self, fname, size=None):
+        return cloud_filestore_read(self, fname, size=size)[0]
+
+    setattr(_file_read, WRAPPED_MARKER, True)
+    BaseIrAttachment._file_read = _file_read
 
 
 class IrAttachment(models.Model):
@@ -82,81 +252,39 @@ class IrAttachment(models.Model):
 
     @api.model
     def _cloud_filestore_param(self, key, default=""):
-        return self.env["ir.config_parameter"].sudo().get_param(PARAM_PREFIX + key, default) or default
+        return _cloud_filestore_param(self.env, key, default)
 
     @api.model
     def _cloud_filestore_mode(self):
-        """Return "off", "production" or "clone".
-
-        "off": no endpoint or bucket is set, so Odoo behaves as without the
-        module. "production": the write key is in odoo.conf and the database
-        is not neutralized. Every other case is "clone": a copy of the
-        database must never put or delete objects in the bucket, even if the
-        write key was copied into its odoo.conf.
-        """
-        if not (self._cloud_filestore_param("endpoint_url") and self._cloud_filestore_param("bucket")):
-            return "off"
-        has_write_key = bool(
-            config.get("cloud_filestore_write_access_key_id")
-            and config.get("cloud_filestore_write_secret_access_key")
-        )
-        is_neutralized = bool(self.env["ir.config_parameter"].sudo().get_param("database.is_neutralized"))
-        if has_write_key and not is_neutralized:
-            return "production"
-        return "clone"
+        """Return "off", "production" or "clone": see `cloud_filestore_mode`."""
+        return cloud_filestore_mode(self.env)
 
     @api.model
     def _cloud_filestore_store(self):
         """Return the cached CloudStore for the current mode; None when off."""
-        mode = self._cloud_filestore_mode()
-        if mode == "off":
-            return None
-        if mode == "production":
-            access_key_id = config.get("cloud_filestore_write_access_key_id")
-            secret_access_key = config.get("cloud_filestore_write_secret_access_key")
-        else:
-            access_key_id = self._cloud_filestore_param("read_access_key_id")
-            secret_access_key = self._cloud_filestore_param("read_secret_access_key")
-        if not (access_key_id and secret_access_key):
-            # Empty keys would let boto3 fall back to ambient credentials
-            # (environment, ~/.aws, instance profile): never use those.
-            _logger.warning("Cloud filestore: no complete access key for mode %s, store disabled", mode)
-            return None
-        settings = (
-            self._cloud_filestore_param("endpoint_url"),
-            self._cloud_filestore_param("region"),
-            self._cloud_filestore_param("bucket"),
-            self._cloud_filestore_param("addressing_style", "path"),
-            self._cloud_filestore_param("key_prefix"),
-            access_key_id,
-            secret_access_key,
+        return cloud_filestore_store(self.env)
+
+    def _register_hook(self):
+        """Warn once when a production database runs without the module server-wide.
+
+        Only a server-wide module wraps the base `_file_read` before the first
+        module of a registry loads. Without it, a module update reads a file
+        that is only in the bucket as empty bytes for every module that loads
+        before this one.
+        """
+        super()._register_hook()
+        dbname = self.env.cr.dbname
+        if "oteny_cloud_filestore" in config["server_wide_modules"] or dbname in _NOT_SERVER_WIDE_WARNED:
+            return
+        if self._cloud_filestore_mode() != "production":
+            return
+        _NOT_SERVER_WIDE_WARNED.add(dbname)
+        _logger.warning(
+            "Cloud filestore: oteny_cloud_filestore is not a server-wide module "
+            "(--load / server_wide_modules), so a module update can read files "
+            "that are only in the bucket as empty"
         )
-        store = _STORE_CACHE.get(settings)
-        if store is None:
-            try:
-                store = CloudStore(
-                    endpoint_url=settings[0],
-                    region=settings[1],
-                    bucket=settings[2],
-                    addressing_style=settings[3],
-                    key_prefix=settings[4],
-                    access_key_id=access_key_id,
-                    secret_access_key=secret_access_key,
-                )
-            except Exception as error:  # noqa: BLE001
-                # A bad setting (an endpoint without scheme, an unknown region)
-                # makes boto3 raise here. It must never fail a save or a read:
-                # without a store, production keeps files local and alerts, and
-                # a clone reads empty bytes. Only the type is logged, so no
-                # setting value reaches the log.
-                _logger.warning(
-                    "Cloud filestore: store not built for mode %s, store disabled: %s",
-                    mode,
-                    type(error).__name__,
-                )
-                return None
-            _STORE_CACHE[settings] = store
-        return store
+        self._cloud_filestore_alert("_not_server_wide")
 
     def _set_attachment_data(self, asbytes):
         """A content change of local-only rows must not reach the bucket either."""
@@ -225,45 +353,8 @@ class IrAttachment(models.Model):
         return bool(self.env.cr.fetchone())
 
     def _cloud_filestore_read(self, fname, size=None):
-        """Read like `_file_read`; return (data, store_unusable).
-
-        `store_unusable` is True when the read failed because the store
-        cannot be used (outage or store-wide refusal). Empty data with False
-        means the object is gone or the store refused this one file.
-        In production, an unusable store alerts the admins; a missing object
-        or a per-file refusal only logs, because neither is an outage.
-        """
-        mode = self._cloud_filestore_mode()
-        if mode == "off" or os.path.exists(self._full_path(fname)):
-            return super()._file_read(fname, size=size), False
-        store = self._cloud_filestore_store()
-        if store is None:
-            return b"", True
-        try:
-            data = store.get(fname)
-        except CloudStoreError as error:
-            _logger.warning("Cloud filestore: read of %s failed: %s", fname, error)
-            unusable = _cloud_filestore_store_unusable(error)
-            if unusable and mode == "production":
-                self._cloud_filestore_alert("_bucket_failed", str(error))
-            return b"", unusable
-        if data is None:
-            if any(attachment.file_size for attachment in self if attachment.store_fname == fname):
-                # A file with content that is neither local nor in the bucket
-                # most likely means a wrong bucket or key_prefix: make it
-                # visible in the log. It is not an outage, so no alert: an
-                # alert here would open and close with every good save.
-                _logger.warning("Cloud filestore: %s is not local and not in the bucket", fname)
-            return b"", False
-        return (data[:size] if size is not None else data), False
-
-    def _file_read(self, fname, size=None):
-        """Read the local file; when it is not there, read it from the bucket.
-
-        A bucket error never raises: the caller gets empty bytes, as Odoo
-        returns for a missing local file.
-        """
-        return self._cloud_filestore_read(fname, size=size)[0]
+        """Read like `_file_read`; return (data, store_unusable): see `cloud_filestore_read`."""
+        return cloud_filestore_read(self, fname, size=size)
 
     def copy_data(self, default=None):
         """Refuse to copy a file whose content cannot be read now.

@@ -6,4 +6,5 @@ from . import test_jobs
 from . import test_local_only
 from . import test_mode
 from . import test_read
+from . import test_server_wide
 from . import test_write

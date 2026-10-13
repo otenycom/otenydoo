@@ -3,6 +3,18 @@ from . import tools
 
 from odoo.tools import SQL
 
+from .models.ir_attachment import wrap_base_file_read
+
+
+def post_load():
+    """Read from the bucket from server start on.
+
+    Odoo runs this when it imports the module: at server start for a
+    server-wide module (--load), before any registry exists, and else when a
+    registry loads the module. The wrap is done once per process.
+    """
+    wrap_base_file_read()
+
 
 def post_init_hook(env):
     """Flag the files that existed before the module was installed.

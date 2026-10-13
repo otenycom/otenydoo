@@ -12,6 +12,7 @@
     "external_dependencies": {"python": ["boto3"]},
     "data": ["data/ir_config_parameter.xml", "data/ir_cron.xml"],
     "post_init_hook": "post_init_hook",
+    "post_load": "post_load",
     "installable": True,
     "application": False,
     "license": "OEEL-1",

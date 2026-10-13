@@ -81,13 +81,35 @@ class CloudFilestoreAlert(models.AbstractModel):
                 if row is None or bool(row[0]) != expect_open:
                     return
                 cr.execute("UPDATE ir_config_parameter SET value = %s WHERE key = %s", [outage_since, key])
-                env = api.Environment(cr, SUPERUSER_ID, {})
-                channel_id = int(env["ir.config_parameter"].get_param(PARAM_PREFIX + "alert_channel_id", "0") or 0)
-                channel = env["discuss.channel"].browse(channel_id).exists()
-                if channel:
-                    channel.message_post(body=message, message_type="comment", subtype_xmlid="mail.mt_comment")
-                else:
-                    _logger.warning("Cloud filestore: no alert channel to post to: %s", message)
+                _post_to_alert_channel(api.Environment(cr, SUPERUSER_ID, {}), message)
             self.env.registry.clear_cache("stable")
         except Exception as error:  # noqa: BLE001
             _logger.warning("Cloud filestore: alert not posted: %s", type(error).__name__)
+
+    @api.model
+    def _not_server_wide(self):
+        """Tell the admins that the module is not server-wide; the outage state stays as it is.
+
+        Runs in a separate cursor, as the outage alerts do, and never raises.
+        """
+        try:
+            with self.env.registry.cursor() as cr:
+                _post_to_alert_channel(
+                    api.Environment(cr, SUPERUSER_ID, {}),
+                    f"The cloud filestore of database {self.env.cr.dbname} is not loaded as a server-wide "
+                    "module (--load or server_wide_modules in odoo.conf). A module update can then read "
+                    "files that are only in the bucket as empty. Add oteny_cloud_filestore to the "
+                    "server-wide modules and restart the server.",
+                )
+        except Exception as error:  # noqa: BLE001
+            _logger.warning("Cloud filestore: alert not posted: %s", type(error).__name__)
+
+
+def _post_to_alert_channel(env, message):
+    """Post the message in the alert channel; log it when no channel is set."""
+    channel_id = int(env["ir.config_parameter"].get_param(PARAM_PREFIX + "alert_channel_id", "0") or 0)
+    channel = env["discuss.channel"].browse(channel_id).exists()
+    if channel:
+        channel.message_post(body=message, message_type="comment", subtype_xmlid="mail.mt_comment")
+    else:
+        _logger.warning("Cloud filestore: no alert channel to post to: %s", message)

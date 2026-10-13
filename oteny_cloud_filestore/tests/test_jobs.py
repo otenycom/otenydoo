@@ -79,6 +79,13 @@ class TestCloudFilestoreJobs(TransactionCase):
         self.assertFalse(self._local_exists(second.store_fname))
         self.assertFalse(self.params.get_param("oteny_cloud_filestore.outage_since"))
 
+    def test_upload_job_skips_existing_object(self):
+        attachment = self._save_local(b"already there")
+        self.fake.objects[attachment.store_fname] = b"already there"
+        self.assertEqual(self.attachment._cloud_filestore_upload_pending(), 1)
+        self.assertEqual(self.fake.puts, [])
+        self.assertFalse(self._local_exists(attachment.store_fname))
+
     def test_upload_skips_local_only(self):
         kept = self._save_local(b"module file", cloud_local_only=True)
         pending = self._save_local(b"user file")

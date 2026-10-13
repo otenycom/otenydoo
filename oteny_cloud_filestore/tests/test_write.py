@@ -53,6 +53,24 @@ class TestCloudFilestoreWrite(TransactionCase):
         self.assertEqual(self.fake.objects[attachment.store_fname], b"user file")
         self.assertFalse(self._local_exists(attachment))
 
+    def test_write_skips_put_when_object_exists(self):
+        # The name is the SHA-1 of the content: same name and size means same file.
+        name = self.attachment._compute_checksum(b"user file")
+        self.fake.objects[name[:2] + "/" + name] = b"user file"
+        attachment = self._save(b"user file")
+        self.assertEqual(attachment.store_fname, name[:2] + "/" + name)
+        self.assertEqual(self.fake.puts, [])
+        self.assertFalse(self._local_exists(attachment))
+
+    def test_write_puts_when_object_size_differs(self):
+        name = self.attachment._compute_checksum(b"user file")
+        fname = name[:2] + "/" + name
+        self.fake.objects[fname] = b"short"
+        attachment = self._save(b"user file")
+        self.assertEqual(self.fake.puts, [fname])
+        self.assertEqual(self.fake.objects[fname], b"user file")
+        self.assertFalse(self._local_exists(attachment))
+
     def test_write_keeps_local_file_of_local_only_twin(self):
         # A local-only file and a user file with the same bytes share one file name.
         twin = self._save(b"shared bytes", install_mode=True)

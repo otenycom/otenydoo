@@ -181,7 +181,11 @@ class IrAttachment(models.Model):
             self._cloud_filestore_alert("_bucket_failed", "no usable store settings")
             return fname
         try:
-            store.put(fname, bin_value)
+            # The name is the SHA-1 of the content, so an object with this name and
+            # size is this file. Asking first spares the bucket a write: Google Cloud
+            # Storage limits writes to about one per second per object name.
+            if store.head(fname) != len(bin_value):
+                store.put(fname, bin_value)
         except CloudStoreError as error:
             if _cloud_filestore_store_unusable(error):
                 _logger.warning("Cloud filestore: upload of %s failed, file stays local: %s", fname, error)
@@ -493,8 +497,11 @@ class IrAttachment(models.Model):
                     _logger.warning("Cloud filestore: local file %s not read: %s", name, error)
                     continue
                 try:
-                    store.put(name, data)
+                    # Ask first: an object that is there already needs no write.
                     size = store.head(name)
+                    if size != len(data):
+                        store.put(name, data)
+                        size = store.head(name)
                 except CloudStoreError as error:
                     if _cloud_filestore_store_unusable(error):
                         _logger.warning("Cloud filestore: upload job stopped at %s: %s", name, error)

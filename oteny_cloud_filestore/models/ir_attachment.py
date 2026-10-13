@@ -49,8 +49,6 @@ def _cloud_filestore_store_unusable(error):
 
 # The attribute that marks Odoo's base `_file_read` as wrapped by this module.
 WRAPPED_MARKER = "_oteny_cloud_filestore_wrapped"
-# Databases that were warned in this process that the module is not server-wide.
-_NOT_SERVER_WIDE_WARNED = set()
 
 
 def _cloud_filestore_param(env, key, default=""):
@@ -265,26 +263,48 @@ class IrAttachment(models.Model):
         return cloud_filestore_store(self.env)
 
     def _register_hook(self):
-        """Warn once when a production database runs without the module server-wide.
+        """Log a warning when a production database runs without the module server-wide.
 
         Only a server-wide module wraps the base `_file_read` before the first
         module of a registry loads. Without it, a module update reads a file
         that is only in the bucket as empty bytes for every module that loads
-        before this one.
+        before this one. The hook only logs: every worker sets up its
+        registries, so a Discuss alert from here would repeat per worker and
+        per restart. The upload job posts the one alert.
         """
         super()._register_hook()
-        dbname = self.env.cr.dbname
-        if "oteny_cloud_filestore" in config["server_wide_modules"] or dbname in _NOT_SERVER_WIDE_WARNED:
+        if self._cloud_filestore_is_server_wide() or self._cloud_filestore_mode() != "production":
             return
-        if self._cloud_filestore_mode() != "production":
-            return
-        _NOT_SERVER_WIDE_WARNED.add(dbname)
         _logger.warning(
             "Cloud filestore: oteny_cloud_filestore is not a server-wide module "
             "(--load / server_wide_modules), so a module update can read files "
             "that are only in the bucket as empty"
         )
+
+    @api.model
+    def _cloud_filestore_is_server_wide(self):
+        return "oteny_cloud_filestore" in config["server_wide_modules"]
+
+    @api.model
+    def _cloud_filestore_check_server_wide(self):
+        """Post the not-server-wide alert once, until the server-wide line is back.
+
+        The system parameter `not_server_wide_alerted` holds the time of the
+        alert; an absent parameter counts as empty. When the module is
+        server-wide again, the parameter is cleared, so a later regression
+        alerts again.
+        """
+        params = self.env["ir.config_parameter"].sudo()
+        key = PARAM_PREFIX + "not_server_wide_alerted"
+        alerted = params.get_param(key)
+        if self._cloud_filestore_is_server_wide():
+            if alerted:
+                params.set_param(key, False)
+            return
+        if alerted:
+            return
         self._cloud_filestore_alert("_not_server_wide")
+        params.set_param(key, fields.Datetime.to_string(fields.Datetime.now()))
 
     def _set_attachment_data(self, asbytes):
         """A content change of local-only rows must not reach the bucket either."""
@@ -546,14 +566,22 @@ class IrAttachment(models.Model):
         outage error, because the next file would most likely fail as well.
         A file that the bucket refuses is skipped, so it cannot block every
         later run. A run also stops after UPLOAD_TIME_BUDGET_SECONDS.
+
+        An object that is in the bucket already with the same size is not
+        put again and does not count as an upload, nor towards `limit`: a
+        name that a user file shares with a local-only file keeps its local
+        copy, so every run asks the bucket for it again (one head, no put).
+
+        The job also posts the alert when the module is not server-wide.
         """
         if self._cloud_filestore_mode() != "production":
             return 0
+        self._cloud_filestore_check_server_wide()
         store = self._cloud_filestore_store()
         if store is None:
             return 0
         started = time.monotonic()
-        uploaded = not_confirmed = refused = 0
+        uploaded = already = not_confirmed = refused = 0
         failed = out_of_time = False
         names = self._cloud_filestore_local_names()
         for batch in split_every(self.env.cr.IN_MAX, names):
@@ -562,13 +590,7 @@ class IrAttachment(models.Model):
             # IS NOT TRUE, because rows that existed before the install can hold NULL.
             self.env.cr.execute(
                 "SELECT DISTINCT store_fname FROM ir_attachment"
-                " WHERE store_fname IN %s AND cloud_local_only IS NOT TRUE"
-                # A name that a local-only row also uses is not pending: the save path
-                # uploaded it already, and its local file must stay for the local-only
-                # row, so the job would upload it again on every run.
-                " AND NOT EXISTS (SELECT 1 FROM ir_attachment local_row"
-                " WHERE local_row.store_fname = ir_attachment.store_fname"
-                " AND local_row.cloud_local_only IS TRUE)",
+                " WHERE store_fname IN %s AND cloud_local_only IS NOT TRUE",
                 [tuple(batch)],
             )
             pending = set(row[0] for row in self.env.cr.fetchall())
@@ -587,11 +609,13 @@ class IrAttachment(models.Model):
                 except OSError as error:
                     _logger.warning("Cloud filestore: local file %s not read: %s", name, error)
                     continue
+                is_put = False
                 try:
                     # Ask first: an object that is there already needs no write.
                     size = store.head(name)
                     if size != len(data):
                         store.put(name, data)
+                        is_put = True
                         size = store.head(name)
                 except CloudStoreError as error:
                     if _cloud_filestore_store_unusable(error):
@@ -615,17 +639,22 @@ class IrAttachment(models.Model):
                         os.unlink(path)
                     except OSError as error:
                         _logger.warning("Cloud filestore: local copy of %s not removed: %s", name, error)
-                uploaded += 1
+                if is_put:
+                    uploaded += 1
+                else:
+                    already += 1
         _logger.info(
-            "Cloud filestore upload job: %d uploaded, %d not confirmed, %d refused, %d files checked%s%s",
+            "Cloud filestore upload job: %d uploaded, %d already in the bucket, %d not confirmed, "
+            "%d refused, %d files checked%s%s",
             uploaded,
+            already,
             not_confirmed,
             refused,
             len(names),
             ", stopped by a bucket error" if failed else "",
             ", stopped by the time budget" if out_of_time else "",
         )
-        if uploaded and not failed:
+        if (uploaded or already) and not failed:
             # After a failed run the outage stays open: the bucket is not working.
             self._cloud_filestore_alert("_bucket_ok")
         return uploaded

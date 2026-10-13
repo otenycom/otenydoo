@@ -5,6 +5,7 @@ import tempfile
 from unittest.mock import MagicMock, patch
 
 from odoo.tests import TransactionCase, tagged
+from odoo.tools import config
 
 from ..models import ir_attachment as ir_attachment_module
 from ..tools import cloud_store
@@ -41,6 +42,10 @@ class TestCloudFilestoreJobs(TransactionCase):
         self.startPatcher(patch.object(model, "_cloud_filestore_mode", side_effect=lambda *args: self.mode))
         self.startPatcher(patch.object(model, "_cloud_filestore_store", return_value=self.fake))
         self.startPatcher(patch.object(model, "_storage", return_value="file"))
+        # The job also checks the server-wide load; these tests are about the files only.
+        self.startPatcher(
+            patch.dict(config.options, {"server_wide_modules": ["base", "web", "oteny_cloud_filestore"]})
+        )
 
     def _save_local(self, raw, **vals):
         """Save a file while the bucket is down, so it stays in the local filestore."""
@@ -62,11 +67,17 @@ class TestCloudFilestoreJobs(TransactionCase):
         user_file = self._save_local(b"shared bytes")
         twin = self._save_local(b"shared bytes", cloud_local_only=True)
         self.assertEqual(user_file.store_fname, twin.store_fname)
-        self.attachment._cloud_filestore_upload_pending()
+        # The user file goes to the bucket; the local file stays for the local-only row.
+        self.assertEqual(self.attachment._cloud_filestore_upload_pending(), 1)
+        self.assertEqual(self.fake.puts, [user_file.store_fname])
         self.assertTrue(self._local_exists(twin.store_fname))
         self.assertEqual(twin.raw, b"shared bytes")
-        # The name is not uploaded again on every run.
-        self.assertEqual(self.fake.puts, [])
+        # A second run asks the bucket again, finds the object and makes no put.
+        with self.assertLogs(LOGGER, "INFO") as logs:
+            self.assertEqual(self.attachment._cloud_filestore_upload_pending(), 0)
+        self.assertEqual(self.fake.puts, [user_file.store_fname])
+        self.assertTrue(self._local_exists(twin.store_fname))
+        self.assertIn("0 uploaded, 1 already in the bucket", "\n".join(logs.output))
 
     def test_upload_pending_moves_local_files(self):
         first = self._save_local(b"file one")
@@ -82,7 +93,10 @@ class TestCloudFilestoreJobs(TransactionCase):
     def test_upload_job_skips_existing_object(self):
         attachment = self._save_local(b"already there")
         self.fake.objects[attachment.store_fname] = b"already there"
-        self.assertEqual(self.attachment._cloud_filestore_upload_pending(), 1)
+        # An object that is there already is not an upload, but its local copy goes.
+        with self.assertLogs(LOGGER, "INFO") as logs:
+            self.assertEqual(self.attachment._cloud_filestore_upload_pending(), 0)
+        self.assertIn("0 uploaded, 1 already in the bucket", "\n".join(logs.output))
         self.assertEqual(self.fake.puts, [])
         self.assertFalse(self._local_exists(attachment.store_fname))
 

@@ -136,6 +136,28 @@ recent_first = entries.sorted('start_date', reverse=True)
 sorted_entries = entries.sorted(lambda e: (e.start_date, e.employee_id.name))
 ```
 
+### A related field through a One2many reads the first record in cache order
+
+`related="contract_ids.start_date"` gives the value of the first record of the
+One2many as the cache holds it. After a `create` in the same transaction the
+new record is appended to the cached list; the list is not sorted again by the
+comodel's `_order`. So "the latest contract" through a related field is the
+oldest one until the cache is reloaded (found 17-Oct-2026: a contract created
+in a test kept the employee's related start date on the older contract). When
+the field means "the latest" or "the first by some order", compute it and pick
+the record explicitly:
+
+```python
+@api.depends("contract_ids.start_date", "contract_ids.end_date")
+def _compute_latest_contract_dates(self):
+    for employee in self:
+        latest = employee.contract_ids.sorted(
+            lambda c: (c.start_date or date.min, c.id), reverse=True
+        )[:1]
+        employee.contract_start_date = latest.start_date
+        employee.contract_end_date = latest.end_date
+```
+
 ### "Is under" in a hierarchy: compare the `parent_path` prefix, never search it as text
 
 `parent_path` holds the ids from the top down, each followed by a slash

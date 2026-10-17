@@ -538,6 +538,19 @@ Run explicitly:
 
 **Note**: `-standard` in `--test-tags` acts as a filter that *excludes* tests with `standard`. It does **not** remove the `standard` tag from a class at runtime. The `-standard` must be in the `@tagged()` decorator on the class itself to prevent the HTTP blocker from being installed.
 
+**Selecting a `-standard` class needs its tag in the selector.** In Odoo 19 a
+selector without a tag part (`/module:Class`) means "standard tests of that
+class" (`odoo/tests/tag_selector.py`: an include without a tag gets
+`tag = 'standard'`), so it runs nothing for a class tagged `-standard`. Name
+one of the class's own tags: `--test-tags=click_all/web:TestMenusAdmin`, not
+`--test-tags=/web:TestMenusAdmin`. That class is Odoo's headless
+click-everywhere test (`web/tests/test_click_everywhere.py`): it opens every
+menu, action and view type as admin in headless Chrome and fails on a
+JavaScript error or a view that does not load. On the full radar module list
+it ran in 179 s to 244 s (17-Oct-2026). Menus whose server action runs longer
+than its 30 s click limit (the Refresh and Recompute menus) are red there as a
+matter of course.
+
 ### API Key Gating and Secret Hygiene
 
 Live / e2e tests — and the CLIs that exercise the same code paths — **must not disclose API keys or client secrets** anywhere they could be observed, retained, or replayed. Treat any leak as a key-rotation event.

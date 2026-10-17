@@ -75,6 +75,28 @@ def migrate(cr, version):
 
 Odoo will recreate the views from your XML files (which no longer have the field reference) during the module update.
 
+**A view that left the data files fails a later module.** When the module
+that removes the field also removes the view, Odoo deletes the view only at
+the end of the whole upgrade (`ir.model.data._process_end`). Until then it
+stays in the combined form, and the next module that adds a view to the same
+form fails the check above, although that module never named the field
+(seen with a removed `res.config.settings` view: every later Settings view
+failed). Delete the view in a pre-migrate of the module that removed it, by
+its XML id and through the ORM:
+
+```python
+def migrate(cr, version):
+    env = api.Environment(cr, SUPERUSER_ID, {})
+    view = env.ref("my_module.removed_view", raise_if_not_found=False)
+    if view:
+        view.with_context(_force_unlink=True).unlink()
+```
+
+`inherit_id` is `ondelete='restrict'`, so a raw `DELETE` fails when other
+views inherit from it; `_force_unlink` deletes those child views with it, as
+an uninstall does, without naming another module's records. A module that
+still ships such a child view creates it again when it upgrades.
+
 ### Error: can only parse strings
 
 ```

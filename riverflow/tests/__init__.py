@@ -30,3 +30,4 @@ from . import test_hidden_page_animation_frames
 from . import test_kanban_drop
 from . import test_state_deadline_on_entry
 from . import test_template_note_copy
+from . import test_transition_from_archived_record

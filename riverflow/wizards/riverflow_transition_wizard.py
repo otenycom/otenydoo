@@ -30,7 +30,15 @@ class TransitionWizard(models.AbstractModel):
     transition_description_invisible = fields.Boolean()
 
     # in each derived class, define the records_to_transition_ids field to be of the correct co-model
-    records_to_transition_ids = fields.Many2many("riverflow.service")  # to be overridden
+    # active_test=False: a transition may start from an archived record (a state that
+    # archives, or a user's Archive). A Many2many leaves out inactive records in a normal
+    # context, so the wizard saw no record on OK, built an empty new one and refused with
+    # "Another user just updated this record". The button passes the record itself in
+    # active_ids, so nothing else can slip in. Derived classes that redefine the field
+    # inherit this context, because Odoo merges the definitions.
+    records_to_transition_ids = fields.Many2many(
+        "riverflow.service", context={"active_test": False}
+    )  # to be overridden
     responsible_team_id = fields.Many2one(
         "res.partner",
         string="Responsible",

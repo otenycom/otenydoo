@@ -17,6 +17,7 @@ read-only. Replaces knowledge.article for radar (community plan, D6).
         "security/ir.model.access.csv",
         "views/oteny_article_views.xml",
     ],
+    "post_init_hook": "post_init_hook",
     "installable": True,
     "application": False,
 }

@@ -22,7 +22,9 @@ class IrModuleModule(models.Model):
                 [("name", "=", "oteny_audit"), ("state", "=", "installed")]
             )
             if audit_module:
-                installed_modules = [m.name for m in self if m.state == "installed"]
+                # After an uninstall, some records of self are deleted (a module
+                # without code, such as studio_customization, leaves the table).
+                installed_modules = [m.name for m in self.exists() if m.state == "installed"]
                 _logger.info(
                     f"New modules installed: {installed_modules}. "
                     "Running audit log setup in the new registry."

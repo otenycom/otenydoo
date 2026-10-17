@@ -1958,6 +1958,30 @@ except SomeSpecificError:
 
 **Warning**: More than 64 savepoints in a transaction slows PostgreSQL significantly.
 
+### A bus message sent in a long request arrives at the commit
+
+`bus.bus._sendone` (and everything built on it: `_notify_typing`, a
+transient chat message, a channel update) writes a row that the browser
+gets only when the transaction commits. In a request that runs for minutes
+(an LLM tool loop, a long import), a "typing" or "progress" message sent
+from it shows up at the end, all at once. Two working ways:
+
+- send it through a separate cursor that commits at once
+  (`with self.env.registry.cursor() as cr: api.Environment(cr, uid,
+  {})["bus.bus"]._sendone(...)`), best-effort, never breaking the work;
+- let the client show the state itself while it waits for the RPC (set
+  `member.isTyping` on the Discuss member, and renew it before the client's
+  one-minute typing timeout ends).
+
+Two more Discuss facts that such a build meets (Odoo 19):
+
+- `discuss.channel.create` always adds the creating user as a member (except
+  in install mode or for a public user), whatever `channel_member_ids` says.
+  A channel that code creates in a cron gets the cron user (OdooBot).
+- A `group` channel has no single correspondent (`computeCorrespondent`
+  returns nothing for `channel` and `group`); in a two-member group, the
+  other member is `thread.correspondents[0]`.
+
 ## message_post Body Handling
 
 In Odoo 19, `message_post` distinguishes between plain text and HTML bodies by type:

@@ -367,6 +367,39 @@ Guard the script so it only acts while the old table exists and the new one does
 
 Before renaming, count the text references on a production restore; a model that is not a `mail.thread` usually has none outside `ir_model*`, the action and the views.
 
+### Taking over another module's model (copy, not rename)
+
+When the old model belongs to **another** module that stays installed until
+later (for example an Enterprise module that is uninstalled at a switch), a
+rename would pull its table from under it. Copy instead, with the same ids,
+**before your data files load**:
+
+- in a **pre-migrate** of the module that defines the new model (it runs
+  before the registry loads the new code), or, for a brand-new module, in its
+  **`post_init_hook`**: a new dependency installs before the modules that
+  depend on it are upgraded, so the hook runs in time for them;
+- `CREATE TABLE new (LIKE old INCLUDING DEFAULTS)`, then a sequence of its own
+  (`CREATE SEQUENCE new_id_seq OWNED BY new.id`, the `id` default on it), the
+  rows (`INSERT … SELECT *`), the primary key and `setval`. The copied `id`
+  default still points at the old table's sequence until you replace it, and
+  that sequence is dropped with the old table;
+- `ir_model_data.model` of **your** modules' XML ids moves to the new model
+  name, or the XML loader meets "found record of different model" (leave the
+  old module's own XML ids alone; they go with its uninstall);
+- `ir_attachment.res_model` moves too (and `mail_message`,
+  `mail_followers`, `mail_activity` for a `mail.thread`), or the old module's
+  uninstall deletes the files;
+- Many2one fields to the old model keep their values; the upgrade of the
+  module that declares the field moves the foreign key to the new table;
+- stored computed fields that the SQL copy leaves empty (`parent_path`, a
+  root field) are computed in the hook (`_parent_store_compute()`,
+  `env.add_to_compute`).
+
+Worked examples: `crewradar_sign/migrations/19.0.1.260/pre-migrate.py`
+(Enterprise `sign.*` → `crewradar.doc.*`) and `oteny_article/hooks.py`
+(Enterprise `knowledge.article` → `oteny.article`), both proved on a
+production copy in the radar Community proof of concept.
+
 ## Renaming a Stored Field
 
 A new field name with a new column is a removal plus an addition. On `-u` Odoo creates the new column: a stored compute is computed for every row, a plain field starts empty. At the end of the upgrade `ir.model.data._process_end` unlinks the old `ir.model.fields` row and **drops the old column** (see [Field Removal Checklist](#field-removal-checklist)). A plain field loses its values that way, and text that stores the old name keeps pointing at a field that no longer exists.
@@ -552,6 +585,33 @@ pre-migrate deletion because view validation runs during module load, before
 any GC (see the stale-view section above). Worked example covering both:
 `crewradar_creds/migrations/19.0.2.165/pre-migrate.py` (consistency-check
 re-architecture).
+
+### Records the data files drop, which other rows hold by a RESTRICT key
+
+The module-data GC at the end of `-u` (`ir.model.data._process_end`) deletes
+every non-noupdate record whose XML left the module's data files. When rows
+that were created at runtime hold such a record by a RESTRICT foreign key, the
+delete fails and **the whole upgrade stops** ("violates RESTRICT setting of
+foreign key constraint"). Seen when a module's data files dropped its
+`ai.agent` record: the `ai.agent.source` rows that the `ai` module made at
+runtime held the agent.
+
+When the records are meant to go later with their own module (an uninstall
+removes them with its tables), **release** their XML ids in a pre-migrate
+instead of deleting the records:
+
+```python
+cr.execute("DELETE FROM ir_model_data WHERE module = 'my_module' AND model LIKE 'ai.%%'")
+```
+
+Read anything you still need from those records **before** the release (the
+release step of the worked example first copied the agent's model into a
+config parameter). Worked example:
+`crewradar_wilma/migrations/19.0.2.311/pre-migrate.py`.
+
+An uninstall itself logs "bad query" errors when foreign keys block its batch
+deletes: it retries in smaller batches and then drops the tables. Those lines
+are noise, not a failure; check the result (the module states, the tables).
 
 ### Hard-deleting seeded records that have dependents (credential-type cleanup pattern)
 

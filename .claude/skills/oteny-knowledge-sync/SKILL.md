@@ -219,6 +219,13 @@ submodule is a further root. Roots come from the setting
 `oteny_knowledge_sync.roots` (one `Label=path` per line). With no setting,
 every addons-path entry whose parent folder holds `.claude/skills` is a root.
 
+**The default label is the folder name.** A clone of the same repository under
+another folder name (a worktree such as `~/oteny/radar-ee`) is a different root
+to the sync: an upgrade on its database publishes a second tree under the new
+label and unpublishes the tree of the old label, with new article ids. Set
+`oteny_knowledge_sync.roots` explicitly on such a database when the article ids
+matter (seen 17-Oct-2026 on a reference copy of production).
+
 ```
 <business repo>/
 ├── .claude/skills/       # ← business root

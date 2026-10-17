@@ -21,6 +21,7 @@ GENERIC_MODULES = [
     "oteny_shortcut",
     "oteny_bot",
     "oteny_backup_trigger",
+    "oteny_article",
     "oteny_knowledge_sync",
     "riverflow",
     "odoo_parallel_tests",

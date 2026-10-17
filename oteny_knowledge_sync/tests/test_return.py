@@ -5,7 +5,6 @@ import xmlrpc.client
 from pathlib import Path
 from unittest.mock import patch
 
-from odoo.api import Environment
 from odoo.tests import tagged
 from odoo.tests.common import TransactionCase
 from odoo.tools import mute_logger
@@ -19,19 +18,6 @@ class TestSyncReturn(TransactionCase):
         self.assertIsNotNone(result)
         self.assertIsInstance(result, dict)
         xmlrpc.client.dumps((result,), allow_none=False)
-
-    def test_sync_returns_xmlrpc_dumpable_when_knowledge_missing(self):
-        original_contains = Environment.__contains__
-
-        def contains_without_knowledge(env, name):
-            return False if name == "knowledge.article" else original_contains(env, name)
-
-        Sync = self.env["oteny.knowledge.sync"]
-        with patch.object(Environment, "__contains__", contains_without_knowledge):
-            result = Sync.sync_skills_to_knowledge()
-        self._assert_xmlrpc_dumpable(result)
-        self.assertEqual(result["articles_synced"], 0)
-        self.assertEqual(result["skipped"], "knowledge_not_installed")
 
     @mute_logger("odoo.addons.oteny_knowledge_sync.models.knowledge_sync")
     def test_sync_returns_xmlrpc_dumpable_without_roots(self):

@@ -26,7 +26,7 @@ class TestRoots(TransactionCase):
         self.addCleanup(self.tmp.cleanup)
         self.root_a = _root(self.tmp.name, "alpha", "alpha-skill")
         self.root_b = _root(self.tmp.name, "beta", "beta-skill")
-        self.Article = self.env["knowledge.article"]
+        self.Article = self.env["oteny.article"]
         self.Sync = self.env["oteny.knowledge.sync"]
         self.Param = self.env["ir.config_parameter"].sudo()
 
@@ -49,7 +49,7 @@ class TestRoots(TransactionCase):
             notes = tree.filtered(lambda a: a.x_skill_file_path == f"skills/{skill}/references/notes.md")
             self.assertEqual(skill_article.parent_id, root)
             self.assertEqual(notes.parent_id, skill_article)
-            self.assertIn(f'href="/knowledge/article/{notes.id}"', skill_article.body)
+            self.assertIn(f'href="/odoo/action-oteny_article.action_oteny_article/{notes.id}"', skill_article.body)
 
     def test_an_unchanged_run_writes_nothing(self):
         self._configure(("Alpha", self.root_a))
@@ -123,7 +123,7 @@ class TestRoots(TransactionCase):
             lambda a: a.x_skill_file_path == "skills/beta-skill/SKILL.md")
         self.assertEqual(len(alpha_skill), 1)
         self.assertEqual(len(beta_skill), 1)
-        self.assertIn(f'href="/knowledge/article/{beta_skill.id}"', alpha_skill.body)
+        self.assertIn(f'href="/odoo/action-oteny_article.action_oteny_article/{beta_skill.id}"', alpha_skill.body)
 
     def test_two_root_sync_missing_sibling_still_warns(self):
         """A sibling name that no configured knowledge root published still warns."""

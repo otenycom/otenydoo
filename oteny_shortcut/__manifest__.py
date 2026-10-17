@@ -28,5 +28,5 @@
         ],
     },
     "auto_install": False,
-    "license": "OEEL-1",
+    "license": "LGPL-3",
 }

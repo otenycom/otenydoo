@@ -38,5 +38,5 @@ _work_probe and _work_release; a missing engine answers ok=False. See README.md.
         ],
     },
     "auto_install": False,
-    "license": "OEEL-1",
+    "license": "LGPL-3",
 }

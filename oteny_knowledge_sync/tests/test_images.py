@@ -39,16 +39,11 @@ class TestSkillSyncImages(TransactionCase):
         super().setUpClass()
         cls.sync = cls.env["oteny.knowledge.sync"]
         cls.Attachment = cls.env["ir.attachment"]
-        admin_partner = cls.env.ref("base.partner_admin")
-        cls.article = cls.env["knowledge.article"].create(
+        cls.article = cls.env["oteny.article"].create(
             {
                 "name": "Test WP Guide",
                 "body": "<p>placeholder</p>",
                 "is_locked": True,
-                "internal_permission": "read",
-                "article_member_ids": [
-                    (0, 0, {"partner_id": admin_partner.id, "permission": "write"})
-                ],
                 "x_skill_is_managed": True,
                 "x_skill_root": "Test",
                 "x_skill_file_path": "skills/test-img/references/guide.md",
@@ -78,7 +73,7 @@ class TestSkillSyncImages(TransactionCase):
 
         self.assertEqual(len(created), 1, "exactly one attachment created")
         att = self.Attachment.browse(created[0])
-        self.assertEqual(att.res_model, "knowledge.article")
+        self.assertEqual(att.res_model, "oteny.article")
         self.assertEqual(att.res_id, self.article.id, "bound to the target article")
         self.assertEqual(att.description, self._marker(png), "dedupe marker on description")
         self.assertIn('src="/web/image/%d"' % att.id, new_body)
@@ -107,7 +102,7 @@ class TestSkillSyncImages(TransactionCase):
         self.assertEqual(created2, [], "re-embed reuses the attachment, creates none")
         self.assertEqual(
             self.Attachment.sudo().search_count(
-                [("description", "=", marker), ("res_model", "=", "knowledge.article")]
+                [("description", "=", marker), ("res_model", "=", "oteny.article")]
             ),
             1,
             "no duplicate attachment for the same image",

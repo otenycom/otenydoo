@@ -21,9 +21,7 @@ class TestSkillSyncIdempotent(TransactionCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        Article = cls.env["knowledge.article"]
-        admin_partner = cls.env.ref("base.partner_admin")
-        member_vals = [(0, 0, {"partner_id": admin_partner.id, "permission": "write"})]
+        Article = cls.env["oteny.article"]
 
         # Unique fake paths so we don't collide with real managed articles
         # already synced into the test DB.
@@ -32,8 +30,6 @@ class TestSkillSyncIdempotent(TransactionCase):
                 "name": "Test Idem Root",
                 "body": "<p>Root</p>",
                 "is_locked": True,
-                "internal_permission": "read",
-                "article_member_ids": member_vals,
                 "x_skill_is_managed": True,
                 "x_skill_root": "Test",
                 "x_skill_file_path": "skills/test-idem-root/SKILL.MD",
@@ -47,8 +43,6 @@ class TestSkillSyncIdempotent(TransactionCase):
                 "body": '<p>See <a href="references/roadmap.md">Roadmap</a></p>',
                 "parent_id": cls.root.id,
                 "is_locked": True,
-                "internal_permission": "read",
-                "article_member_ids": member_vals,
                 "x_skill_is_managed": True,
                 "x_skill_root": "Test",
                 "x_skill_file_path": "skills/test-idem-skill/SKILL.md",
@@ -61,8 +55,6 @@ class TestSkillSyncIdempotent(TransactionCase):
                 "body": "<p>Roadmap content</p>",
                 "parent_id": cls.skill.id,
                 "is_locked": True,
-                "internal_permission": "read",
-                "article_member_ids": member_vals,
                 "x_skill_is_managed": True,
                 "x_skill_root": "Test",
                 "x_skill_file_path": "skills/test-idem-skill/references/roadmap.md",
@@ -81,7 +73,7 @@ class TestSkillSyncIdempotent(TransactionCase):
         # First pass resolves the .md link to the roadmap's Knowledge URL.
         Sync._rewrite_internal_links("Test")
         self.assertIn(
-            f"/knowledge/article/{self.roadmap.id}",
+            f"/odoo/action-oteny_article.action_oteny_article/{self.roadmap.id}",
             self.skill.body,
             "First pass should have resolved the roadmap link",
         )
@@ -116,7 +108,6 @@ class TestSkillSyncIdempotent(TransactionCase):
             "body": article.body,
             "icon": article.icon,
             "is_locked": True,
-            "internal_permission": "read",
             "parent_id": article.parent_id.id,
             "x_skill_file_path": article.x_skill_file_path,
             "x_skill_is_managed": True,

@@ -27,5 +27,5 @@
     "demo": [],
     "application": True,
     "auto_install": False,
-    "license": "OPL-1",
+    "license": "LGPL-3",
 }

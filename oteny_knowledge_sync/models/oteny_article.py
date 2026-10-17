@@ -4,7 +4,7 @@ from odoo import fields, models
 class KnowledgeArticle(models.Model):
     """Mark the articles the skill sync manages, and which root they came from."""
 
-    _inherit = "knowledge.article"
+    _inherit = "oteny.article"
 
     x_skill_file_path = fields.Char(
         string="Skill File Path",
@@ -19,6 +19,6 @@ class KnowledgeArticle(models.Model):
     x_skill_root = fields.Char(
         string="Skill Root",
         index=True,
-        help="The label of the configured root this article belongs to. One Knowledge "
+        help="The label of the configured root this article belongs to. One article "
         "tree per root.",
     )

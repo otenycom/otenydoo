@@ -1,7 +1,7 @@
-"""Publish agent skills as Knowledge articles, one tree per configured root.
+"""Publish agent skills as articles (oteny.article), one tree per configured root.
 
 Walks ``<root>/.claude/skills/`` for every configured root and creates or updates
-locked Knowledge articles, preserving the folder hierarchy under one top-level
+locked articles, preserving the folder hierarchy under one top-level
 article per root (``<Label> Skills``). A file may set ``sync_to_knowledge: false``
 in its YAML front matter to stay agent-only; on a folder's ``SKILL.md`` that
 excludes the whole subtree, so a reference never outlives the skill that gives it
@@ -14,7 +14,7 @@ the list has its tree unpublished on the next sync.
 
 The sync runs after every upgrade of a module under a root, so it does as little
 as possible when nothing changed: internal ``.md`` links are resolved to
-Knowledge URLs inline while each body is written, and :meth:`_write_managed`
+article URLs inline while each body is written, and :meth:`_write_managed`
 writes only fields that differ.
 
 A CrewRadar article may still name a sibling skill (``riverflow/SKILL.md``,
@@ -107,11 +107,13 @@ class KnowledgeSync(models.AbstractModel):
 
     # ------------------------------------------------------------------ entry
 
+    @staticmethod
+    def _article_url(article_id):
+        """The web client URL of one article (the Articles app of oteny_article)."""
+        return f"/odoo/action-oteny_article.action_oteny_article/{article_id}"
+
     def sync_skills_to_knowledge(self):
         """Sync every configured root. Always returns a dict (XML-RPC needs a value)."""
-        if "knowledge.article" not in self.env:
-            _logger.info("Knowledge module not installed, skipping skill sync")
-            return {"articles_synced": 0, "skipped": "knowledge_not_installed"}
         roots = self._skill_roots()
         if not roots:
             _logger.warning("Knowledge sync: no root with .claude/skills configured or found")
@@ -138,7 +140,7 @@ class KnowledgeSync(models.AbstractModel):
         Returns ``(count, excluded_paths)``. The caller rewrites links after
         every configured knowledge root has published.
         """
-        Article = self.env["knowledge.article"]
+        Article = self.env["oteny.article"]
         self._adopt_legacy_articles(label, skills_dir)
         managed = Article.search([("x_skill_is_managed", "=", True), ("x_skill_root", "=", label)])
         existing_by_path = {}
@@ -156,7 +158,6 @@ class KnowledgeSync(models.AbstractModel):
             existing_by_path, link_map
         )
         self._cleanup_stale_articles(label, processed_paths)
-        self._add_internal_users_to_root_article(root_article)
         _logger.info("Knowledge sync root %r: %d articles", label, len(processed_paths))
         return len(processed_paths), excluded_paths
 
@@ -164,7 +165,7 @@ class KnowledgeSync(models.AbstractModel):
         """Managed articles without a root (written before roots existed) join the
         first root whose tree holds their source file, so they update in place and
         keep their ids and URLs instead of being deleted and recreated."""
-        Article = self.env["knowledge.article"]
+        Article = self.env["oteny.article"]
         legacy = Article.search([("x_skill_is_managed", "=", True), ("x_skill_root", "=", False)])
         if not legacy:
             return
@@ -179,7 +180,7 @@ class KnowledgeSync(models.AbstractModel):
 
     def _unpublish_roots_not_in(self, labels):
         """Delete the managed trees of roots that left the configuration."""
-        Article = self.env["knowledge.article"]
+        Article = self.env["oteny.article"]
         gone = Article.search([("x_skill_is_managed", "=", True), ("x_skill_root", "not in", labels)])
         if gone:
             _logger.info("Knowledge sync: unpublishing %d article(s) of roots %s",
@@ -246,10 +247,7 @@ class KnowledgeSync(models.AbstractModel):
         rewritten = 0
 
         def knowledge_href(article_id):
-            return (
-                f'href="/knowledge/article/{article_id}" '
-                f'class="o_knowledge_article_link" data-res_id="{article_id}"'
-            )
+            return f'href="{self._article_url(article_id)}"'
 
         def replace_link(match):
             nonlocal rewritten
@@ -343,7 +341,7 @@ class KnowledgeSync(models.AbstractModel):
             md_dir: absolute folder of the source markdown file (to resolve
                 relative ``src`` values like ``img/foo.png``).
             skills_root: absolute boundary the resolved image must stay within.
-            article: the target ``knowledge.article`` record, or ``None`` when it
+            article: the target ``oteny.article`` record, or ``None`` when it
                 does not exist yet (new file). For ``None``, freshly created
                 attachments get ``res_id=0`` and their ids are returned so the
                 caller can backfill ``res_id`` once the article is created.
@@ -393,7 +391,7 @@ class KnowledgeSync(models.AbstractModel):
             # images so its own checksum can't be used).
             content_key = "skill-img:%s" % hashlib.sha1(data).hexdigest()
             att = Attachment.search(
-                [("description", "=", content_key), ("res_model", "=", "knowledge.article")],
+                [("description", "=", content_key), ("res_model", "=", "oteny.article")],
                 limit=1,
             )
             if not att:
@@ -401,7 +399,7 @@ class KnowledgeSync(models.AbstractModel):
                     "name": resolved.name,
                     "datas": base64.b64encode(data),
                     "mimetype": mimetypes.guess_type(resolved.name)[0] or "application/octet-stream",
-                    "res_model": "knowledge.article",
+                    "res_model": "oteny.article",
                     "res_id": article.id if article else 0,
                     "description": content_key,
                 })
@@ -419,8 +417,6 @@ class KnowledgeSync(models.AbstractModel):
         """Write only the fields that differ; skip the write when nothing changed."""
         changed = {}
         for fname, new_val in values.items():
-            if fname == "article_member_ids":
-                continue
             field = record._fields.get(fname)
             if field is not None and field.type == "html":
                 if field.convert_to_cache(new_val, record) != record[fname]:
@@ -435,13 +431,12 @@ class KnowledgeSync(models.AbstractModel):
 
     def _ensure_root_article(self, label, skills_dir, processed_paths, link_map):
         """Find or create the root ``<Label> Skills`` article of one root."""
-        Article = self.env["knowledge.article"]
+        Article = self.env["oteny.article"]
         root_name = f"{label} Skills"
         root_article = Article.search(
             [("x_skill_is_managed", "=", True), ("x_skill_root", "=", label), ("parent_id", "=", False)],
             limit=1,
         )
-        admin_partner = self.env.ref("base.partner_admin")
         skill_md = skills_dir / "SKILL.MD"
         parsed = None
         file_path = None
@@ -465,8 +460,6 @@ class KnowledgeSync(models.AbstractModel):
             "name": root_name,
             "icon": "📚",
             "is_locked": True,
-            "internal_permission": "read",
-            "article_member_ids": [(0, 0, {"partner_id": admin_partner.id, "permission": "write"})],
             "x_skill_is_managed": True,
             "x_skill_root": label,
         }
@@ -528,7 +521,7 @@ class KnowledgeSync(models.AbstractModel):
     def _sync_file(self, label, file_path, base_path, parent_article, processed_paths,
                    excluded_paths, existing_by_path, link_map):
         """Sync one markdown file to an article of root ``label``. Returns the article or None."""
-        Article = self.env["knowledge.article"]
+        Article = self.env["oteny.article"]
         try:
             parsed = markdown_utils.parse_skill_file(file_path)
             relative_path = str(file_path.relative_to(base_path))
@@ -551,7 +544,6 @@ class KnowledgeSync(models.AbstractModel):
                 "body": body_html,
                 "icon": parsed.get("icon", "📄"),
                 "is_locked": True,
-                "internal_permission": "read",
                 "parent_id": parent_article.id if parent_article else False,
                 "x_skill_file_path": relative_path,
                 "x_skill_is_managed": True,
@@ -560,8 +552,6 @@ class KnowledgeSync(models.AbstractModel):
             if existing:
                 self._write_managed(existing, values)
                 return existing
-            admin_partner = self.env.ref("base.partner_admin")
-            values["article_member_ids"] = [(0, 0, {"partner_id": admin_partner.id, "permission": "write"})]
             article = Article.create(values)
             if new_image_attachment_ids:
                 self.env["ir.attachment"].browse(new_image_attachment_ids).write({"res_id": article.id})
@@ -571,20 +561,9 @@ class KnowledgeSync(models.AbstractModel):
             _logger.error("Error syncing file %s: %s", file_path, exc)
             return None
 
-    def _add_internal_users_to_root_article(self, root_article):
-        """Every active internal user reads the root article from the Knowledge sidebar."""
-        internal_users = self.env["res.users"].search([("active", "=", True), ("share", "=", False)])
-        existing = set(root_article.article_member_ids.mapped("partner_id.id"))
-        new_members = [
-            {"article_id": root_article.id, "partner_id": user.partner_id.id, "permission": "read"}
-            for user in internal_users if user.partner_id.id not in existing
-        ]
-        if new_members:
-            self.env["knowledge.article.member"].create(new_members)
-
     def _sort_articles_alphabetically(self):
         """Sort every managed article alphabetically within its parent."""
-        managed = self.env["knowledge.article"].search([("x_skill_is_managed", "=", True)])
+        managed = self.env["oteny.article"].search([("x_skill_is_managed", "=", True)])
         by_parent = {}
         for article in managed:
             by_parent.setdefault(article.parent_id.id if article.parent_id else False, []).append(article)
@@ -596,7 +575,7 @@ class KnowledgeSync(models.AbstractModel):
 
     def _cleanup_stale_articles(self, label, processed_paths):
         """Delete this root's articles whose source files no longer exist."""
-        managed = self.env["knowledge.article"].search(
+        managed = self.env["oteny.article"].search(
             [("x_skill_is_managed", "=", True), ("x_skill_root", "=", label)])
         stale = managed.filtered(lambda a: a.x_skill_file_path and a.x_skill_file_path not in processed_paths)
         if stale:
@@ -613,7 +592,7 @@ class KnowledgeSync(models.AbstractModel):
         roots publish the same relative skill path.
         """
         excluded_lower = self._build_excluded_lookup(excluded_paths)
-        all_managed = self.env["knowledge.article"].search([("x_skill_is_managed", "=", True)])
+        all_managed = self.env["oteny.article"].search([("x_skill_is_managed", "=", True)])
         maps_by_root = self._link_maps_by_knowledge_root(all_managed)
         targets = all_managed.filtered(lambda a: a.x_skill_root == label) if label else all_managed
         _logger.debug(
@@ -623,7 +602,7 @@ class KnowledgeSync(models.AbstractModel):
         by_root_targets = {}
         for article in targets:
             knowledge_root = article.x_skill_root or ""
-            by_root_targets.setdefault(knowledge_root, self.env["knowledge.article"])
+            by_root_targets.setdefault(knowledge_root, self.env["oteny.article"])
             by_root_targets[knowledge_root] |= article
         for knowledge_root, articles in by_root_targets.items():
             link_map = self._configured_link_map(knowledge_root, maps_by_root)

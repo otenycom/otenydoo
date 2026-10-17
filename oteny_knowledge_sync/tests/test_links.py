@@ -18,10 +18,8 @@ class TestSkillSyncLinks(TransactionCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        Article = cls.env["knowledge.article"]
-        admin_partner = cls.env.ref("base.partner_admin")
+        Article = cls.env["oteny.article"]
 
-        member_vals = [(0, 0, {"partner_id": admin_partner.id, "permission": "write"})]
 
         # Use unique fake paths to avoid conflicts with pre-existing
         # managed articles from the real skill sync in the test DB.
@@ -32,8 +30,6 @@ class TestSkillSyncLinks(TransactionCase):
                 "name": "Test Skills Root",
                 "body": "<p>Root</p>",
                 "is_locked": True,
-                "internal_permission": "read",
-                "article_member_ids": member_vals,
                 "x_skill_is_managed": True,
                 "x_skill_root": "Test",
                 "x_skill_file_path": "skills/test-link-root/SKILL.MD",
@@ -50,8 +46,6 @@ class TestSkillSyncLinks(TransactionCase):
                 ),
                 "parent_id": cls.root.id,
                 "is_locked": True,
-                "internal_permission": "read",
-                "article_member_ids": member_vals,
                 "x_skill_is_managed": True,
                 "x_skill_root": "Test",
                 "x_skill_file_path": "skills/test-link-hr/SKILL.md",
@@ -65,8 +59,6 @@ class TestSkillSyncLinks(TransactionCase):
                 "body": "<p>HR Roadmap content</p>",
                 "parent_id": cls.hr_skill.id,
                 "is_locked": True,
-                "internal_permission": "read",
-                "article_member_ids": member_vals,
                 "x_skill_is_managed": True,
                 "x_skill_root": "Test",
                 "x_skill_file_path": "skills/test-link-hr/references/roadmap.md",
@@ -80,8 +72,6 @@ class TestSkillSyncLinks(TransactionCase):
                 "body": "<p>Root Roadmap content</p>",
                 "parent_id": cls.root.id,
                 "is_locked": True,
-                "internal_permission": "read",
-                "article_member_ids": member_vals,
                 "x_skill_is_managed": True,
                 "x_skill_root": "Test",
                 "x_skill_file_path": "skills/test-link-root/references/roadmap.md",
@@ -95,8 +85,6 @@ class TestSkillSyncLinks(TransactionCase):
                 "body": "<p>Manning Agency content</p>",
                 "parent_id": cls.root.id,
                 "is_locked": True,
-                "internal_permission": "read",
-                "article_member_ids": member_vals,
                 "x_skill_is_managed": True,
                 "x_skill_root": "Test",
                 "x_skill_file_path": "skills/test-link-manning/SKILL.md",
@@ -111,8 +99,8 @@ class TestSkillSyncLinks(TransactionCase):
         self.hr_skill.invalidate_recordset(["body"])
         body = self.hr_skill.body
 
-        expected_href = f"/knowledge/article/{self.hr_roadmap.id}"
-        wrong_href = f"/knowledge/article/{self.root_roadmap.id}"
+        expected_href = f"/odoo/action-oteny_article.action_oteny_article/{self.hr_roadmap.id}"
+        wrong_href = f"/odoo/action-oteny_article.action_oteny_article/{self.root_roadmap.id}"
 
         self.assertIn(
             expected_href,
@@ -134,7 +122,7 @@ class TestSkillSyncLinks(TransactionCase):
         self.hr_skill.invalidate_recordset(["body"])
         body = self.hr_skill.body
 
-        expected_href = f"/knowledge/article/{self.manning_skill.id}"
+        expected_href = f"/odoo/action-oteny_article.action_oteny_article/{self.manning_skill.id}"
         self.assertIn(
             expected_href,
             body,
@@ -153,9 +141,7 @@ class TestSkillSyncLinks(TransactionCase):
           ../../../commands/profile.md link in the profiler-analysis reference,
           whose resolved path (commands/profile.md) has no leading ../ and
           previously slipped past the suppression check."""
-        Article = self.env["knowledge.article"]
-        admin_partner = self.env.ref("base.partner_admin")
-        member_vals = [(0, 0, {"partner_id": admin_partner.id, "permission": "write"})]
+        Article = self.env["oteny.article"]
 
         external_href = "../../../../external-repo/foo/README.md"
         external_article = Article.create(
@@ -164,8 +150,6 @@ class TestSkillSyncLinks(TransactionCase):
                 "body": f'<p>See <a href="{external_href}">External</a></p>',
                 "parent_id": self.root.id,
                 "is_locked": True,
-                "internal_permission": "read",
-                "article_member_ids": member_vals,
                 "x_skill_is_managed": True,
                 "x_skill_root": "Test",
                 "x_skill_file_path": "skills/test-link-external/SKILL.md",
@@ -182,8 +166,6 @@ class TestSkillSyncLinks(TransactionCase):
                 "body": f'<p>See <a href="{sibling_dir_href}">/profile</a></p>',
                 "parent_id": self.root.id,
                 "is_locked": True,
-                "internal_permission": "read",
-                "article_member_ids": member_vals,
                 "x_skill_is_managed": True,
                 "x_skill_root": "Test",
                 "x_skill_file_path": "skills/test-link-sibling/references/analysis.md",
@@ -233,9 +215,7 @@ class TestSkillSyncLinks(TransactionCase):
         leading '..'. The old escape check only caught paths that walked out of .claude
         entirely, so this shape fell through and warned on every single sync — against a
         file that exists (.claude/commands/profile.md, the real /profile command)."""
-        Article = self.env["knowledge.article"]
-        admin_partner = self.env.ref("base.partner_admin")
-        member_vals = [(0, 0, {"partner_id": admin_partner.id, "permission": "write"})]
+        Article = self.env["oteny.article"]
 
         sibling_href = "../../../commands/profile.md"
         sibling_article = Article.create(
@@ -244,8 +224,6 @@ class TestSkillSyncLinks(TransactionCase):
                 "body": f'<p>See <a href="{sibling_href}">/profile</a></p>',
                 "parent_id": self.root.id,
                 "is_locked": True,
-                "internal_permission": "read",
-                "article_member_ids": member_vals,
                 "x_skill_is_managed": True,
                 "x_skill_root": "Test",
                 "x_skill_file_path": "skills/test-link-sibling/references/profiler.md",
@@ -289,9 +267,7 @@ class TestSkillSyncLinks(TransactionCase):
         """A link to a skill kept agent-only (sync_to_knowledge: false) has no
         Knowledge article to target. The rewriter must leave the link as-is and
         NOT warn — the exclusion is intentional, not a broken link."""
-        Article = self.env["knowledge.article"]
-        admin_partner = self.env.ref("base.partner_admin")
-        member_vals = [(0, 0, {"partner_id": admin_partner.id, "permission": "write"})]
+        Article = self.env["oteny.article"]
 
         # An in-tree link that would normally warn (no matching article), but
         # whose target is passed in as intentionally excluded.
@@ -302,8 +278,6 @@ class TestSkillSyncLinks(TransactionCase):
                 "body": f'<p>See <a href="{excluded_href}">Agent Only</a></p>',
                 "parent_id": self.root.id,
                 "is_locked": True,
-                "internal_permission": "read",
-                "article_member_ids": member_vals,
                 "x_skill_is_managed": True,
                 "x_skill_root": "Test",
                 "x_skill_file_path": "skills/test-link-index/SKILL.md",
@@ -414,7 +388,7 @@ class TestSkillSyncLinks(TransactionCase):
         )
         source.invalidate_recordset(["body"])
         self.assertIn(
-            f"/knowledge/article/{target.id}",
+            f"/odoo/action-oteny_article.action_oteny_article/{target.id}",
             source.body,
             "A percent-encoded href must become a Knowledge URL",
         )
@@ -447,9 +421,7 @@ class TestSkillSyncLinks(TransactionCase):
         """Guard against over-suppression: an in-tree .md link to a file that
         doesn't exist (typo, deleted file, etc.) MUST still emit a warning so
         authoring bugs surface."""
-        Article = self.env["knowledge.article"]
-        admin_partner = self.env.ref("base.partner_admin")
-        member_vals = [(0, 0, {"partner_id": admin_partner.id, "permission": "write"})]
+        Article = self.env["oteny.article"]
 
         broken_href = "references/does-not-exist-typo.md"
         Article.create(
@@ -458,8 +430,6 @@ class TestSkillSyncLinks(TransactionCase):
                 "body": f'<p>See <a href="{broken_href}">Typo</a></p>',
                 "parent_id": self.root.id,
                 "is_locked": True,
-                "internal_permission": "read",
-                "article_member_ids": member_vals,
                 "x_skill_is_managed": True,
                 "x_skill_root": "Test",
                 "x_skill_file_path": "skills/test-link-broken-internal/SKILL.md",
@@ -478,15 +448,12 @@ class TestSkillSyncLinks(TransactionCase):
         )
 
     def _managed_article(self, name, body, knowledge_root, file_path, parent=None):
-        admin_partner = self.env.ref("base.partner_admin")
-        return self.env["knowledge.article"].create(
+        return self.env["oteny.article"].create(
             {
                 "name": name,
                 "body": body,
                 "parent_id": parent.id if parent else False,
                 "is_locked": True,
-                "internal_permission": "read",
-                "article_member_ids": [(0, 0, {"partner_id": admin_partner.id, "permission": "write"})],
                 "x_skill_is_managed": True,
                 "x_skill_root": knowledge_root,
                 "x_skill_file_path": file_path,
@@ -527,7 +494,7 @@ class TestSkillSyncLinks(TransactionCase):
         )
         source.invalidate_recordset(["body"])
         self.assertIn(
-            f"/knowledge/article/{target.id}",
+            f"/odoo/action-oteny_article.action_oteny_article/{target.id}",
             source.body,
             "Sibling name in another configured knowledge root must become a Knowledge URL",
         )
@@ -581,7 +548,7 @@ class TestSkillSyncLinks(TransactionCase):
         ]
         self.assertEqual(offending, [], f"Got: {[r.getMessage() for r in offending]}")
         source.invalidate_recordset(["body"])
-        self.assertIn(f"/knowledge/article/{target.id}", source.body)
+        self.assertIn(f"/odoo/action-oteny_article.action_oteny_article/{target.id}", source.body)
 
     def test_same_knowledge_root_wins_on_path_collision(self):
         """When two configured roots publish the same relative skill path, the
@@ -608,8 +575,8 @@ class TestSkillSyncLinks(TransactionCase):
 
         self.env["oteny.knowledge.sync"]._rewrite_internal_links("Crewradar")
         source.invalidate_recordset(["body"])
-        self.assertIn(f"/knowledge/article/{own_target.id}", source.body)
-        self.assertNotIn(f"/knowledge/article/{other_target.id}", source.body)
+        self.assertIn(f"/odoo/action-oteny_article.action_oteny_article/{own_target.id}", source.body)
+        self.assertNotIn(f"/odoo/action-oteny_article.action_oteny_article/{other_target.id}", source.body)
 
     def test_skills_tree_suffix_from_escaped_path(self):
         """An escaped href that still names a skill file yields a ``skills/`` tail."""

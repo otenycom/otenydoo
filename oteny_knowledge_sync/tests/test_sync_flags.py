@@ -51,11 +51,8 @@ class TestSyncExcludeCascade(TransactionCase):
     must not let its references land on the root as context-free articles."""
 
     def _make_root(self):
-        admin_partner = self.env.ref("base.partner_admin")
-        return self.env["knowledge.article"].create({
+        return self.env["oteny.article"].create({
             "name": "Test Cascade Root", "body": "<p>Root</p>", "is_locked": True,
-            "internal_permission": "read",
-            "article_member_ids": [(0, 0, {"partner_id": admin_partner.id, "permission": "write"})],
             "x_skill_is_managed": True, "x_skill_root": "Test",
             "x_skill_file_path": "skills/test-cascade-root/SKILL.MD",
         })
@@ -86,7 +83,7 @@ class TestSyncExcludeCascade(TransactionCase):
             "skills/test-cascade-skill/references/note.md",
             "skills/test-cascade-skill/references/deep/nested.md"})
         self.assertFalse(root.child_ids)
-        self.assertFalse(self.env["knowledge.article"].search([("x_skill_file_path", "like", "test-cascade-skill%")]))
+        self.assertFalse(self.env["oteny.article"].search([("x_skill_file_path", "like", "test-cascade-skill%")]))
 
     def test_published_skill_still_nests_its_references(self):
         root = self._make_root()
@@ -98,7 +95,7 @@ class TestSyncExcludeCascade(TransactionCase):
                 "skills/test-cascade-skill/SKILL.md",
                 "skills/test-cascade-skill/references/note.md",
                 "skills/test-cascade-skill/references/deep/nested.md"})
-            Article = self.env["knowledge.article"]
+            Article = self.env["oteny.article"]
             skill_article = Article.search([("x_skill_file_path", "=", "skills/test-cascade-skill/SKILL.md")])
             note = Article.search([("x_skill_file_path", "=", "skills/test-cascade-skill/references/note.md")])
             self.assertEqual(skill_article.parent_id, root)

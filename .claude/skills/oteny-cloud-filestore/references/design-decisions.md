@@ -694,6 +694,11 @@ None (12-Oct-2026).
 
 ## 5. Test bucket (homelab, not production)
 
+> **Removed on 12-Oct-2026.** The container, its data (a 5.7 GB copy of the
+> production files that a test session had loaded) and the pve mount were
+> deleted the same day. The facts below stay as a record of the setup and of
+> the Garage limit for the narrow read key; the store does not exist now.
+
 A private S3 test store, set up on 12-Oct-2026 for the build and for later
 tests of the module. It is a personal homelab system of the Radar dev team,
 not a Cuneus system; production stays on Hetzner (D11).
@@ -721,6 +726,10 @@ not a Cuneus system; production stays on Hetzner (D11).
   `~/.config/garage-pve/config` and `~/.config/garage-pve/credentials` (AWS
   profile format, one profile per key); never in the repository or in a
   database that leaves the laptop.
+- **Browse the files:** `~/.config/garage-pve/webui.sh` starts `garage-webui`
+  (nixpkgs) on `http://127.0.0.1:3909`, through an SSH tunnel to the Garage
+  admin API inside the container. The UI has admin rights and no login, so
+  it listens on localhost only (`HOST=127.0.0.1`).
 - **Checked on 12-Oct-2026 with boto3:** the write key puts and deletes; the
   read key gets and heads an object, and its put and delete return
   `AccessDenied`; the `personal` key is refused on the test bucket.

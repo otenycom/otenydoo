@@ -64,6 +64,31 @@ The fixed cost per file limits the speed, not the bandwidth: an upload (about
 55 to 65 ms), a size check (about 27 ms), the local delete and a database
 query, one file after another.
 
+## The first push to Google Cloud Storage (13-Oct-2026)
+
+The same production copy `cr-cloud` (24,207 user files, 5.66 GB) was pushed
+again, now to Google Cloud Storage `cuneus-crewradar-docs`, prefix
+`dev/cr-cloud/` (EU multi-region), from the developer laptop over the public
+internet, with the code of plan 1b and the module loaded server-wide. The
+local files came back from the `crmain` filestore first, because Garage held
+the only copy and was off; one generated thumbnail existed only in Garage.
+
+- 24,207 files, 5.66 GB in 91.8 minutes: 4.4 files/s, about 1.0 MB/s, about
+  230 ms per file. A batch of 500 files took 113 s (at most 123 s).
+- A check of 50 random objects (size and SHA-1 against the name) found no
+  error.
+- Five user files stayed local: each shares its name with a local-only file
+  (partner images equal to menu icons or the company logo). They are in the
+  bucket, and their local copy stays (D24).
+
+Half the speed of the Garage push, for two reasons: each request crosses the
+public internet to Google's EU region instead of the tailnet, and each new
+file now costs three requests (a `head` before the upload, new in plan 1b,
+the upload, and the confirming `head`). For a first push the first `head`
+always answers "not there". A plan 2 candidate: skip it during a first push,
+or upload several files at the same time. A push from Odoo.sh, close to
+Google, is expected to be faster; it is not measured yet.
+
 ## Odoo's own attachment tests
 
 On 13-Oct-2026, 61 standard Odoo tests that work with attachments ran against

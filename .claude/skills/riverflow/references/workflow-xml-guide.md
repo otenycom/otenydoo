@@ -54,6 +54,9 @@ For a workflow attached to a non-service model owned by a consumer module
 
 ## State Records
 
+A prompt's structure `a->b->c` names three states (a, b, c) and two transitions (a->b,
+b->c). Per workflow, list the states first, then the transitions.
+
 ### Sequence Convention
 
 States have sequences that increment by **10**:

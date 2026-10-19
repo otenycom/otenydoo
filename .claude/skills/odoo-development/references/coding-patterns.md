@@ -1491,6 +1491,17 @@ def _compute_some_type_whitelist(self):
 
 The widget (`web/…/fields/selection/filterable_selection_field.js`) shows only options whose value is in `record.data[whitelist_fname]`, **always keeping the currently-stored value** even if outside the whitelist (so existing data never disappears). It also accepts `whitelisted_values` / `blacklisted_values` (static arrays) instead of a field name. Because a whitelist can only narrow the visible options — never enforce them at other entry points — pair it with a runtime guard where the value is consumed (e.g. an `@api.constrains`, or a client-side check before acting on it). Real example: `oteny_shortcut` scopes `ir.filters.shortcut_view_type` to the view types a filter's model actually has.
 
+## Comments and Formatting
+
+- **Write comments for the next reader of the business logic.** The reader codes at a
+  professional level; the comment says the purpose of the code and why it is as it is
+  (the business reason, the consideration, the trap it avoids). Do not narrate what the
+  code does, unless the code is complex or uses a trick.
+- **Keep existing comments**, unless they are no longer true. When you refactor, update
+  the comments that describe the changed code.
+- **Keep existing indentation and line breaks.** Python is formatted with Black; do not
+  reformat code you did not change.
+
 ## Date and Time
 
 ### Current Date/Time

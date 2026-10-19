@@ -134,3 +134,19 @@ and uploads nothing.
   `tracemalloc` on the developer laptop: peak 0.15 MB through
   `CloudStore.open().iter_chunks()` (64 KB chunks), 44.07 MB through
   `CloudStore.get()`.
+- **A restore of the test3 backup on the developer laptop (19-Oct-2026).**
+  Backup `cuneus-test3-40107605_2026-10-19_142934_exact_fs.zip`, taken after
+  the full push of plan 1c: zip 591 MB, `dump.sql` 3.1 GB, `filestore/` 518
+  files, 106 MB (510 local-only files 91 MB, 2 user files that share their
+  name with a local-only file, 6 files no row uses 14 MB), 24,883 user files
+  (5.4 GB) only in the bucket. Restore on `crmain` with the radar restore
+  script, full (not `--lite`): audit filter 39 s, restore and module upgrade
+  67 s, total 106 s; `-u oteny_cloud_filestore` 13 s. In clone mode against
+  `dev/odoosh-test3/`, 20 single reads of files of 4 KB to 500 KB: median
+  155 ms from the bucket (87 to 303 ms), median 0.6 ms from the cache copy
+  that the first read left.
+- **Prefetch reads a whole batch from the bucket.** Reading `raw` of one
+  attachment out of a `search()` of 400 records computes `raw` for the whole
+  prefetch set: about 190 bucket-only files came from the bucket in one
+  access, in 29 s. Code that reads `raw` in a loop over a large recordset
+  pays every file at once; `browse(id)` of a single record does not.

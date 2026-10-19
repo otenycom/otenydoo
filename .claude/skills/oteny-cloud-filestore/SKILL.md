@@ -370,6 +370,14 @@ module" warning after the restart.
 - When the 1 s `lock_timeout` of a cache write hits, Odoo also logs the
   cancelled statement as an `odoo.sql_db` ERROR ("bad query"); the counts of
   that minute are dropped.
+- The radar restore script upgrades only the modules in `odoo.installModules`
+  of `.vscode/settings.json`, and `oteny_cloud_filestore` is not in that list.
+  A restore of a database that has the module therefore leaves a new model
+  of the module without its table (log: "Model oteny.cloud.filestore.cache
+  has no table") until `-u oteny_cloud_filestore` runs. Seen on `crmain`,
+  19-Oct-2026.
+- Reading `raw` of one attachment of a large recordset reads the whole
+  prefetch set from the bucket (lab-results.md).
 - `cloud_dump` has no timeout. The standby's Odoo is stopped while the copy
   and the link run, so the first night after the rollout can take long; the
   `--seed` link from the rsync mirror avoids most downloads.

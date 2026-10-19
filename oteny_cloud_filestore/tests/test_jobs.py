@@ -10,7 +10,7 @@ from odoo.tools import config
 from ..models import ir_attachment as ir_attachment_module
 from ..tools import cloud_store
 from ..tools.cloud_store import CloudStoreError, CloudStoreUnavailable
-from .common import FakeCloudStore
+from .common import FakeCloudStore, patch_read_cache
 
 LOGGER = "odoo.addons.oteny_cloud_filestore.models.ir_attachment"
 
@@ -42,6 +42,7 @@ class TestCloudFilestoreJobs(TransactionCase):
         self.startPatcher(patch.object(model, "_cloud_filestore_mode", side_effect=lambda *args: self.mode))
         self.startPatcher(patch.object(model, "_cloud_filestore_store", return_value=self.fake))
         self.startPatcher(patch.object(model, "_storage", return_value="file"))
+        patch_read_cache(self)
         # The upload job keeps its resume point in process memory: each test starts a new sweep.
         self.startPatcher(patch.dict(ir_attachment_module._UPLOAD_RESUME_AFTER, clear=True))
         # The job also checks the server-wide load; these tests are about the files only.

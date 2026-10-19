@@ -55,8 +55,11 @@ production save keeps the file local.
 4. Set these system parameters (all prefixed `oteny_cloud_filestore.`):
    `endpoint_url`, `region`, `bucket`, `addressing_style` (default `path`),
    `key_prefix` (default empty), `read_access_key_id`,
-   `read_secret_access_key`, `hold_days` (default `365`, minimum `120`) and
-   `alert_channel_id` (the id of the `discuss.channel` for outage messages).
+   `read_secret_access_key`, `hold_days` (default `365`, minimum `120`),
+   `cache_limit_mb` (the size limit of the read cache, default `100`; `0`
+   turns the cache off; see Rollout Condition for the first production
+   value) and `alert_channel_id` (the id of the `discuss.channel` for
+   outage messages).
    `outage_since` and `not_server_wide_alerted` are internal state: do not
    edit them.
 5. Set `alert_channel_id`. The Discuss alert needs it. Without it, an outage
@@ -105,23 +108,56 @@ attachment (for example `ab/ab12...`).
   because the name is the content hash and the object is this file. If not,
   it puts the bytes. This spares the bucket a write: Google Cloud Storage
   limits writes to about one per second per object name. After the bucket
-  confirms the object, the local copy is removed. The same content is one
-  object. The catch-up job also asks first, and puts only when the object
+  confirms the object, the local copy stays as a cache copy when it may
+  enter the cache (at most a quarter of `cache_limit_mb`); else it is
+  removed. The same content is one object. The catch-up job also asks first, and puts only when the object
   is missing or has another size.
 - **A read**: if the local file exists, Odoo reads it. If not, the module
-  reads the object from the bucket. A bucket error never raises: the caller
+  reads the object from the bucket and, when the file may enter the cache,
+  keeps a local cache copy (checked against its SHA-1), so the next read is
+  local. A bucket error never raises: the caller
   gets empty bytes, as Odoo gives for a missing local file. In production, a
   store that cannot be used posts the alert. An object that is missing, or a
   refusal of one file, only logs a warning.
-- **A download in the browser**: Odoo reads the bytes from the bucket and
-  sends them itself. The browser never sees the bucket. A file that is
+- **A download in the browser**: the browser never sees the bucket. A file
+  that may enter the cache is first written to the local filestore and then
+  sent by Odoo from there, so nginx (`X-Accel-Redirect`) and range requests
+  work. A larger file is passed on in chunks of 64 KB while it downloads, so
+  the worker never holds the whole file (29 MB: peak 0.15 MB instead of
+  44 MB). A file that is
   missing in the bucket gives a 404 and never an empty 200 that a browser
-  could cache.
+  could cache. The response header `X-Cloud-Filestore` says where Odoo read
+  the bytes: `bucket` or `local`. It shows in the network panel of the
+  browser. In mode off the header is not sent.
 - **A delete**: Odoo's garbage collection removes the local file as before.
   In production the object in the bucket stays for the hold time
   (`hold_days`, default 365). The hold time counts from the last delete of
   that name. A name that is used again before the hold time ends keeps its
-  object. A clone never deletes in the bucket. A bad `hold_days` value never
+  object. The garbage collection itself makes no bucket call: a daily job
+  deletes the objects past the hold time in batches of up to 1,000
+  (`DeleteObjects`), each batch under Odoo's own SHARE lock on
+  `ir_attachment` with Odoo's 10 s `lock_timeout`, and it checks every name
+  again inside the lock. A clone never deletes in the bucket.
+- **The read cache** (D21): a cache copy is a normal file in the local
+  filestore whose row in `oteny.cloud.filestore.cache` carries the mark
+  "in bucket". A row is marked only after a confirmed upload or a verified
+  download; every other local file must stay. Read counts are kept in the
+  memory of each worker and written at most once a minute. An hourly job
+  removes the copies with the lowest keep value (GDSF) when the marked
+  files pass the limit, down to 90 %, after a `head` confirms each object;
+  nothing is removed while the bucket cannot be reached, and a file read in
+  the last 5 minutes stays.
+- **The DR copy**: `odoo-bin --addons-path=<path> cloud_dump -d <db> --into
+  <folder> [--checklist <folder>] [--seed <folder>]` copies every object
+  the database uses, plus the names of the `checklist/` markers, into a
+  folder, with the read key and without listing the bucket (D27). A file in
+  `--seed` with the right SHA-1 is hard-linked instead of downloaded. A
+  name that leaves both lists is removed 30 days later (D23). Exit codes: 0
+  ok, 1 stopped at a bucket or disk error (partial copy), 2 module not
+  installed or mode off, 3 crash, 4 mode on but no usable store (read key
+  or bucket settings). The standby on CUNEUS40 runs it
+  every night: radar `cuneus-infrastructure`,
+  `references/disaster-recovery.md`. A bad `hold_days` value never
   shortens the hold time. A value below 120 days is replaced by 120 with a
   warning, because Odoo.sh keeps backups for 3 to 4 months, and a backup
   must never point to a deleted object.
@@ -245,20 +281,29 @@ download.
 ## Rollout Condition
 
 Do not put the write key in the `odoo.conf` of a production database before
-the line `server_wide_modules = base,rpc,web,oteny_cloud_filestore` is in the
-same file (see Setup, step 7), and before one of these two conditions is
-true:
+all of these are true (Ries, review of 19-Oct-2026):
 
-- A second copy of the bucket exists (plan 2, the bucket copy).
-- The owners accept two facts. First, the bucket is the only copy of the
-  files once the Odoo.sh backups that still hold them expire (after 3 to 4
-  months). Second, reads are slower until the read cache of plan 2 exists.
+- The line `server_wide_modules = base,rpc,web,oteny_cloud_filestore` is in
+  the same file (see Setup, step 7), and the start command of production is
+  checked (below).
+- The DR copy and the read cache of plan 2 are deployed, and one night of
+  the standby on CUNEUS40 has run with them (the § 4 check of
+  [plan 2](plans/2026-10-19-plan-2-rollout-blockers.md)).
+- `cache_limit_mb` is set to `10240` (10 GB, above the 6 GB filestore), so
+  production keeps every file local while the bucket fills (Q3). The code
+  default of 100 would remove almost every local copy within hours. The
+  limit goes down in steps later, each after a look at the read times.
 
-One check is OPEN and must be done on Odoo.sh before the rollout. Odoo.sh
-reads `/home/odoo/.config/odoo/odoo.conf`. The check: does a
-`server_wide_modules` line in that file reach the workers, or does the start
-command of Odoo.sh overrule it? It runs on `test3`, not on `test1`:
-[plan 1c](plans/2026-10-19-plan-1c-odoosh-check.md).
+The Odoo.sh check of the `server_wide_modules` line is done (19-Oct-2026,
+`test3`, [plan 1c](plans/2026-10-19-plan-1c-odoosh-check.md)). The start
+command of Odoo.sh passes `--config /home/odoo/.config/odoo/odoo.conf` and has
+no `--load`, so the line in that file is used. The line reached the HTTP
+threads and the cron threads, and it stayed through a restart, a restore and
+a rebuild. `test3` runs one process (`--workers=0`), so the check does not
+prove the worker processes of production: before the write key goes in, read
+the start command of production once (`/proc/<pid>/cmdline` of an HTTP worker
+and of the cron worker) and check that the log shows no "not a server-wide
+module" warning after the restart.
 
 ## Known Limits
 
@@ -271,16 +316,12 @@ command of Odoo.sh overrule it? It runs on `test3`, not on `test1`:
   in the bucket fails the same way. A real server clock never stands still,
   so this is a property of the test. Results:
   [lab-results.md](references/lab-results.md).
-- A download holds the whole file in memory while Odoo sends it. Large files
-  need the chunked streaming of plan 2.
 - `head` on a missing bucket returns None. A HEAD answer has no body, so the
   error code is only `404`, and the module reads that as "no such key". This
   is safe. The upload job asks first. A None from `head` is not equal to the
   file size, so the job puts, and a put to a missing bucket raises
   `NoSuchBucket`, so the job stops and posts the alert. A None from `head`
   counts as "not confirmed", so the local file stays.
-- A clone reads every file from the bucket each time. A read cache comes in
-  plan 2 (D21).
 - During an outage, a download of a file that is only in the bucket answers
   404, and an image shows as broken. There is no placeholder. A copy of a
   record with such a file (a duplicate, a forwarded mail) fails with "The
@@ -312,11 +353,29 @@ command of Odoo.sh overrule it? It runs on `test3`, not on `test1`:
   upload. A call can pass its 24 seconds by one upload, and a cron run of 10
   calls can pass its 240 seconds by up to ten uploads. A large file makes
   this longer. A per-file timeout is not built.
-- Bucket deletes run inside the garbage collection lock of Odoo, one request
-  at a time. Plan 2 batches them, before the first delete markers reach the
-  hold time (R13).
-- Plan 2 also builds the command `odoo-bin cloud_dump` (D9, D26) and the
-  copy of the bucket (D16, D22, D23, D27).
+- A save of the same content as an object whose delete batch is running
+  can lose its only copy: the save finds the object with `head`, removes
+  its local copy, and waits on the lock for its row while the batch deletes
+  the object. It needs content deleted 365 days ago, saved again within the
+  second of its batch. Odoo's own cleanup and the code before plan 2 have
+  the same window; Q4 accepted Odoo's level of protection. A cache copy
+  survives it: eviction checks with `head` and the upload job uploads an
+  unmarked file again.
+- The delete job is safe only when the cron runs it: outside a cron (a shell
+  run) the earlier statements of its transaction fix the snapshot before the
+  lock, so the check can miss a save that runs at the same time.
+- The 5-minute protection of eviction reads `last_read`, which each worker
+  writes at most once a minute. A running download keeps its open file, so
+  only a request between the existence check and the open can fail.
+- When the 1 s `lock_timeout` of a cache write hits, Odoo also logs the
+  cancelled statement as an `odoo.sql_db` ERROR ("bad query"); the counts of
+  that minute are dropped.
+- `cloud_dump` has no timeout. The standby's Odoo is stopped while the copy
+  and the link run, so the first night after the rollout can take long; the
+  `--seed` link from the rsync mirror avoids most downloads.
+- A failed filestore rsync now skips the night's restore (the standby keeps
+  last night's database and files). Check the CUNEUS40 log for recurring
+  `rsync` exit codes 23 or 24 before the new script is deployed.
 
 ## Tests
 
@@ -350,10 +409,11 @@ limits are described in [test-store.md](references/test-store.md).
 
 ## References
 
-- [design-decisions.md](references/design-decisions.md): D1 to D27.
+- [design-decisions.md](references/design-decisions.md): D1 to D28.
 - [Plan 1: core module](plans/2026-10-12-plan-1-core-module.md).
 - [Plan 1c: the check on Odoo.sh](plans/2026-10-19-plan-1c-odoosh-check.md).
 - [Plan 1d: the upload job reports its progress](plans/2026-10-19-plan-1d-upload-progress.md).
+- [Plan 2: the four items of Ries's review](plans/2026-10-19-plan-2-rollout-blockers.md).
 - [test-store.md](references/test-store.md): the live test store.
 - [lab-results.md](references/lab-results.md): measured latency and the
   first push of a production copy.
@@ -364,19 +424,41 @@ limits are described in [test-store.md](references/test-store.md).
 
 - [x] Plan 1, the core module: modes, upload on save, read and streaming,
   hold time, catch-up and reverse jobs, alert, live tests.
-- [ ] Plan 2: the read cache (D21). The lab shows a read from the bucket is
-  more than 100 times slower than a local read.
-- [ ] Plan 2: streaming in chunks for large files (D18), `odoo-bin
-  cloud_dump` (D9, D26), the copy of the bucket (D16, D22, D23, D27), and
-  bucket deletes in batches (R13).
+
+### Plan 2 (Ries's review of 19-Oct-2026, in his order)
+
+Built 19-Oct-2026 in the working tree of `feat/cloud-filestore`, not
+committed; 182 module tests pass with the live tests. Detail, rulings and
+the review text: [plan 2](plans/2026-10-19-plan-2-rollout-blockers.md).
+
+1. [x] Chunked streaming of bucket downloads (D18), with the 404 before any
+   header and a broken connection on a failure in the middle.
+2. [~] The DR copy (D16, D26, D27): `cloud_dump --into --seed` and the DR
+   night with three folders (radar `dr_sync.py`). Built; not yet run on
+   CUNEUS40 (the laptop could not reach it). Blocks the rollout.
+3. [x] The read cache (D21): mark, write-through, fill on read, read counts,
+   eviction. First production limit 10240 MB (Rollout Condition).
+4. [x] Bucket deletes outside the garbage-collection lock (R13), in batches
+   with `DeleteObjects` (accepted by Google, probe of 19-Oct-2026).
+- [x] N1: a missing store is exit 4 and fails the DR step; exit 2 ("skipped")
+  only means module not installed or mode off.
+- [ ] Run the § 4 check of plan 2 on CUNEUS40: one night with the new
+  script, then the standby with internet off opens a sample of 50 files.
+- [ ] Deploy order: production installs the module (with `-u`) before the
+  new `dr_sync.py` goes to CUNEUS40; check the rsync exit codes first.
+
+### Other open items
+
 - [ ] Plan 2 candidate: a faster first push. Upload several files at the same
   time, or confirm an upload from the answer of the put instead of a
   separate `head`. Measured cost: about 104 ms per file in the lab, about 161
   ms from Odoo.sh. [Plan 1d](plans/2026-10-19-plan-1d-upload-progress.md)
   removed the 10-minute pause of the cron; the parallel uploads and the
   confirm-from-put remain candidates.
-- [ ] Measure once from an Odoo.sh branch before the rollout: a full first
-  push of a production copy on `test3` into `dev/odoosh-test3/`
+- [x] Measure once from an Odoo.sh branch before the rollout: a full first
+  push of a production copy on `test3` into `dev/odoosh-test3/`, about
+  162 ms per upload and about 330 files per minute with the cron of plan 1d;
+  a read in clone mode about 243 ms per file
   ([plan 1c](plans/2026-10-19-plan-1c-odoosh-check.md)).
 - [ ] Plan 2: the D25 gap. During a module update, a module that loads
   before this one can create a file. That row gets no `cloud_local_only`

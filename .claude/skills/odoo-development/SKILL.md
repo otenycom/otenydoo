@@ -77,6 +77,8 @@ Odoo's ORM handles caching, flushing, and transactions automatically. Work with 
 - **SQL constraints as class attributes**: Odoo 19 declares them as `_code_unique = models.Constraint("unique(code)", "The document type code must be unique")` — the legacy `_sql_constraints` list is deprecated (workspace examples: `rivercreds/models/rivercreds_credential_type.py`)
 - **Never commit transactions**: The framework handles `cr.commit()`; manual commits break atomicity
 - **No FK to separate-cursor records**: Records created via `self.env.registry.cursor()` and committed independently are invisible to the main transaction's FK constraint checks. Writing a Many2one pointing to such a record causes `ForeignKeyViolation` at flush. Use a plain Integer reference field (e.g., `channel_id_ref`) and look up via domain filter instead of a relational field.
+- **A separate cursor can wait on its own request**: a write through `self.env.registry.cursor()` during a request waits for any row lock that the request's own open transaction holds, and Postgres does not see that as a deadlock. Start such a write with `SET LOCAL lock_timeout TO '1s'` and drop it on a timeout when the data is a hint (read counts); Odoo then logs the cancelled statement as an `odoo.sql_db` ERROR unless the execute passes `log_exceptions=False` (example: `oteny_cloud_filestore`, cache writes of the read path).
+- **A command that lives in an addon** (`<addon>/cli/<name>.py`, a `Command` subclass) is found by `odoo-bin` only when `--addons-path=...` is the FIRST argument and the command name the second (`odoo/cli/command.py`, `main()`); otherwise `odoo-bin` exits 1 with "Unknown command". Example: `odoo-bin --addons-path=... cloud_dump -d <db> --into <folder>`.
 
 ### Compute Method Patterns
 

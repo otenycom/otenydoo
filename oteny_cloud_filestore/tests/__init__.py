@@ -1,3 +1,5 @@
+from . import test_cache
+from . import test_cloud_copy
 from . import test_cloud_store_errors
 from . import test_cloud_store_live
 from . import test_end_to_end_live
@@ -7,4 +9,5 @@ from . import test_local_only
 from . import test_mode
 from . import test_read
 from . import test_server_wide
+from . import test_stream
 from . import test_write

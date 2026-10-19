@@ -5,10 +5,11 @@ from unittest.mock import patch
 
 from odoo.exceptions import UserError
 from odoo.tests import HttpCase, TransactionCase, tagged
+from odoo.tools import config
 
 from ..tools import cloud_store
 from ..tools.cloud_store import CloudStoreError
-from .common import FakeCloudStore
+from .common import FakeCloudStore, patch_read_cache
 
 LOGGER = "odoo.addons.oteny_cloud_filestore.models.ir_attachment"
 
@@ -34,6 +35,7 @@ class CloudFilestoreReadMixin:
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
+        self.cache_write = patch_read_cache(self)
 
     def _bucket_only_attachment(self, raw=b"bucket content"):
         """Save in production mode: the file goes to the fake and the local copy is removed."""
@@ -183,11 +185,33 @@ class TestCloudFilestoreHttp(CloudFilestoreReadMixin, HttpCase):
         self._patch_cloud_filestore()
         attachment = self._bucket_only_attachment(b"streamed from the bucket")
         self.authenticate("admin", "admin")
-        with patch.object(self.fake, "get", wraps=self.fake.get) as get:
+        with patch.object(self.fake, "open", wraps=self.fake.open) as open_object:
             response = self.url_open(f"/web/content/{attachment.id}?download=true")
-        get.assert_called()
+        open_object.assert_called()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content, b"streamed from the bucket")
+
+    def test_http_header_tells_where_the_bytes_come_from(self):
+        """The browser's network panel shows whether Odoo read the file from the bucket or from the disk."""
+        self._patch_cloud_filestore()
+        in_bucket = self._bucket_only_attachment(b"streamed from the bucket")
+        # A clone never puts, so this save stays in the local filestore.
+        self.mode = "clone"
+        local = self.env["ir.attachment"].create({"name": "local.bin", "raw": b"written locally", "mimetype": "text/plain"})
+        self.mode = "production"
+        self.authenticate("admin", "admin")
+        response = self.url_open(f"/web/content/{in_bucket.id}?download=true")
+        self.assertEqual(response.headers.get("X-Cloud-Filestore"), "bucket")
+        # Odoo's own stream finds a local file through config.filestore(), not
+        # through the patched _filestore(): point both at the test folder.
+        self.startPatcher(patch.object(config, "filestore", return_value=self.env["ir.attachment"]._filestore()))
+        response = self.url_open(f"/web/content/{local.id}?download=true")
+        self.assertEqual(response.headers.get("X-Cloud-Filestore"), "local")
+        self.assertEqual(response.content, b"written locally")
+        # Without a bucket the module behaves as plain Odoo.
+        self.mode = "off"
+        response = self.url_open(f"/web/content/{local.id}?download=true")
+        self.assertNotIn("X-Cloud-Filestore", response.headers)
 
     def test_http_stream_bucket_failure_is_404(self):
         """An empty body must never be sent with the real etag: a cache would keep it."""

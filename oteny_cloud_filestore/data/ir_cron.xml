@@ -10,4 +10,24 @@
         <field name="interval_type">minutes</field>
         <field name="active" eval="True"/>
     </record>
+    <!-- The read cache grows with every read of a bucket file; this keeps it under its limit (D21). -->
+    <record id="ir_cron_cloud_filestore_evict" model="ir.cron">
+        <field name="name">Cloud filestore: evict old cache copies</field>
+        <field name="model_id" ref="model_oteny_cloud_filestore_cache"/>
+        <field name="state">code</field>
+        <field name="code">model._cloud_filestore_cache_evict()</field>
+        <field name="interval_number">1</field>
+        <field name="interval_type">hours</field>
+        <field name="active" eval="True"/>
+    </record>
+    <!-- Bucket deletes run apart from Odoo's garbage collection, in short locked batches (D8). -->
+    <record id="ir_cron_cloud_filestore_delete_expired" model="ir.cron">
+        <field name="name">Cloud filestore: delete expired objects from the bucket</field>
+        <field name="model_id" ref="base.model_ir_attachment"/>
+        <field name="state">code</field>
+        <field name="code">model._cloud_filestore_delete_expired()</field>
+        <field name="interval_number">1</field>
+        <field name="interval_type">days</field>
+        <field name="active" eval="True"/>
+    </record>
 </odoo>

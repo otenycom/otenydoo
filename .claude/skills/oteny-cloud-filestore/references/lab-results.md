@@ -123,3 +123,14 @@ reboot clears): `cf-demo.conf` (port 8072, database `cf-demo`, prefix
 `cr-cloud/`, with the radar addons). A copy of a neutralized restore must
 lose its `database.is_neutralized` flag, or the module stays in clone mode
 and uploads nothing.
+
+## Plan 2 facts (19-Oct-2026)
+
+- **`DeleteObjects` on Google Cloud Storage.** A `delete_objects` request
+  with two keys under `dev/probe-<id>/`, `Quiet: True`, with the dev write
+  key: answer 200, no `Errors`, and a `head` of both keys found nothing. The
+  delete job of plan 2 therefore deletes up to 1,000 objects per request.
+- **Memory of a streamed download.** A 29 MB object, measured with
+  `tracemalloc` on the developer laptop: peak 0.15 MB through
+  `CloudStore.open().iter_chunks()` (64 KB chunks), 44.07 MB through
+  `CloudStore.get()`.

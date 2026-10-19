@@ -73,6 +73,26 @@ class TestCloudStoreErrors(BaseCase):
         with self.assertRaises(CloudStoreUnavailable):
             store.head("ab/abc")
 
+    def test_delete_many_request_and_errors_answer(self):
+        store = self._store()
+        store.key_prefix = "dev/"
+        store._client.delete_objects.return_value = {"Errors": [{"Key": "dev/ab/bad", "Code": "AccessDenied"}]}
+        self.assertEqual(store.delete_many(["ab/good", "ab/bad"]), ["ab/bad"])
+        store._client.delete_objects.assert_called_once_with(
+            Bucket="bucket",
+            Delete={"Objects": [{"Key": "dev/ab/good"}, {"Key": "dev/ab/bad"}], "Quiet": True},
+        )
+        # A clean answer has no `Errors`; an empty list makes no call; a 5xx is an outage.
+        store._client.delete_objects.reset_mock(return_value=True)
+        store._client.delete_objects.return_value = {}
+        self.assertEqual(store.delete_many(["ab/good"]), [])
+        store._client.delete_objects.reset_mock()
+        self.assertEqual(store.delete_many([]), [])
+        store._client.delete_objects.assert_not_called()
+        down = self._store(delete_objects=_client_error(503, "ServiceUnavailable"))
+        with self.assertRaises(CloudStoreUnavailable):
+            down.delete_many(["ab/good"])
+
     def test_refusal_is_error_not_unavailable(self):
         store = self._store(put_object=_client_error(403, "AccessDenied"))
         with self.assertRaises(CloudStoreError) as caught:
@@ -148,3 +168,29 @@ class TestCloudStoreErrors(BaseCase):
         with self.assertRaises(CloudStoreError) as caught:
             store.put("ab/abc", b"x")
         self.assertNotIsInstance(caught.exception, (cloud_store.CloudStoreAccessError, CloudStoreUnavailable))
+
+    def test_open_gives_size_and_none_for_a_missing_key(self):
+        store = self._store()
+        # A stand-in for botocore's StreamingBody.
+        body = MagicMock()
+        body.iter_chunks.return_value = iter([b"ab", b"c"])
+        store._client.get_object.return_value = {"ContentLength": 3, "Body": body}
+        opened = store.open("ab/abc")
+        self.assertEqual(opened.size, 3)
+        self.assertEqual(list(opened.iter_chunks(2)), [b"ab", b"c"])
+        opened.close()
+        body.close.assert_called_once()
+        store = self._store(get_object=_client_error(404, "NoSuchKey"))
+        self.assertIsNone(store.open("ab/abc"))
+
+    def test_open_body_failure_maps_like_get(self):
+        for raised, expected in (
+            (ReadTimeoutError(endpoint_url="x"), CloudStoreUnavailable),
+            (IncompleteReadError(actual_bytes=1, expected_bytes=2), CloudStoreUnavailable),
+        ):
+            store = self._store()
+            body = MagicMock()
+            body.iter_chunks.side_effect = raised
+            store._client.get_object.return_value = {"ContentLength": 3, "Body": body}
+            with self.assertRaises(expected):
+                list(store.open("ab/abc").iter_chunks())

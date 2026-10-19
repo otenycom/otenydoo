@@ -64,7 +64,7 @@ Odoo.sh to Google Cloud Storage is not known.
   per run, the local copy removed only after the bucket confirms it.
 - Reads in clone mode from `dev/odoosh-test3/`.
 
-## Result (interim, 19-Oct-2026)
+## Result (19-Oct-2026)
 
 test3 build `cuneus-test3-40107605`, radar `2d5eba9f`, otenydoo `06bd4fe`,
 boto3 and botocore 1.43.114 from `requirements.txt`. The module was installed
@@ -109,5 +109,27 @@ copy is removed after the confirming `head`. The database has 25,395 local
 files (the 53,990 rows share them), so the first push needs about 51 runs, or
 about 8.5 hours through the cron.
 
-Still open: the end of the first push, the reads in clone mode, the line after
-a rebuild, the clean-up.
+**The line after a rebuild.** The deploy of plan 1d (otenydoo `be06dee`,
+radar `d6da477`) rebuilt test3 at 10:09: a new Odoo process, `odoo.conf`
+unchanged (with `server_wide_modules = base,rpc,web,oteny_cloud_filestore`),
+the start command again with `--config` and without `--load`, and no
+"not a server-wide module" warning at the registry load.
+
+**The first push.** The old cron moved 500 files per 10-minute run (8:48 to
+10:00, 4,024 files). From 10:10 the cron of plan 1d ran: calls of about 24 s
+with about 150 uploads each (about 162 ms per upload), 10 calls per cron run
+(241 to 245 s), 3 to 58 s between runs, about 330 files per minute. It
+logged `fully done` at 11:11:30 with 0 refused and 0 not confirmed. 518 local
+files stayed: local-only files and names they share. In all, 24,877 files
+went to `dev/odoosh-test3/`.
+
+**Reads in clone mode.** At 11:15 test3 was a clone again
+(`database.is_neutralized` set, the write key out of `odoo.conf`, the
+"unknown option" warnings gone). 200 of the newest user files that are only
+in the bucket were read with the read key (`odoo-bin shell`, one after the
+other): 200 matched their SHA-1 checksum, 0 differed, 0 were empty; 94.2 MB in
+48.6 s, about 243 ms per file (about 470 KB per file on average).
+
+Still open: the clean-up (delete `dev/odoosh-test3/`, restore test3 from a
+`main` backup) and the check of the production start command (SKILL.md,
+Rollout Condition).

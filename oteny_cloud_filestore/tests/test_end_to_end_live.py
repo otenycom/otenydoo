@@ -7,7 +7,7 @@ from odoo.tools import config
 
 from ..models import ir_attachment as ir_attachment_module
 from ..tools.cloud_store import CloudStore
-from .common import live_run_prefix, live_store_config
+from .common import live_run_prefix, live_store_config, patch_read_cache
 
 
 @tagged("oteny_cloud_filestore", "post_install", "-at_install")
@@ -38,6 +38,7 @@ class TestEndToEndLive(TransactionCase):
         params.set_param("oteny_cloud_filestore.read_access_key_id", live["read_access_key_id"])
         params.set_param("oteny_cloud_filestore.read_secret_access_key", live["read_secret_access_key"])
         params.set_param("database.is_neutralized", "")
+        patch_read_cache(self)
 
         # A store with the write key, only to look into the bucket and clean up.
         self.writer = CloudStore(

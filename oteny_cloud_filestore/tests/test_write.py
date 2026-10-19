@@ -8,7 +8,7 @@ from odoo.tools import config
 
 from ..tools import cloud_store
 from ..tools.cloud_store import CloudStoreError, CloudStoreUnavailable
-from .common import FakeCloudStore
+from .common import FakeCloudStore, patch_read_cache
 
 
 @tagged("oteny_cloud_filestore", "post_install", "-at_install")
@@ -37,6 +37,7 @@ class TestCloudFilestoreWrite(TransactionCase):
         self.startPatcher(patch.object(model, "_cloud_filestore_mode", side_effect=lambda: self.mode))
         self.startPatcher(patch.object(model, "_cloud_filestore_store", return_value=self.fake))
         self.startPatcher(patch.object(model, "_storage", return_value="file"))
+        patch_read_cache(self)
 
     def _save(self, raw, **context):
         return self.attachment.with_context(**context).create({"name": "user.bin", "raw": raw})

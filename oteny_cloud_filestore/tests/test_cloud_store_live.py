@@ -1,3 +1,5 @@
+import hashlib
+import os
 import time
 import unittest
 from uuid import uuid4
@@ -58,6 +60,15 @@ class TestCloudStoreLive(BaseCase):
         self.writer.delete("ab/abc")
         self.assertIsNone(self.writer.get("ab/abc"))
         self.assertIsNone(self.writer.head("ab/abc"))
+
+    def test_delete_many_deletes_both_objects(self):
+        self._put("ab/many1", b"one")
+        self._put("ab/many2", b"two")
+        self.assertEqual(self.writer.delete_many(["ab/many1", "ab/many2", "ab/never-written"]), [])
+        self.assertIsNone(self.writer.head("ab/many1"))
+        self.assertIsNone(self.writer.head("ab/many2"))
+        with self.assertRaises(ValueError):
+            self.writer.delete_many(["ab/%d" % number for number in range(1001)])
 
     def test_delete_missing_is_silent(self):
         self.writer.delete("ab/never-written")
@@ -134,3 +145,21 @@ class TestCloudStoreLive(BaseCase):
         with self.assertRaises(CloudStoreUnavailable):
             store.head("ab/abc")
         self.assertLess(time.monotonic() - started, 15)
+
+    def test_large_object_streams_in_small_chunks(self):
+        """About 30 MB (the largest production file is 29 MB) arrive in chunks of at most 64 KiB."""
+        data = os.urandom(30 * 1024 * 1024)
+        self._put("ab/large", data)
+        opened = self.reader.open("ab/large")
+        self.assertEqual(opened.size, len(data))
+        digest = hashlib.sha1()
+        biggest = 0
+        try:
+            for chunk in opened.iter_chunks():
+                biggest = max(biggest, len(chunk))
+                digest.update(chunk)
+        finally:
+            opened.close()
+        self.assertLessEqual(biggest, 65536)
+        self.assertEqual(digest.hexdigest(), hashlib.sha1(data).hexdigest())
+        self.assertIsNone(self.reader.open("ab/missing"))

@@ -1,6 +1,12 @@
 # Cloud filestore — design decisions (the spec)
 
-> **Status: IN DESIGN (9-Oct-2026).** Interview with Thijs finished: D1–D20
+> **Status: PLAN 1 BUILT, PLAN 2 OPEN (19-Oct-2026).** The module
+> `oteny_cloud_filestore` exists on the otenydoo branch `feat/cloud-filestore`
+> (plans 1, 1b, 1c and 1d). The bucket is Google Cloud Storage (D28). Plan 2
+> and its order: the Roadmap of [SKILL.md](../SKILL.md). The rest of this
+> header is the record of the design phase.
+>
+> **Design phase (9-Oct-2026).** Interview with Thijs finished: D1–D20
 > agreed (8-Oct-2026). On 9-Oct-2026 Ries added a local read cache (D21),
 > answered Q16–Q19, and replaced the signed links of D18 with streaming by
 > Odoo, which also answers Q20, and answered Q21 (production is the server
@@ -8,8 +14,7 @@
 > (Thijs) fixed sentences that later decisions had overtaken and opened
 > Q22–Q27, all answered by D22–D27 ([§ 4](#4-questions)). The
 > decisions are a draft spec: a new decision revises an older one where the
-> whole design gets better (Ries, 9-Oct-2026). Next: design review, then a
-> written spec in an otenydoo skill (D12). No code exists yet. The
+> whole design gets better (Ries, 9-Oct-2026). The
 > problem this answers is described in radar's
 > `rivercreds-docs/references/filestore-cloning.md` (business repository).
 > Moved here from radar's `rivercreds-docs/plans/cloud-filestore.md` on
@@ -154,7 +159,8 @@ consequence: a clone older than the hold time cannot open files that
 production has deleted from the bucket since.
 
 **D11 — S3 protocol; read key in a system parameter, write key in
-`odoo.conf` (answers Q5, revised by Q21).** The module
+`odoo.conf` (answers Q5, revised by Q21; the Hetzner facts are revised by
+D28).** The module
 speaks the S3 protocol, which nearly every object store offers (Hetzner, AWS,
 Backblaze, Wasabi, Cloudflare R2, MinIO), so it is not tied to one provider.
 The read key lives in a system parameter (Thijs, 8-Oct-2026), so it travels
@@ -234,9 +240,11 @@ longer in the bucket, so a file deleted in Odoo disappears from the backup
 too (first draft: add-only, never remove). The DR standby
 (D15) can read its files from the same folder instead of downloading them a
 second time.
+*Built in plan 2 (19-Oct-2026): the copy is the module command `cloud_dump --into`; the folder layout on CUNEUS40 is in [plan 2](../plans/2026-10-19-plan-2-rollout-blockers.md), § 4.*
 
 **D17 — Two keys: a write key for production, a read-only key for clones
-(answers Q13).** (Thijs, 8-Oct-2026.) The write key is used only by
+(answers Q13; the Hetzner policy and project are replaced by the managed
+folders of D28).** (Thijs, 8-Oct-2026.) The write key is used only by
 production and lives only in the `odoo.conf` of the production server (D3),
 so no database copy carries it. The read key is limited by a Hetzner bucket policy to `s3:GetObject` on
 this one bucket (plus `s3:GetObjectVersion` if versioning is on) and stays in
@@ -286,7 +294,8 @@ that answers "OK" or "error", for an outside monitor to poll) was named as an
 equal option and stays possible later; it would also catch the case where
 Odoo itself is down, which a Discuss message cannot report.
 
-**D20 — No Object Lock on the bucket (answers Q15).** (Thijs, 8-Oct-2026.)
+**D20 — No Object Lock on the bucket (answers Q15; checked against
+Google's soft delete in D28).** (Thijs, 8-Oct-2026.)
 Hetzner's Object Lock would block every delete for a fixed period after the
 upload, but it can only be switched on when the bucket is created. It is not
 used. Protection against a wrong delete rests on three other measures: the
@@ -381,6 +390,7 @@ every clone use the cache with the same rules (Q18, revises D10).
   together in every backup, so a restore keeps them in step. A cron evicts.
   A file read in the last 5 minutes is never evicted, so a download that is
   in progress keeps its file.
+*Built in plan 2 (19-Oct-2026). A limit of 0 turns the cache off; the first production limit is 10240 MB (SKILL.md, Rollout Condition). Outcome: [plan 2](../plans/2026-10-19-plan-2-rollout-blockers.md), § 10.*
 
 **D22 — A deleted file disappears from every copy once no Odoo.sh backup can
 need it (answers Q25).** (Thijs, 12-Oct-2026.) The bucket holds personal
@@ -458,6 +468,7 @@ evicts them (as in D2 and D9). Detail for the spec: for the standby,
 `cloud_dump` fills the local filestore in place instead of writing a zip; the
 work is the same as the reverse migration (D2). Read as: "the API key" is the
 S3 read key of D17 (to confirm).
+*Built in plan 2 (19-Oct-2026): the standby fills `bucket-copy/` with `cloud_dump --into --seed` and mounts a hard-linked union of that folder and the rsync mirror; [plan 2](../plans/2026-10-19-plan-2-rollout-blockers.md), § 4 and § 10.*
 
 **D27 — CUNEUS40 uses the same read key as a laptop clone (answers Q24).**
 (Thijs, 12-Oct-2026.) No separate key and no right to list the bucket. So the
@@ -472,6 +483,45 @@ whose name it knows, but it cannot list or bulk-download the bucket. Detail
 for the spec: the D16 copy and the standby's filestore (D26) may then be one
 folder, or two; the standby must not write its own new files into the
 backup copy.
+*Built in plan 2: one folder for the copy, one for the standby (the union of hard links), so the standby never writes into the copy.*
+
+**D28 — The bucket is Google Cloud Storage, not Hetzner (revises D11, D15,
+D16, D17, D20; the reason is open, Q28).** The bucket is `cuneus-crewradar-docs`
+in Google Cloud Storage, location EU multi-region, used through Google's S3
+interface (endpoint `https://storage.googleapis.com`, region `auto`) with
+HMAC keys. It has been the store of the module since 13-Oct-2026; the setup
+is in [test-store.md](test-store.md). The module still speaks only S3 (D11),
+so no code depends on the provider. What changes in the earlier decisions:
+
+- **D11, D17 (the narrow keys).** A Hetzner bucket policy and a separate
+  Hetzner project are not used. The bucket has two managed folders, `main/`
+  for production and `dev/` for development and tests, and each folder has
+  its own access rules. Each key is the HMAC key of a service account with a
+  role on one folder only: the write key has `roles/storage.objectAdmin`,
+  the read key a custom role with only `storage.objects.get`, so it cannot
+  list (D27). A key for `dev/` cannot touch `main/`. This is proven for the
+  `dev/` keys by the live tests `test_write_key_stays_in_its_folder` and
+  `test_read_key_cannot_list`. The keys for `main/` do not exist yet; they
+  need the same short exception to the organization policy
+  `iam.disableServiceAccountKeyCreation` at the rollout.
+- **D16 (why a copy of our own).** The Hetzner reason (one Ceph cluster in
+  one location) does not apply as written: the bucket is EU multi-region.
+  The other reason stays: a delete through our own key is carried out like
+  any request, so the copy on CUNEUS40 is still needed.
+- **D15 (traffic).** The check was made against Hetzner's 1 TB of included
+  egress. Google bills egress from the bucket per GB. The volume stays a few
+  hundred MB per month; the price per month is not checked.
+- **D20 (no Object Lock), checked against Google's soft delete.** The bucket
+  has soft delete for 7 days: an object that is deleted stays recoverable
+  for 7 days. That is a fourth measure beside the three of D20. It covers a
+  wrong delete through the write key, for example a fault in the delete job
+  of plan 2 (R13), but only when somebody sees it within 7 days. It does
+  not replace the hold time (D8) or the CUNEUS40 copy (D16), which keep a
+  file much longer. The Hetzner fact in D20 (Object Lock only at bucket
+  creation) does not describe Google; the Google retention options are not
+  checked, and D20 does not need them. A soft-deleted object is billed for
+  its storage during the 7 days. The bucket deletes only objects past the
+  hold time, so that cost is small.
 
 ## 3. Research facts that shape the design
 
@@ -688,9 +738,9 @@ recommended answer with its reason.
 
 ### Open
 
-Raised in the full review of 12-Oct-2026.
-
-None (12-Oct-2026).
+- **Q28 (19-Oct-2026).** Why did the store change from Hetzner to Google
+  Cloud Storage, and who decided it? D28 records the facts of the change;
+  the reason and the owner are not written down.
 
 ## 5. Test bucket (homelab, not production)
 

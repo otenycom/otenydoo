@@ -10,6 +10,34 @@ from botocore.exceptions import (
 )
 
 
+class CloudObject:
+    """An open object of the bucket: its size and its body in chunks."""
+
+    def __init__(self, body, size):
+        self.size = size
+        self._body = body
+        self._closed = False
+
+    def iter_chunks(self, chunk_size=65536):
+        """Yield the body; a failure while reading maps to our exceptions, like `get`."""
+        try:
+            yield from self._body.iter_chunks(chunk_size)
+        except _UNAVAILABLE_ERRORS as error:
+            raise CloudStoreUnavailable("get_object: store unreachable") from error
+        except BotoCoreError as error:
+            raise CloudStoreError(f"get_object: {type(error).__name__}") from error
+
+    def close(self):
+        # Safe to call twice: a stream closes the object from more than one place.
+        if not self._closed:
+            self._closed = True
+            self._body.close()
+
+
+# The S3 limit of one delete_objects request.
+DELETE_MANY_MAX = 1000
+
+
 class CloudStoreError(Exception):
     """The store refused a request or gave an unexpected answer."""
 
@@ -102,10 +130,13 @@ class CloudStore:
 
         With missing_ok, a missing key gives None instead of an error. Only
         get, head and delete may pass it: a put to a missing key or bucket
-        must fail, or the caller would think the file is stored.
+        must fail, or the caller would think the file is stored. A call on
+        no single key (delete_objects) passes name=None.
         """
+        if name is not None:
+            kwargs["Key"] = self._key(name)
         try:
-            return getattr(self._client, method)(Bucket=self.bucket, Key=self._key(name), **kwargs)
+            return getattr(self._client, method)(Bucket=self.bucket, **kwargs)
         except ClientError as error:
             status = error.response.get("ResponseMetadata", {}).get("HTTPStatusCode") or 0
             code = str(error.response.get("Error", {}).get("Code", ""))
@@ -135,6 +166,17 @@ class CloudStore:
         except BotoCoreError as error:
             raise CloudStoreError(f"get_object: {type(error).__name__}") from error
 
+    def open(self, name):
+        """Open an object to read in chunks; None when the key is missing.
+
+        `get` holds the whole object in memory. A download of a large file
+        uses this instead, so the worker holds one chunk at a time.
+        """
+        response = self._call("get_object", name, missing_ok=True)
+        if response is None:
+            return None
+        return CloudObject(response["Body"], response["ContentLength"])
+
     def head(self, name):
         response = self._call("head_object", name, missing_ok=True)
         return None if response is None else response["ContentLength"]
@@ -142,3 +184,21 @@ class CloudStore:
     def delete(self, name):
         # A missing key is silent; a missing bucket still raises.
         self._call("delete_object", name, missing_ok=True)
+
+    def delete_many(self, names):
+        """Delete up to 1000 objects in one request; return the names that were NOT deleted.
+
+        The bucket answers a batch with one status, and lists the keys it
+        failed on under `Errors`. A name that is missing is not an error.
+        """
+        if len(names) > DELETE_MANY_MAX:
+            raise ValueError(f"delete_many takes at most {DELETE_MANY_MAX} names")
+        if not names:
+            return []
+        response = self._call(
+            "delete_objects",
+            None,
+            Delete={"Objects": [{"Key": self._key(name)} for name in names], "Quiet": True},
+        )
+        prefix_length = len(self.key_prefix)
+        return [error["Key"][prefix_length:] for error in response.get("Errors", [])]

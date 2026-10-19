@@ -313,9 +313,15 @@ The fix, in `_cloud_filestore_upload_pending`:
   three new progress tests); green run `0 failed, 0 error(s) of 100 tests`
   on the database cf-test. `test_upload_respects_limit` and
   `test_upload_stops_after_time_budget` pass unchanged.
-- Not yet measured on Odoo.sh. The speed of the new cron there is unknown;
-  the measured numbers are those of plan 1c (about 161 ms per file, 25,395
-  local files, 500 files per 10-minute run before the fix).
+- Measured on Odoo.sh (test3, 19-Oct-2026, plan 1c): the rest of the first
+  push, about 21,400 files, took from 10:10 to 11:11:30 instead of about 7
+  hours. Calls of about 24 s with about 150 uploads, 10 calls per cron run
+  (241 to 245 s, a little over the 240 s budget as documented), about 330
+  files per minute; the last run ended `fully done` with 0 refused and no
+  "processed no record" warning.
+- The header `X-Cloud-Filestore` (`bucket` or `local`), added after the
+  measurement: `test_http_header_tells_where_the_bytes_come_from`, red
+  `None != 'bucket'`, green `0 failed, 0 error(s) of 102 tests`.
 - Task 3: the cloud filestore skill describes the new cron (cron paragraph,
   first-push limit, roadmap, references).
 - Final review fix: the resume point. Red run `1 failed, 0 error(s) of 101

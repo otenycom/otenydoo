@@ -219,10 +219,11 @@ true:
   files once the Odoo.sh backups that still hold them expire (after 3 to 4
   months). Second, reads are slower until the read cache of plan 2 exists.
 
-One check is OPEN and must be done on test1 before the rollout. Odoo.sh
+One check is OPEN and must be done on Odoo.sh before the rollout. Odoo.sh
 reads `/home/odoo/.config/odoo/odoo.conf`. The check: does a
 `server_wide_modules` line in that file reach the workers, or does the start
-command of Odoo.sh overrule it?
+command of Odoo.sh overrule it? It runs on `test3`, not on `test1`:
+[plan 1c](plans/2026-10-19-plan-1c-odoosh-check.md).
 
 ## Known Limits
 
@@ -302,6 +303,7 @@ limits are described in [test-store.md](references/test-store.md).
 
 - [design-decisions.md](references/design-decisions.md): D1 to D27.
 - [Plan 1: core module](plans/2026-10-12-plan-1-core-module.md).
+- [Plan 1c: the check on Odoo.sh](plans/2026-10-19-plan-1c-odoosh-check.md).
 - [test-store.md](references/test-store.md): the live test store.
 - [lab-results.md](references/lab-results.md): measured latency and the
   first push of a production copy.
@@ -320,8 +322,9 @@ limits are described in [test-store.md](references/test-store.md).
 - [ ] Plan 2 candidate: a faster first push. Upload several files at the same
   time, or confirm an upload from the answer of the put instead of a
   separate `head`. Measured cost today: about 104 ms per file.
-- [ ] Measure once from an Odoo.sh branch against the production bucket
-  before the rollout.
+- [ ] Measure once from an Odoo.sh branch before the rollout: a full first
+  push of a production copy on `test3` into `dev/odoosh-test3/`
+  ([plan 1c](plans/2026-10-19-plan-1c-odoosh-check.md)).
 - [ ] Plan 2: the D25 gap. During a module update, a module that loads
   before this one can create a file. That row gets no `cloud_local_only`
   flag (NULL), so the upload job treats a module image as a user file and

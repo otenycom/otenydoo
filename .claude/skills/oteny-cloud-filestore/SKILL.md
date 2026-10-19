@@ -370,12 +370,12 @@ module" warning after the restart.
 - When the 1 s `lock_timeout` of a cache write hits, Odoo also logs the
   cancelled statement as an `odoo.sql_db` ERROR ("bad query"); the counts of
   that minute are dropped.
-- The radar restore script upgrades only the modules in `odoo.installModules`
-  of `.vscode/settings.json`, and `oteny_cloud_filestore` is not in that list.
-  A restore of a database that has the module therefore leaves a new model
-  of the module without its table (log: "Model oteny.cloud.filestore.cache
-  has no table") until `-u oteny_cloud_filestore` runs. Seen on `crmain`,
-  19-Oct-2026.
+- `oteny_cloud_filestore` is a first-party module of Radar (19-Oct-2026): it
+  is in `GENERIC_MODULES` of radar `increment_version.py` and in
+  `odoo.installModules`. Before, a deploy never raised its version, so
+  Odoo.sh never upgraded it (test3 ran plan 2 code without the cache table),
+  and a restore left its new tables missing. With no bucket settings the
+  module is in mode off, so an install changes nothing until the rollout.
 - Reading `raw` of one attachment of a large recordset reads the whole
   prefetch set from the bucket (lab-results.md).
 - `cloud_dump` has no timeout. The standby's Odoo is stopped while the copy

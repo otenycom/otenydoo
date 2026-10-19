@@ -40,7 +40,7 @@ cd <business-repo> && ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo-bin \
   --without-demo=True \
   --http-interface 127.0.0.1 \
   --test-enable \
-  --test-tags=oteny_audit,oteny_shortcut,oteny_bot,oteny_backup_trigger,odoo_parallel_tests,oteny_knowledge_sync,riverflow,rivercreds,crewradar,crewradar_wilma,crewradar_cuneus_sign,crewradar_creds,crewradar_sign,crewradar_marinetraffic \
+  --test-tags=oteny_audit,oteny_shortcut,oteny_bot,oteny_backup_trigger,odoo_parallel_tests,oteny_knowledge_sync,oteny_cloud_filestore,riverflow,rivercreds,crewradar,crewradar_wilma,crewradar_cuneus_sign,crewradar_creds,crewradar_sign,crewradar_marinetraffic \
   -d cr-test \
   -r ries -w ries \
   --max-cron-threads 0 \

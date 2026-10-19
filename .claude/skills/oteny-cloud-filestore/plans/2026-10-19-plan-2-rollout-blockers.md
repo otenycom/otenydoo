@@ -302,6 +302,13 @@ team to check)
   10240 (Rollout Condition in SKILL.md).
 - The race of a save during a delete batch is kept and documented (Known
   Limits): Odoo's own cleanup has the same window.
+- Corrected after the deploy to test3: the ruling "no manual version bump,
+  the deploy tool increments every module version" was wrong. The deploy
+  bumps only the modules in `GENERIC_MODULES` and `RADAR_MODULES` of radar
+  `increment_version.py`, and `oteny_cloud_filestore` was not in it, so
+  test3 kept version 19.0.1.0 and never created the cache table. Root fix
+  (Radar dev team, 19-Oct-2026): the module joined that list and
+  `odoo.installModules`.
 
 **Open**
 - N1 (fixed after the build, 19-Oct-2026): `cloud_dump` exits 2 only for

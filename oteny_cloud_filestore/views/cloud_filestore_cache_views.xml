@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!--
+        Inspection views for developers and admins, only in debug mode (Settings > Technical).
+        The cache rows are written by the read path, the upload job and the eviction cron;
+        a hand edit could mark a file that is not in the bucket, so the views are read-only.
+    -->
+    <record id="cloud_filestore_cache_view_list" model="ir.ui.view">
+        <field name="name">oteny.cloud.filestore.cache.list</field>
+        <field name="model">oteny.cloud.filestore.cache</field>
+        <field name="arch" type="xml">
+            <list create="false" edit="false" delete="false" default_order="last_read desc">
+                <field name="name" />
+                <field name="size" sum="Total" />
+                <field name="in_bucket" />
+                <field name="reads" />
+                <field name="reads_date" optional="hide" />
+                <field name="last_read" />
+            </list>
+        </field>
+    </record>
+
+    <record id="cloud_filestore_cache_view_form" model="ir.ui.view">
+        <field name="name">oteny.cloud.filestore.cache.form</field>
+        <field name="model">oteny.cloud.filestore.cache</field>
+        <field name="arch" type="xml">
+            <form create="false" edit="false" delete="false">
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="name" />
+                            <field name="size" />
+                            <field name="in_bucket" />
+                        </group>
+                        <group>
+                            <field name="reads" />
+                            <field name="reads_date" />
+                            <field name="last_read" />
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="cloud_filestore_cache_view_search" model="ir.ui.view">
+        <field name="name">oteny.cloud.filestore.cache.search</field>
+        <field name="model">oteny.cloud.filestore.cache</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="name" />
+                <filter name="in_bucket" string="Cache Copies" domain="[('in_bucket', '=', True)]" />
+                <filter name="not_in_bucket" string="Not Marked" domain="[('in_bucket', '=', False)]" />
+                <group>
+                    <filter name="group_in_bucket" string="In Bucket" context="{'group_by': 'in_bucket'}" />
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_cloud_filestore_cache" model="ir.actions.act_window">
+        <field name="name">Cloud Filestore Cache</field>
+        <field name="res_model">oteny.cloud.filestore.cache</field>
+        <field name="view_mode">list,form</field>
+        <field name="context">{'search_default_in_bucket': 1}</field>
+    </record>
+
+    <menuitem
+        id="menu_cloud_filestore_cache"
+        name="Cloud Filestore Cache"
+        parent="base.menu_custom"
+        action="action_cloud_filestore_cache"
+        groups="base.group_no_one"
+        sequence="100"
+    />
+
+    <!-- Where an attachment's content lives, for inspection in debug mode. -->
+    <record id="view_attachment_form_cloud_filestore" model="ir.ui.view">
+        <field name="name">ir.attachment.form.cloud.filestore</field>
+        <field name="model">ir.attachment</field>
+        <field name="inherit_id" ref="base.view_attachment_form" />
+        <field name="arch" type="xml">
+            <xpath expr="//group[@name='description_group']" position="before">
+                <group string="Cloud Filestore" groups="base.group_no_one">
+                    <field name="store_fname" readonly="1" />
+                    <field name="file_size" readonly="1" />
+                    <field name="checksum" readonly="1" />
+                    <field name="cloud_local_only" />
+                </group>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_attachment_tree_cloud_filestore" model="ir.ui.view">
+        <field name="name">ir.attachment.list.cloud.filestore</field>
+        <field name="model">ir.attachment</field>
+        <field name="inherit_id" ref="base.view_attachment_tree" />
+        <field name="arch" type="xml">
+            <field name="file_size" position="after">
+                <field name="cloud_local_only" optional="hide" groups="base.group_no_one" />
+            </field>
+        </field>
+    </record>
+</odoo>

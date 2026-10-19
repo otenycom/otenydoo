@@ -598,3 +598,20 @@ class TestCloudFilestoreCacheHttp(CloudFilestoreReadMixin, HttpCase):
         with self.assertLogs("odoo.addons.oteny_cloud_filestore", level="WARNING"):
             response = self.url_open(f"/web/content/{attachment.id}?download=true")
         self.assertEqual(response.status_code, 404)
+
+
+@tagged("oteny_cloud_filestore", "post_install", "-at_install")
+class TestCloudFilestoreCacheAudit(TransactionCase):
+    def test_cache_rows_stay_out_of_the_audit_log(self):
+        """A cache row changes on almost every bucket read; it must never grow the audit log."""
+        if "oteny.audit.log" not in self.env:
+            self.skipTest("oteny_audit is not installed")
+        self.assertTrue(self.env["oteny.audit.log"]._is_audit_ignored("oteny.cloud.filestore.cache"))
+        before = self.env["oteny.audit.log"].sudo().search_count([("model_name", "=", "oteny.cloud.filestore.cache")])
+        row = self.env["oteny.cloud.filestore.cache"].sudo().create({"name": "ab/ab12", "size": 1, "in_bucket": True})
+        row.in_bucket = False
+        row.unlink()
+        # oteny_audit writes its rows when the ORM flushes, so the flush is what is tested here.
+        self.env.flush_all()
+        after = self.env["oteny.audit.log"].sudo().search_count([("model_name", "=", "oteny.cloud.filestore.cache")])
+        self.assertEqual(after, before)

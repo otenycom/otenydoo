@@ -147,6 +147,13 @@ attachment (for example `ab/ab12...`).
   files pass the limit, down to 90 %, after a `head` confirms each object;
   nothing is removed while the bucket cannot be reached, and a file read in
   the last 5 minutes stays.
+- **Inspection in debug mode**: Settings › Technical › Cloud Filestore Cache
+  lists the cache rows, read-only (a hand edit could mark a file that is
+  not in the bucket). The attachment form shows a group "Cloud Filestore"
+  (file name, size, checksum, Stays Local), and the attachment list has
+  Stays Local as an optional column. The cache model sets
+  `_oteny_audit_ignore = True`: its rows change on almost every bucket read
+  and hold no business data, so `oteny_audit` writes no rows for them.
 - **The DR copy**: `odoo-bin --addons-path=<path> cloud_dump -d <db> --into
   <folder> [--checklist <folder>] [--seed <folder>]` copies every object
   the database uses, plus the names of the `checklist/` markers, into a

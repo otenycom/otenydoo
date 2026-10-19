@@ -45,6 +45,11 @@ class CloudFilestoreCache(models.Model):
 
     _name = "oteny.cloud.filestore.cache"
     _description = "Cloud filestore cache copy"
+    # The rows change on almost every read of a bucket file and on every eviction run. They
+    # hold no business data (only a file name, a size and read counts), so an audit row per
+    # change would only grow the audit log. A plain class attribute that oteny_audit reads,
+    # so this module does not depend on it.
+    _oteny_audit_ignore = True
 
     name = fields.Char(required=True, help="The file name in the local filestore and in the bucket.")
     size = fields.Integer(help="The size of the file in bytes.")

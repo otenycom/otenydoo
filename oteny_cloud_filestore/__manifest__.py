@@ -10,7 +10,12 @@
     "author": "Oteny",
     "depends": ["base", "mail", "web"],
     "external_dependencies": {"python": ["boto3"]},
-    "data": ["security/ir.model.access.csv", "data/ir_config_parameter.xml", "data/ir_cron.xml"],
+    "data": [
+        "security/ir.model.access.csv",
+        "data/ir_config_parameter.xml",
+        "data/ir_cron.xml",
+        "views/cloud_filestore_cache_views.xml",
+    ],
     "post_init_hook": "post_init_hook",
     "post_load": "post_load",
     "installable": True,

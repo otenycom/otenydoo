@@ -42,6 +42,8 @@ class TestCloudFilestoreJobs(TransactionCase):
         self.startPatcher(patch.object(model, "_cloud_filestore_mode", side_effect=lambda *args: self.mode))
         self.startPatcher(patch.object(model, "_cloud_filestore_store", return_value=self.fake))
         self.startPatcher(patch.object(model, "_storage", return_value="file"))
+        # The upload job keeps its resume point in process memory: each test starts a new sweep.
+        self.startPatcher(patch.dict(ir_attachment_module._UPLOAD_RESUME_AFTER, clear=True))
         # The job also checks the server-wide load; these tests are about the files only.
         self.startPatcher(
             patch.dict(config.options, {"server_wide_modules": ["base", "web", "oteny_cloud_filestore"]})
@@ -254,6 +256,107 @@ class TestCloudFilestoreJobs(TransactionCase):
             self.assertEqual(self.attachment._cloud_filestore_upload_pending(), 1)
         self.assertEqual(len(self.fake.objects), 1)
         self.assertEqual(self.attachment._cloud_filestore_upload_pending(), 2)
+
+    def _progress_patch(self):
+        """Record the progress reports that the upload job gives to the cron runner."""
+        return patch.object(type(self.env["ir.cron"]), "_commit_progress", return_value=0.0)
+
+    def _as_cron(self):
+        """The attachment model as Odoo's cron runner calls it."""
+        cron = self.env.ref("oteny_cloud_filestore.ir_cron_cloud_filestore_upload")
+        return self.attachment.with_context(cron_id=cron.id)
+
+    def test_upload_reports_progress_to_the_cron(self):
+        """With work left, the cron runner calls the job again at once; else it waits the interval."""
+        for raw in (b"one", b"two", b"three"):
+            self._save_local(raw)
+        # A call has a tenth of the run budget, so the second file waits for the next call.
+        clock = MagicMock()
+        clock.monotonic.side_effect = itertools.chain([0, 0], itertools.repeat(30))
+        with self._progress_patch() as progress, patch.object(ir_attachment_module, "time", clock):
+            self.assertEqual(self._as_cron()._cloud_filestore_upload_pending(), 1)
+        progress.assert_called_once_with(1, remaining=2)
+        with self._progress_patch() as progress:
+            self.assertEqual(self._as_cron()._cloud_filestore_upload_pending(limit=1), 1)
+        progress.assert_called_once_with(1, remaining=1)
+        # A run by hand reports nothing; the caller commits, as the Reverse Migration steps do.
+        with self._progress_patch() as progress:
+            self.assertEqual(self.attachment._cloud_filestore_upload_pending(), 1)
+        progress.assert_not_called()
+        with self._progress_patch() as progress:
+            self.assertEqual(self._as_cron()._cloud_filestore_upload_pending(), 0)
+        progress.assert_called_once_with(0, remaining=0)
+
+    def test_upload_progress_ignores_files_that_stay_local(self):
+        """A file kept local on purpose must not make the cron run again and again."""
+        shared = self._save_local(b"shared bytes")
+        self._save_local(b"shared bytes", cloud_local_only=True)
+        refused = self._save_local(b"too large")
+        self._save_local(b"normal")
+        real_put = self.fake.put
+
+        def refuse_one(name, data):
+            if name == refused.store_fname:
+                raise CloudStoreError("put_object: store refused (400 EntityTooLarge)")
+            real_put(name, data)
+
+        with self._progress_patch() as progress, patch.object(self.fake, "put", side_effect=refuse_one):
+            with self.assertLogs(LOGGER, "WARNING"):
+                self.assertEqual(self._as_cron()._cloud_filestore_upload_pending(), 2)
+        progress.assert_called_once_with(2, remaining=0)
+        self.assertTrue(self._local_exists(shared.store_fname))
+        self.assertTrue(self._local_exists(refused.store_fname))
+
+    def test_upload_resumes_after_files_that_stay_local(self):
+        """A file kept local before the stop point must not cost every later call of the sweep."""
+        names = sorted(self._save_local(raw).store_fname for raw in (b"one", b"two", b"three"))
+        # The roles follow the sort order of the names, not the order of creation.
+        refused_name, first_name, last_name = names
+        real_put = self.fake.put
+
+        def refuse_one(name, data):
+            if name == refused_name:
+                raise CloudStoreError("put_object: store refused (400 EntityTooLarge)")
+            real_put(name, data)
+
+        put = self.startPatcher(patch.object(self.fake, "put", side_effect=refuse_one))
+        head = self.startPatcher(patch.object(self.fake, "head", wraps=self.fake.head))
+        # The clock reads 0 at the start and at the first two checks, then is past the budget.
+        clock = MagicMock()
+        clock.monotonic.side_effect = itertools.chain([0, 0, 0], itertools.repeat(10_000))
+        with self._progress_patch() as progress, patch.object(ir_attachment_module, "time", clock):
+            with self.assertLogs(LOGGER, "WARNING"):
+                self.assertEqual(self._as_cron()._cloud_filestore_upload_pending(), 1)
+        progress.assert_called_once_with(1, remaining=1)
+        self.assertEqual([call.args[0] for call in put.call_args_list], [refused_name, first_name])
+        put.reset_mock()
+        head.reset_mock()
+        # The next call continues after the last name reached: no head and no put for the refused file.
+        with self._progress_patch() as progress:
+            self.assertEqual(self._as_cron()._cloud_filestore_upload_pending(), 1)
+        progress.assert_called_once_with(1, remaining=0)
+        self.assertEqual([call.args[0] for call in put.call_args_list], [last_name])
+        self.assertNotIn(refused_name, [call.args[0] for call in head.call_args_list])
+        # The sweep is over, so the next one tries the refused file again, once.
+        put.reset_mock()
+        with self._progress_patch() as progress:
+            with self.assertLogs(LOGGER, "WARNING"):
+                self.assertEqual(self._as_cron()._cloud_filestore_upload_pending(), 0)
+        progress.assert_called_once_with(0, remaining=0)
+        self.assertEqual([call.args[0] for call in put.call_args_list], [refused_name])
+        self.assertTrue(self._local_exists(refused_name))
+
+    def test_upload_outage_reports_no_remaining(self):
+        """During an outage the cron waits its interval instead of calling the bucket again at once."""
+        self._save_local(b"first")
+        self._save_local(b"second")
+        self.startPatcher(patch.object(type(self.attachment), "_cloud_filestore_alert"))
+        with self._progress_patch() as progress, patch.object(
+            self.fake, "put", side_effect=CloudStoreUnavailable("down")
+        ):
+            with self.assertLogs(LOGGER, "WARNING"):
+                self.assertEqual(self._as_cron()._cloud_filestore_upload_pending(), 0)
+        progress.assert_called_once_with(0, remaining=0)
 
     def test_download_file_has_odoo_file_mode(self):
         """A restored file must have the rights of a file that Odoo writes itself."""

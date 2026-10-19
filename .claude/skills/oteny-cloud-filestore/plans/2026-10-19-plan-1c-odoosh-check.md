@@ -53,7 +53,7 @@ Odoo.sh to Google Cloud Storage is not known.
 
 ## What the check must prove
 
-- The OPEN check: with `server_wide_modules = base,web,oteny_cloud_filestore`
+- The OPEN check: with `server_wide_modules = base,rpc,web,oteny_cloud_filestore`
   in `/home/odoo/.config/odoo/odoo.conf`, the module is server-wide in the
   HTTP workers and in the cron worker. Evidence: no "not server-wide" warning
   in `~/logs/odoo.log`, and the system parameter
@@ -64,6 +64,50 @@ Odoo.sh to Google Cloud Storage is not known.
   per run, the local copy removed only after the bucket confirms it.
 - Reads in clone mode from `dev/odoosh-test3/`.
 
-## Result
+## Result (interim, 19-Oct-2026)
 
-Not run yet.
+test3 build `cuneus-test3-40107605`, radar `2d5eba9f`, otenydoo `06bd4fe`,
+boto3 and botocore 1.43.114 from `requirements.txt`. The module was installed
+with a second `odoo-bin -i oteny_cloud_filestore --stop-after-init --no-http`
+next to the running server: 53,990 rows became user files and 637 stayed
+local-only; the upload cron was created active although the restore had
+neutralized the other crons.
+
+**The OPEN check: the line in `odoo.conf` is used.**
+
+- The start command of Odoo.sh (`/proc/<pid>/cmdline`) passes
+  `--config /home/odoo/.config/odoo/odoo.conf` and has no `--load`. In Odoo a
+  command-line option overrules the file only for an option that is on the
+  command line, so `server_wide_modules` comes from the file.
+- `odoo.conf` (dated 29-Jan-2023) survived the restore of 19-Oct-2026 and the
+  deploy push that followed it.
+- Control in production mode without the line: the restart logged
+  `oteny_cloud_filestore is not a server-wide module`, and the first upload
+  run set `not_server_wide_alerted` (08:48:07; no `alert_channel_id`, so the
+  alert went to the log only).
+- With `server_wide_modules = base,web,oteny_cloud_filestore` and
+  `odoosh-restart http`: no warning at the registry load, and the next upload
+  run (cron thread, 08:59:57) removed `not_server_wide_alerted`.
+- test3 runs one process (`--workers=0 --max-cron-threads=2`), so HTTP and
+  cron are threads of that process; `odoosh-restart cron` answers "no cron
+  workers are alive". Production runs worker processes (its log shows
+  "Worker process ... was killed"), so its start command is not proven by
+  test3.
+- The skill's line leaves out `rpc`, which is in the Odoo 19 default
+  (`base,rpc,web`). On test3 `/xmlrpc/2/common`, `/jsonrpc`, `/web/version`
+  and `/json/version` still answered, because `rpc` is installed in the one
+  database.
+- Decision (Radar dev team, 19-Oct-2026): the line keeps `rpc`, so the
+  skill's line is `server_wide_modules = base,rpc,web,oteny_cloud_filestore`.
+  Checked on test3 after `odoosh-restart http` (09:01): no "not server-wide"
+  warning, and `/xmlrpc/2/common`, `/jsonrpc`, `/web/version` and
+  `/json/version` answered.
+
+**Writes from Odoo.sh.** Two upload runs: 500 files in 80.64 s and 500 in
+83.04 s, so about 161 to 166 ms per file, 0 refused, 0 not confirmed; the local
+copy is removed after the confirming `head`. The database has 25,395 local
+files (the 53,990 rows share them), so the first push needs about 51 runs, or
+about 8.5 hours through the cron.
+
+Still open: the end of the first push, the reads in clone mode, the line after
+a rebuild, the clean-up.

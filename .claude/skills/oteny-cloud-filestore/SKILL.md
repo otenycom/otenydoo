@@ -66,7 +66,15 @@ production save keeps the file local.
    `cloud_filestore_write_secret_access_key`.
 7. Add the module to the server-wide modules in `odoo.conf`, with the
    modules that the server already lists:
-   `server_wide_modules = base,web,oteny_cloud_filestore`. Odoo then loads
+   `server_wide_modules = base,rpc,web,oteny_cloud_filestore`. Keep `rpc`:
+   the Odoo 19 default is `base,rpc,web`, and a line in `odoo.conf` replaces
+   that default. Odoo adds back only `base` and `web`. `rpc` serves
+   `/xmlrpc`, `/jsonrpc`, `/json/2` and `/web/version`. On a server with one
+   database those routes still answered without `rpc` in the line, because
+   `rpc` is installed in the database. Do not rely on that. On Odoo.sh the
+   file is `/home/odoo/.config/odoo/odoo.conf`; the start command passes it
+   with `--config` and has no `--load`, so the line is used (checked on
+   test3, [plan 1c](plans/2026-10-19-plan-1c-odoosh-check.md)). Odoo then loads
    the module when the server starts, before it loads any database. This
    matters during a module update (`-u`): Odoo loads the modules one by one,
    and a module that loads before this one can read a file that is only in
@@ -126,13 +134,40 @@ in the local filestore. The module posts one Discuss message in the channel
 again. Several workers at the same time still post once.
 
 A cron job, "Cloud filestore: upload local files to the bucket", runs every
-10 minutes. It uploads at most 500 local user files per run and removes
-the local copy only after the bucket reports the same size. It stops at the
-first outage error (no connection, a timeout, an HTTP 5xx), and it stops
-after 240 seconds, so a run stays below the time limit of an Odoo.sh cron.
-The next run continues. The same job does the first migration of an
-existing database: install the module, set the parameters and the write key,
-and the job moves the old files in batches.
+10 minutes. It removes the local copy of a file only after the bucket
+reports the same size. While local user files are pending, the job reports
+its progress to Odoo's cron runner (`ir.cron._commit_progress`), so Odoo
+calls it again at once, without the 10-minute pause. One cron run is 10
+calls (`MIN_RUNS_PER_JOB`), and more only while the run is under 10 seconds
+(`MIN_TIME_PER_JOB`). When work is still left after the calls, Odoo
+schedules the job again as soon as possible: the next poll of a cron worker,
+after the other ready jobs. A call uploads at most 500 files and stops after
+24 seconds (`UPLOAD_CALL_BUDGET_SECONDS`, the 240 seconds of
+`UPLOAD_TIME_BUDGET_SECONDS` divided by `MIN_RUNS_PER_JOB`). The call checks
+the time before each file, so it can pass the 24 seconds by one upload, and a
+run of 10 calls can pass 240 seconds by up to ten uploads (see Known Limits).
+The job walks the sorted local names in sweeps. A sweep visits each name
+once, over as many calls and runs as it needs: a call continues after the
+last name that the previous call reached. The job keeps that point per
+database in process memory (`_UPLOAD_RESUME_AFTER`). After a restart, or in
+another worker, the point is lost and the walk starts at the first name
+again: this costs extra `head` requests, never a wrong result. A call reports
+as `remaining` the pending names of the sweep that no call has reached yet,
+from the name where it stopped to the last name. A name that a call reached
+and kept local (it shares its name with a local-only file, the bucket refused
+it, the bucket did not confirm it, or the file was unreadable) does not count
+and is not checked again in that sweep. A call that reaches the last name
+ends the sweep and reports 0, so the cron then waits its interval. The next
+sweep starts at the first name; it tries the files kept local again, and it
+finds a new file that sorts before the point of the last sweep. The job stops
+at the first outage error (no connection, a timeout, an HTTP 5xx), reports
+`remaining = 0` and waits the 10 minutes; the next run continues the sweep.
+When no pending file is left, the job also waits the 10 minutes. A run by
+hand (`odoo-bin shell`) reports nothing. The shell rolls back on exit, so
+call `env.cr.commit()` after the run, as in the steps of The Reverse
+Migration. The same job does the first migration of an existing database:
+install the module, set the parameters and the write key, and the job moves
+the old files in batches.
 
 A refusal that concerns the whole store counts as an outage. This is an HTTP
 401 or 403, or one of the error codes `AccessDenied`, `InvalidAccessKeyId`,
@@ -210,7 +245,7 @@ download.
 ## Rollout Condition
 
 Do not put the write key in the `odoo.conf` of a production database before
-the line `server_wide_modules = base,web,oteny_cloud_filestore` is in the
+the line `server_wide_modules = base,rpc,web,oteny_cloud_filestore` is in the
 same file (see Setup, step 7), and before one of these two conditions is
 true:
 
@@ -260,9 +295,23 @@ command of Odoo.sh overrule it? It runs on `test3`, not on `test1`:
   writes during a module install or update stay local. The attachment is
   still a user file, so the next upload run moves it. Seen once on a
   production copy: a `sign.document` PDF.
-- The first push of a database is slow per file: about 104 ms per file, so
-  about 42 minutes for 24,000 files in one run, or about 8 hours through the
-  cron ([lab-results.md](references/lab-results.md)).
+- The first push of a database is slow per file: about 104 ms per file in the
+  lab ([lab-results.md](references/lab-results.md)) and about 161 ms per file
+  from Odoo.sh ([plan 1c](plans/2026-10-19-plan-1c-odoosh-check.md)). Before
+  [plan 1d](plans/2026-10-19-plan-1d-upload-progress.md) the cron moved 500
+  files per run and then waited 10 minutes. At that rate the 25,395 local
+  files would need about 8.5 hours (a calculation: the push did not finish
+  under the old code). The cron is now built to work without that pause
+  (tested locally, not yet on Odoo.sh). The time is then at least the files
+  times the time per file: about 68 minutes for 25,395 files at 161 ms. This
+  is a calculation and a lower bound, not a measurement of the new cron on
+  Odoo.sh, because each call also lists the local names. A file that stays
+  local on purpose (it shares its name with a local-only file, or the bucket
+  refuses it) costs one `head`, or one refused put, per sweep of the names.
+- An upload call checks its time budget before each file, not during an
+  upload. A call can pass its 24 seconds by one upload, and a cron run of 10
+  calls can pass its 240 seconds by up to ten uploads. A large file makes
+  this longer. A per-file timeout is not built.
 - Bucket deletes run inside the garbage collection lock of Odoo, one request
   at a time. Plan 2 batches them, before the first delete markers reach the
   hold time (R13).
@@ -304,6 +353,7 @@ limits are described in [test-store.md](references/test-store.md).
 - [design-decisions.md](references/design-decisions.md): D1 to D27.
 - [Plan 1: core module](plans/2026-10-12-plan-1-core-module.md).
 - [Plan 1c: the check on Odoo.sh](plans/2026-10-19-plan-1c-odoosh-check.md).
+- [Plan 1d: the upload job reports its progress](plans/2026-10-19-plan-1d-upload-progress.md).
 - [test-store.md](references/test-store.md): the live test store.
 - [lab-results.md](references/lab-results.md): measured latency and the
   first push of a production copy.
@@ -321,7 +371,10 @@ limits are described in [test-store.md](references/test-store.md).
   bucket deletes in batches (R13).
 - [ ] Plan 2 candidate: a faster first push. Upload several files at the same
   time, or confirm an upload from the answer of the put instead of a
-  separate `head`. Measured cost today: about 104 ms per file.
+  separate `head`. Measured cost: about 104 ms per file in the lab, about 161
+  ms from Odoo.sh. [Plan 1d](plans/2026-10-19-plan-1d-upload-progress.md)
+  removed the 10-minute pause of the cron; the parallel uploads and the
+  confirm-from-put remain candidates.
 - [ ] Measure once from an Odoo.sh branch before the rollout: a full first
   push of a production copy on `test3` into `dev/odoosh-test3/`
   ([plan 1c](plans/2026-10-19-plan-1c-odoosh-check.md)).

@@ -1938,6 +1938,78 @@ Benefits: (a) failed records don't roll back the batch, (b) main cursor is freed
 
 **Testing caveat**: `TransactionCase` tests run in a savepoint that is invisible to cursors opened via `self.pool.cursor()`. Test the claiming logic indirectly (e.g., call `_generate_review()` directly) rather than through the per-cursor wrapper.
 
+### A Cron With a Backlog Reports Its Progress (`_commit_progress`)
+
+A cron job that handles a fixed batch per run (`limit=500`) and does not report progress counts as "fully done" after every run. It then waits its whole interval, also when thousands of records are left. The backlog drains at one batch per interval.
+
+Odoo 19 has a progress API for this: `ir.cron._commit_progress(processed=0, *, remaining=None, deactivate=False)`.
+
+- It adds `processed` to `done`. Without `remaining`, it subtracts `processed` from the last `remaining`. With `remaining`, it sets the value.
+- It commits.
+- It returns the seconds left until `cron_end_time`, or 0. `cron_end_time` is the start of the run plus `MIN_TIME_PER_JOB` (10 s), so after the first call the value is almost always 0. It is not a budget for the run: do not use it to size a call.
+- Outside a cron (no `ir_cron_progress_id` in the context), it only commits and returns `float("inf")`.
+- The counters live in the model `ir.cron.progress`. `_notify_progress(done=, remaining=)` is the deprecated older form: do not use it.
+
+`ir.cron._run_job` calls the job in a loop: 10 calls (`MIN_RUNS_PER_JOB`), and more only while the run is under 10 s (`MIN_TIME_PER_JOB`). The loop ends earlier when a call sets the status. After each call:
+
+| Result of the call | Status |
+|---|---|
+| No error, `remaining = 0` (or no report at all) | fully done: the cron waits its normal interval |
+| No error, progress, `remaining > 0` | call again |
+| No error, 0 done, `remaining > 0`, first call | partially done, with the warning "processed no record" |
+| No error, 0 done, `remaining > 0`, a later call | partially done |
+| Error, but this call committed progress (`done > 0`) and `remaining > 0` | call again |
+| Any other error (no progress, or `remaining = 0`) | failed |
+
+When the loop ends with work left, the status is partially done and `_process_job` calls `_reschedule_asap`. That inserts an `ir.cron.trigger` for now. The next poll of a cron worker runs the job again, after the other ready jobs. This also holds for a call that reports 0 done and `remaining > 0`: Odoo runs the job again as soon as possible, again and again. Odoo has no built-in stop for it. `CONSECUTIVE_TIMEOUT_FOR_FAILURE` (3) timeouts in a row without progress count as failed.
+
+Rules:
+
+1. **`remaining` counts only work that a new call can do.** Items kept back on purpose (refused, skipped, kept local) never count. If they do, `remaining` never reaches 0 and the cron runs without end. Items kept back BEFORE the stop point also cost: a job that walks from the start again checks them in every call. When they use up the budget of a call, each call stops with little or no work done and `remaining > 0`, and the cron runs again as soon as possible without end. Keep a resume point (the next call continues after the last item reached), or make the walk skip kept-back items cheaply.
+2. **A call is short.** One cron run is 10 calls (`MIN_RUNS_PER_JOB`), and more only while the run is under 10 s (`MIN_TIME_PER_JOB`). So the budget of a call is the budget of the run divided by `MIN_RUNS_PER_JOB`. A call that uses the whole run budget makes a run ten times too long. A budget that is checked before each item lets a call pass it by one item.
+3. **On an outage report `remaining=0`.** The cron then waits its interval, and does not call a broken service ten times at once.
+4. **Report only inside a cron: `self.env.context.get("cron_id")`.** `TransactionCase` forbids `cr.commit()`. A run by hand reports nothing, and the caller commits: `odoo-bin shell` rolls back on exit, so call `env.cr.commit()` after the run.
+
+```python
+from odoo.addons.base.models.ir_cron import MIN_RUNS_PER_JOB
+
+RUN_BUDGET_SECONDS = 240
+CALL_BUDGET_SECONDS = RUN_BUDGET_SECONDS / MIN_RUNS_PER_JOB
+
+@api.model
+def _upload_pending(self, limit=500):
+    started = time.monotonic()
+    done = 0
+    remaining = 0
+    ids = self._pending_ids()  # only work that a new call can do
+    for index, record_id in enumerate(ids):
+        if done >= limit or time.monotonic() - started > CALL_BUDGET_SECONDS:
+            remaining = len(ids) - index
+            break
+        try:
+            self.browse(record_id)._upload()
+        except ServiceUnavailable:
+            remaining = 0  # outage: wait the interval
+            break
+        done += 1
+    if self.env.context.get("cron_id"):
+        self.env["ir.cron"]._commit_progress(done, remaining=remaining)
+    return done
+```
+
+To test it, patch `ir.cron._commit_progress` and call the method with `with_context(cron_id=...)`. Assert the call: `progress.assert_called_once_with(1, remaining=2)`. Assert that a call without `cron_id` reports nothing. Cover the outage (`remaining=0`) and a refused item (not in `remaining`).
+
+```python
+def _progress_patch(self):
+    return patch.object(type(self.env["ir.cron"]), "_commit_progress", return_value=0.0)
+
+def _as_cron(self):
+    cron = self.env.ref("my_module.ir_cron_upload")
+    return self.model.with_context(cron_id=cron.id)
+```
+
+Found in otenydoo `oteny_cloud_filestore` (19-Oct-2026): the upload cron moved 500 files per 10 minutes and did not report progress. A first push of a large filestore took 8.5 hours for 1 hour of work. It now reports `remaining`, and Odoo calls it again at once. It keeps a resume point per database in process memory (`_UPLOAD_RESUME_AFTER`), so a file kept local is checked once per sweep, not once per call.
+
 ### Exception Handling with Savepoints
 
 Catch only specific exceptions. Use savepoints to isolate error handling:

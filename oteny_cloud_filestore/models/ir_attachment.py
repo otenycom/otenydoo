@@ -1,3 +1,4 @@
+import bisect
 import functools
 import hashlib
 import logging
@@ -10,6 +11,7 @@ from werkzeug.exceptions import NotFound
 
 from odoo import api, fields, models
 from odoo.addons.base.models.ir_attachment import IrAttachment as BaseIrAttachment
+from odoo.addons.base.models.ir_cron import MIN_RUNS_PER_JOB
 from odoo.exceptions import UserError
 from odoo.http import Stream
 from odoo.tools import config, split_every
@@ -25,16 +27,32 @@ DEFAULT_HOLD_DAYS = 365
 # backup that still points to it, so a shorter hold time is never used.
 MIN_HOLD_DAYS = 120
 SECONDS_PER_DAY = 86400
-# The upload job stops after this many seconds, well below the time limit of
+# The budget of one cron run of the upload job, well below the time limit of
 # an Odoo.sh cron run: three timeouts in a row mark the cron as failed. The
-# next run continues where this one stopped, because the walk is sorted and
-# uploaded files are no longer local.
+# next call continues where this one stopped (see _UPLOAD_RESUME_AFTER).
 UPLOAD_TIME_BUDGET_SECONDS = 240
+# Odoo's cron runner calls the job again at once while it reports work left
+# (ir.cron._commit_progress): 10 calls (MIN_RUNS_PER_JOB), and more only while
+# the run is under 10 s (MIN_TIME_PER_JOB). One call gets its share of the run
+# budget, so a run of 10 calls stays near it. The budget is checked before
+# each file, so a call can pass it by one upload.
+UPLOAD_CALL_BUDGET_SECONDS = UPLOAD_TIME_BUDGET_SECONDS / MIN_RUNS_PER_JOB
 
 # One CloudStore per full set of settings, so a read does not build a boto3
 # client every time, and a settings change builds a new one. The keys of
 # this dict hold secrets: never log or print them.
 _STORE_CACHE = {}
+
+# The last local name that the upload job reached, per database. The next
+# call continues after it, so a file kept local on purpose (shared with a
+# local-only file, refused, not confirmed) costs one check per sweep, not one
+# per call; else such files could use up the budget of every call and the
+# cron would run again at once without end. A sweep walks the sorted names
+# once; at its end the point is cleared. It lives in process memory, not in
+# a system parameter, because each write of a parameter clears the caches of
+# every worker. A lost point (a restart, another worker) only means that the
+# walk starts at the first name again: extra heads, never a wrong result.
+_UPLOAD_RESUME_AFTER = {}
 
 
 def _cloud_filestore_store_unusable(error):
@@ -555,6 +573,17 @@ class IrAttachment(models.Model):
         return names
 
     @api.model
+    def _cloud_filestore_pending_names(self, names):
+        """Return the names among `names` that a user file uses (not only local-only rows)."""
+        # IS NOT TRUE, because rows that existed before the install can hold NULL.
+        self.env.cr.execute(
+            "SELECT DISTINCT store_fname FROM ir_attachment"
+            " WHERE store_fname IN %s AND cloud_local_only IS NOT TRUE",
+            [tuple(names)],
+        )
+        return {row[0] for row in self.env.cr.fetchall()}
+
+    @api.model
     def _cloud_filestore_upload_pending(self, limit=500):
         """Move local user files to the bucket; return the number of confirmed uploads.
 
@@ -565,12 +594,23 @@ class IrAttachment(models.Model):
         short object never costs the only copy. A run stops at the first
         outage error, because the next file would most likely fail as well.
         A file that the bucket refuses is skipped, so it cannot block every
-        later run. A run also stops after UPLOAD_TIME_BUDGET_SECONDS.
+        later run. A call also stops after UPLOAD_CALL_BUDGET_SECONDS. In a
+        cron run it reports its progress to the cron, which calls the job
+        again at once while files are left; `limit` caps the uploads of one
+        call.
+
+        A sweep walks the sorted local names once, over as many calls as it
+        needs: each call continues after the last name that the previous
+        call reached (_UPLOAD_RESUME_AFTER). `remaining` counts the pending
+        names of the sweep that no call has reached yet. A call that reaches
+        the end of the names ends the sweep and reports 0; the next sweep
+        starts at the first name, so a file that was kept local, or a new
+        file that sorts before the point, is tried again then.
 
         An object that is in the bucket already with the same size is not
         put again and does not count as an upload, nor towards `limit`: a
         name that a user file shares with a local-only file keeps its local
-        copy, so every run asks the bucket for it again (one head, no put).
+        copy, so every sweep asks the bucket for it again (one head, no put).
 
         The job also posts the alert when the module is not server-wide.
         """
@@ -583,24 +623,26 @@ class IrAttachment(models.Model):
         started = time.monotonic()
         uploaded = already = not_confirmed = refused = 0
         failed = out_of_time = False
+        stop_index = None
         names = self._cloud_filestore_local_names()
-        for batch in split_every(self.env.cr.IN_MAX, names):
-            if failed or out_of_time or uploaded >= limit:
+        dbname = self.env.cr.dbname
+        resume_after = _UPLOAD_RESUME_AFTER.get(dbname)
+        # The first name after the point; a name that is gone just moves the start on.
+        first_index = bisect.bisect_right(names, resume_after) if resume_after is not None else 0
+        for start in range(first_index, len(names), self.env.cr.IN_MAX):
+            if failed or stop_index is not None:
                 break
-            # IS NOT TRUE, because rows that existed before the install can hold NULL.
-            self.env.cr.execute(
-                "SELECT DISTINCT store_fname FROM ir_attachment"
-                " WHERE store_fname IN %s AND cloud_local_only IS NOT TRUE",
-                [tuple(batch)],
-            )
-            pending = set(row[0] for row in self.env.cr.fetchall())
-            for name in batch:
+            batch = names[start : start + self.env.cr.IN_MAX]
+            pending = self._cloud_filestore_pending_names(batch)
+            for offset, name in enumerate(batch):
                 if name not in pending:
                     continue
                 if uploaded >= limit:
+                    stop_index = start + offset
                     break
-                if time.monotonic() - started > UPLOAD_TIME_BUDGET_SECONDS:
+                if time.monotonic() - started > UPLOAD_CALL_BUDGET_SECONDS:
                     out_of_time = True
+                    stop_index = start + offset
                     break
                 path = self._full_path(name)
                 try:
@@ -643,20 +685,38 @@ class IrAttachment(models.Model):
                     uploaded += 1
                 else:
                     already += 1
+        remaining = 0
+        if failed:
+            # The point stays as it is: the next run continues the sweep.
+            pass
+        elif stop_index is None:
+            # The sweep reached the end of the names: the next one starts at the first name.
+            _UPLOAD_RESUME_AFTER.pop(dbname, None)
+        else:
+            if stop_index > first_index:
+                _UPLOAD_RESUME_AFTER[dbname] = names[stop_index - 1]
+            # Only names no call of this sweep reached: files kept local on purpose never count.
+            for start in range(stop_index, len(names), self.env.cr.IN_MAX):
+                batch = names[start : start + self.env.cr.IN_MAX]
+                remaining += len(self._cloud_filestore_pending_names(batch))
         _logger.info(
             "Cloud filestore upload job: %d uploaded, %d already in the bucket, %d not confirmed, "
-            "%d refused, %d files checked%s%s",
+            "%d refused, %d files checked, %d left for the next call%s%s",
             uploaded,
             already,
             not_confirmed,
             refused,
             len(names),
+            remaining,
             ", stopped by a bucket error" if failed else "",
             ", stopped by the time budget" if out_of_time else "",
         )
         if (uploaded or already) and not failed:
             # After a failed run the outage stays open: the bucket is not working.
             self._cloud_filestore_alert("_bucket_ok")
+        if self.env.context.get("cron_id"):
+            # Work left makes Odoo call the job again at once; 0 lets the cron wait its interval.
+            self.env["ir.cron"]._commit_progress(uploaded + already, remaining=remaining)
         return uploaded
 
     @api.model

@@ -719,6 +719,21 @@ A `store=False` Boolean in a form (a filter toggle above a list) belongs to the 
 
 Real example (historical, crewradar 19.0.10.67 to 19.0.10.68; the control was retired in 19.0.10.69 in favour of oteny_shortcut Forms shortcuts, which keep no per-user memory at all — the pattern below stays valid for a preference that must be remembered): the Services tab **Show** control (`crewradar.service.filter.mixin.service_filter`, a required non-stored Selection with the `selection_badge` widget; first shipped as a `boolean_toggle` in 19.0.10.57, where the memory never fired) — documented in full in the consuming business's own skill bundle, § Services Tab Filters. Since 19.0.10.68 the control uses `crewradar_service_filter`, a subclass of the badge widget: `record.update()` also marks the record dirty, and a view preference must not show the save / discard buttons, so on a clean record the widget stores the choice with an ORM call (`set_service_filter`) and calls `record.load()`; the non-stored field re-reads its default, which reads the stored choice, and the record stays clean. On a dirty or new record it keeps `record.update()`, because a reload discards unsaved edits.
 
+### Depend on records that a compute creates through their parent's One2many
+
+When a compute creates child records (a plan row whose `_compute_item_ids` creates its
+items), a dependent on another model that reaches those children through a different
+inverse path (a log entry's `credential_plan_item_ids`, inverse of the item's stored related
+`log_entry_id`) is not marked: the children did not exist when the parent was marked, and
+their creation inside the compute does not reach the other path. Depend through the parent
+instead (`credential_plan_slot_ids.item_ids`, `credential_plan_slot_ids.item_ids.status`):
+a change that marks the parent's compute marks this dependent in the same step, and its
+compute then reads the fresh children. Real case: the log entry's
+`credential_auto_add_trigger` (crewradar_creds, 19-Oct-2026) never ran after an extension of
+the placement until its depends went through the rows. In a test, read the parent's field
+(the row's `item_ids`) before the dependent, as the end of a request computes them in that
+order.
+
 ### A dotted `@api.depends` cannot cross a non-stored, search-based One2many
 
 `@api.depends("service_ids.deadline")` only works when Odoo can find, from a changed `riverflow.service`, which parent records hold it in `service_ids`. It does that through the One2many's inverse field, or, when there is none, by `search([("service_ids", "in", ids)])` on the parent model. A `compute=` One2many without `inverse_name` and without `search=` has neither: `fields.py` warns at load time that the field "should be searchable", and the runtime search raises `Cannot convert ... to SQL because it is not stored`. The failure does not show in a test that only reads the compute; it shows the first time a service is created or written while a parent form is in cache.

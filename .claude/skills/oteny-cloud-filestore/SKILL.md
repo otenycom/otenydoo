@@ -371,8 +371,9 @@ module" warning after the restart.
   cancelled statement as an `odoo.sql_db` ERROR ("bad query"); the counts of
   that minute are dropped.
 - `oteny_cloud_filestore` is a first-party module of Radar (19-Oct-2026): it
-  is in `GENERIC_MODULES` of radar `increment_version.py` and in
-  `odoo.installModules`. Before, a deploy never raised its version, so
+  is in `GENERIC_MODULES` of otenydoo `increment_version.py` (the list a
+  deploy uses for the generic modules), in the fallback list of radar
+  `increment_version.py`, and in `odoo.installModules`. Before, a deploy never raised its version, so
   Odoo.sh never upgraded it (test3 ran plan 2 code without the cache table),
   and a restore left its new tables missing. With no bucket settings the
   module is in mode off, so an install changes nothing until the rollout.

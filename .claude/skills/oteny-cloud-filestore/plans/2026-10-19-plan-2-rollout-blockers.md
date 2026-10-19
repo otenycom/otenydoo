@@ -308,13 +308,23 @@ team to check)
   `increment_version.py`, and `oteny_cloud_filestore` was not in it, so
   test3 kept version 19.0.1.0 and never created the cache table. Root fix
   (Radar dev team, 19-Oct-2026): the module joined that list and
-  `odoo.installModules`.
+  `odoo.installModules`. A second deploy still skipped it: when otenydoo
+  has its own `increment_version.py`, radar hands the generic modules to
+  that script, and its `GENERIC_MODULES` list is the one that counts
+  (radar's list is only the fallback). The module is now in both.
 
 **Open**
 - N1 (fixed after the build, 19-Oct-2026): `cloud_dump` exits 2 only for
   "module not installed" and "mode off"; a mode that is on without a usable
   store is exit 4, which the DR script logs as a failed step. The texts that
   said rsync runs as `bot` now say root (`cron.d/dr-sync`).
+- Checked on test3 (19-Oct-2026, clone mode, `dev/odoosh-test3/`, module
+  19.0.1.1 after the fixed deploy): the cache table and the three crons
+  exist; three bucket-only files read over JSON-2 match their SHA-1; each
+  first read left a marked cache row and the second read was faster (about
+  150 ms, then about 60 ms, both including the network round trip from the
+  laptop); `ir.logging` holds no ERROR row. Not checked: a browser download
+  and its `X-Cloud-Filestore` header.
 - The § 4 run on CUNEUS40 (the laptop could not reach it).
 - Read times in clone mode from `test3`: measured by the plan 1c session
   (about 243 ms per file); write them into `lab-results.md` before the limit

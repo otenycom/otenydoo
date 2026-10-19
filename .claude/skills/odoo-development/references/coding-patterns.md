@@ -180,6 +180,23 @@ def _check_number(self):
 
 Guard it with a test in the module that owns the base constraint: assert the method name is in `env[model]._constraint_methods` and compare its `_constrains` set. The test database installs every module, so the guard also catches an override in a module that sits higher in the tree. Real case: a client module overrode three `rivercreds.credential` checks without the decorator; for five months no credential of any type was checked for a number, expiry date or issuing country (the consuming business's skill bundle has the full record).
 
+### An `_order` needs a unique tie-breaker, and a queue loop sets its own order
+
+An `_order` on a field that is not unique (`create_date`, `date`, `sequence`, `name`) leaves the
+order of equal rows to PostgreSQL, and that order changes with the plan, a `LIMIT` (a bounded
+heap sort is not stable) and the load. Records that one transaction creates share their
+`create_date`, so `_order = "create_date desc"` alone puts them in any order. End every `_order`
+with `id` (`"create_date desc, id desc"`).
+
+A loop that consumes a queue (a cron that takes the next batch, a deadline loop) sets its own
+`order=` on the `search`, because the queue's order is a rule of the process and the model's
+`_order` is a choice for the list view. Take the oldest first (`order="id"`) unless the process
+says otherwise, so an old row never waits behind new ones when the batch has a `limit`.
+
+Found in radar (rivercreds `rivercreds.document.import.job`, 17-Oct-2026): the cron loops used
+`_order = "create_date desc"`, so a deadline test that expects the first job to be imported
+failed at random under the parallel test gate; the loops now search with `order="id"`.
+
 ## Compute Method Patterns
 
 ### registry.loaded Guard and Migration Pattern

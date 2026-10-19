@@ -23,6 +23,7 @@ When creating a new migration **on `dev`**, set the folder name to the module's 
 | `crewradar_cuneus_sign` | `19.0.5.x` | dev / main (mainline; `feature/work-permit-v2` merged its 5.x here) |
 | `crewradar_cuneus_sign` | `19.0.6.x` | dev / main (mainline — the `barney` branch merged and was deleted on 2026-08-20, so its minor folded in; `dev`'s manifest continues from `19.0.6.x`) |
 | `crewradar` | `19.0.10.x` | dev / main (mainline — same fold; claimed by `barney` on 2026-08-11 for the ship-contact-type split, retired 2026-08-25) |
+| `crewradar` | `19.0.11.x` | dev / main (mainline — claimed by `feature/airfare-segments` on 2026-10-06 for airfare per vacation scheme segment; the branch merged into dev, so its minor folded in; dev's manifest continues from `19.0.11.x`) |
 
 Allocation is **per module** — the same number in another module is unrelated (`crewradar` has had `19.0.6.x` folders since long before barney claimed `crewradar_cuneus_sign` 6.x). Only claim a minor in a module you actually add migrations to. When a branch merges and dies, its minor folds into mainline and the row retires; dev's manifest continues from that minor.
 

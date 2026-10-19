@@ -155,6 +155,12 @@ under_root = f"{root.id}/" in record.parent_path
 
 In a search, `("id", "child_of", root.id)` does the same and is the safer choice.
 
+### Several extensions of one model in one module: the one loaded last runs first
+
+When two files of one module both `_inherit` the same model and override the same method, the class that `models/__init__.py` imports **last** is the first one in the MRO (`odoo/orm/model_classes.py`). Its `super()` call runs the other override. So when override B must see what override A wrote, import B's file after A's and write a comment there, as nothing else shows that the order matters.
+
+Example (crewradar 19.0.11.1): `crewradar_log_entry_vacation` and `crewradar_log_entry_airfare` both extend `crewradar.log.entry._compute_check_result_ids_impl`. The vacation override rebuilds the vacation scheme segments; the airfare chain reads them. With the airfare file imported first, the chain ran before the segments were rebuilt. The airfare import now comes after the vacation import, and the airfare override calls `super()` before its chain.
+
 ### Overriding an `@api.constrains` method: repeat the decorator
 
 An override of a constraint method **must repeat `@api.constrains` with the full field list** of the base method. Odoo 19 builds `_constraint_methods` from the final class attribute only (`odoo/orm/models.py` `_constraint_methods`: `getmembers(cls, ...)` keeps a member only if it has `_constrains`). An undecorated override therefore hides the base constraint for **every** record of the model, not only for the records the override meant to relax — and nothing warns.

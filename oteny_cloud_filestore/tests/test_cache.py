@@ -213,8 +213,8 @@ class TestCloudFilestoreCache(CloudFilestoreReadMixin, TransactionCase):
         self.cache._cloud_filestore_cache_mark(name, 5)  # uncommitted insert in the test transaction
         write = ir_attachment_module.IrAttachment._cloud_filestore_cache_in_own_transaction
         started = time.monotonic()
-        # Odoo logs the cancelled statement itself ("bad query").
-        with self.assertLogs("odoo.sql_db", "ERROR"), self.assertLogs(LOGGER, "WARNING") as logs:
+        # Only the module's warning: Odoo's own "bad query" ERROR is switched off for this write.
+        with self.assertNoLogs("odoo.sql_db", "ERROR"), self.assertLogs(LOGGER, "WARNING") as logs:
             self.assertFalse(write(self.env["ir.attachment"], "_cloud_filestore_cache_mark", name, 5))
         self.assertLess(time.monotonic() - started, 10)
         self.assertIn("lock timeout", logs.output[0])

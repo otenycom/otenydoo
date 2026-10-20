@@ -293,9 +293,11 @@ all of these are true (Ries, review of 19-Oct-2026):
 - The line `server_wide_modules = base,rpc,web,oteny_cloud_filestore` is in
   the same file (see Setup, step 7), and the start command of production is
   checked (below).
-- The DR copy and the read cache of plan 2 are deployed, and one night of
-  the standby on CUNEUS40 has run with them (the § 4 check of
-  [plan 2](plans/2026-10-19-plan-2-rollout-blockers.md)).
+- The DR copy and the read cache of plan 2 are deployed, and the new DR
+  script runs on CUNEUS40. Revised 20-Oct-2026 (Thijs, Ries to agree,
+  [plan 3](plans/2026-10-20-plan-3-go-live.md) Q1): the first CUNEUS40 night
+  with a real copy holds back the first lowering of `cache_limit_mb`, not
+  the write key, because at 10 GB production keeps every file local.
 - `cache_limit_mb` is set to `10240` (10 GB, above the 6 GB filestore), so
   production keeps every file local while the bucket fills (Q3). The code
   default of 100 would remove almost every local copy within hours. The
@@ -374,9 +376,10 @@ module" warning after the restart.
 - The 5-minute protection of eviction reads `last_read`, which each worker
   writes at most once a minute. A running download keeps its open file, so
   only a request between the existence check and the open can fail.
-- When the 1 s `lock_timeout` of a cache write hits, Odoo also logs the
-  cancelled statement as an `odoo.sql_db` ERROR ("bad query"); the counts of
-  that minute are dropped.
+- When the 1 s `lock_timeout` of a cache write in the read path hits, the
+  write is dropped (the counts of that minute, or a fill mark, whose copy is
+  then removed) and the module logs a warning; Odoo's own "bad query" ERROR
+  is switched off for these writes.
 - `oteny_cloud_filestore` is a first-party module of Radar (19-Oct-2026): it
   is in `GENERIC_MODULES` of otenydoo `increment_version.py` (the list a
   deploy uses for the generic modules), in the fallback list of radar
@@ -462,6 +465,12 @@ the review text: [plan 2](plans/2026-10-19-plan-2-rollout-blockers.md).
   script, then the standby with internet off opens a sample of 50 files.
 - [ ] Deploy order: production installs the module (with `-u`) before the
   new `dr_sync.py` goes to CUNEUS40; check the rsync exit codes first.
+
+### Plan 3: go live (Wednesday 21-Oct-2026, night)
+
+- [ ] [Plan 3](plans/2026-10-20-plan-3-go-live.md): merge, test1, install on
+  production at 10 GB, first push overnight, CUNEUS40 copy night, then the
+  limit in steps.
 
 ### Other open items
 

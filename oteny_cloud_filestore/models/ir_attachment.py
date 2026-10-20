@@ -680,7 +680,8 @@ class IrAttachment(models.Model):
         try:
             with self.env.registry.cursor() as cr:
                 cr.execute("SET LOCAL lock_timeout TO '1s'")
-                getattr(api.Environment(cr, SUPERUSER_ID, {})["oteny.cloud.filestore.cache"], method)(*args)
+                env = api.Environment(cr, SUPERUSER_ID, {"cloud_filestore_quiet_sql": True})
+                getattr(env["oteny.cloud.filestore.cache"], method)(*args)
         except Exception as error:  # noqa: BLE001
             _logger.warning("Cloud filestore: cache write %s dropped: %s", method, error)
             return False

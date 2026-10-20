@@ -66,6 +66,19 @@ class CloudFilestoreCache(models.Model):
     _name_unique = models.Constraint("UNIQUE(name)", "A file name has only one cache row.")
 
     @api.model
+    def _cloud_filestore_cache_execute(self, query, params):
+        """Run a cache write; quiet in the read path's own transaction.
+
+        There a lock timeout of one second drops the write on purpose (a hint
+        that waits on the request's own lock), and the caller logs a warning.
+        Odoo would also log the cancelled statement as an `odoo.sql_db` ERROR,
+        which reads like a fault in the server log, so that log is switched off
+        there. Everywhere else Odoo logs as usual.
+        """
+        quiet = self.env.context.get("cloud_filestore_quiet_sql", False)
+        self.env.cr.execute(query, params, log_exceptions=not quiet)
+
+    @api.model
     def _cloud_filestore_cache_mark(self, fname, size):
         """Set the "in bucket" mark: the bucket confirmed the file, the local copy stays as a cache copy.
 
@@ -81,7 +94,7 @@ class CloudFilestoreCache(models.Model):
             return
         now = fields.Datetime.now()
         self.flush_model()
-        self.env.cr.execute(
+        self._cloud_filestore_cache_execute(
             f"""
             INSERT INTO {self._table} AS cache
                 (name, size, reads, reads_date, last_read, in_bucket,
@@ -113,7 +126,7 @@ class CloudFilestoreCache(models.Model):
         now = fields.Datetime.now()
         names, reads = zip(*counts.items())
         self.flush_model()
-        self.env.cr.execute(
+        self._cloud_filestore_cache_execute(
             f"""
             UPDATE {self._table} AS cache SET
                 reads = {FADED_READS} + counted.reads,
@@ -134,7 +147,7 @@ class CloudFilestoreCache(models.Model):
         """Clear the "in bucket" mark: these local files must stay, they are no cache copies (any more)."""
         self.flush_model()
         for batch in split_every(self.env.cr.IN_MAX, names):
-            self.env.cr.execute(
+            self._cloud_filestore_cache_execute(
                 f"UPDATE {self._table} SET in_bucket = FALSE, write_uid = %s, write_date = %s"
                 " WHERE name IN %s AND in_bucket",
                 [self.env.uid, fields.Datetime.now(), tuple(batch)],

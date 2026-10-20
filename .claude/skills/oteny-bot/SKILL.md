@@ -104,6 +104,7 @@ free state. The only honest release is the occupant's existing exit.
 |---|---|
 | `oteny.bot` | Bot row, Discuss home channel, dance latch |
 | `mint_uplink_key` | An administrator's `/json/2/` mint of the bot user's uplink key, so an odoo.sh database needs no Odoo shell: [pilot-bot-commissioning.md](references/pilot-bot-commissioning.md#mint-the-uplink-key-over-json2-no-odoo-shell) |
+| `bind_discuss_channel` | Moves the Discuss channel onto the bot row for a new uplink ref. With riverflow installed, a bind on a neutralized database also arms riverflow's two bot crons and answers `bot_crons_armed`: [riverflow](../riverflow/SKILL.md) "The bot crons on a neutralized copy" |
 | `oteny.bot.session` | One exchange + outcome. `origin_ref` is the clickable origin. `browser_status` is not the slot. |
 | `oteny.bot.turn` | Per-LLM-call detail |
 | `login_dance_until` / `login_dance_user_id` / `login_dance_token` | TTL latch. Never show the token. |

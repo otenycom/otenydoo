@@ -122,6 +122,14 @@ directly, as an admin:
 Add the pilot's partner and a human operator's partner to that channel.
 Do not add either to an existing bot's channel.
 
+A row created this way is not bound, so on a neutralized database it does
+not arm riverflow's bot crons, which a bind does
+([riverflow](../../riverflow/SKILL.md), "The bot crons on a neutralized
+copy"). If the pilot works riverflow records there, switch on
+`riverflow.ir_cron_bot_dispatch_queue` and
+`riverflow.ir_cron_bot_reap_timeouts` by hand (`ir.cron/write`,
+`active=True`, over `/json/2/` as an admin).
+
 ## 5. Confirm Discuss allow-all is on the box
 
 Path B reuse can deliver the key without writing

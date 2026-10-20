@@ -17,6 +17,7 @@ from . import test_workflow_icons
 from . import test_bot_one_live_slot
 from . import test_transition_buttons_bot_hide
 from . import test_bot_execute
+from . import test_bot_crons_armed_on_bind
 from . import test_service_hooks
 from . import test_work_contract
 from . import test_team_channel_copy

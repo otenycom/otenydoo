@@ -12,8 +12,8 @@ from odoo.addons.oteny_bot.models.oteny_bot import (
     VERBOSE_SENTINEL,
     WORK_HEADER_FMT,
 )
-from odoo.exceptions import UserError
-from odoo.tests import TransactionCase, tagged
+from odoo.exceptions import AccessError, UserError
+from odoo.tests import TransactionCase, new_test_user, tagged
 from odoo.tools import mute_logger
 
 
@@ -148,6 +148,38 @@ class TestOtenyBot(TransactionCase):
         self.assertTrue(res["ok"])
         bot = self.env["oteny.bot"].browse(res["bot_id"])
         self.assertEqual(bot.discuss_channel_id, channel)
+
+    def test_mint_uplink_key_rotates_the_bot_users_key_for_an_administrator_only(self):
+        # Provisioning over /json/2/ (no SSH to odoo.sh): an administrator's key mints the
+        # bot's uplink key. The key must authenticate AS the bot user, a re-run must rotate
+        # it, and nobody but an administrator may mint one.
+        Key = self.env["res.users.apikeys"]
+        bot_user = new_test_user(self.env, login="mint.bot", groups="base.group_user")
+        bot = self.env["oteny.bot"].create({"name": "Mint Bot", "bot_user_id": bot_user.id})
+        admin_bot = bot.with_user(self.env.ref("base.user_admin"))
+
+        first = admin_bot.mint_uplink_key("bot-uplink")
+        self.assertTrue(first["ok"])
+        self.assertEqual(first["db"], self.env.cr.dbname)
+        self.assertEqual(first["bot_user_id"], bot_user.id)
+        # a global key, so it passes the "rpc" scope that /json/2/ checks
+        self.assertEqual(Key._check_credentials(scope="rpc", key=first["key"]), bot_user.id)
+
+        second = admin_bot.mint_uplink_key("bot-uplink")
+        self.assertIsNone(Key._check_credentials(scope="rpc", key=first["key"]))
+        self.assertEqual(Key._check_credentials(scope="rpc", key=second["key"]), bot_user.id)
+        self.assertEqual(Key.sudo().search_count(
+            [("user_id", "=", bot_user.id), ("name", "=", "bot-uplink")]), 1)
+
+        clerk = new_test_user(self.env, login="mint.clerk", groups="base.group_user")
+        with self.assertRaises(AccessError):
+            bot.with_user(clerk).mint_uplink_key("bot-uplink")
+        # the refused call revoked nothing
+        self.assertEqual(Key._check_credentials(scope="rpc", key=second["key"]), bot_user.id)
+
+        userless = self.env["oteny.bot"].create({"name": "No User Bot"})
+        with self.assertRaises(UserError):
+            userless.with_user(self.env.ref("base.user_admin")).mint_uplink_key("bot-uplink")
 
     # --- the Discuss-flag dispatch (the trigger that replaces the harness poll) --- #
 

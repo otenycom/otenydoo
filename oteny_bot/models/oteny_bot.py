@@ -13,7 +13,7 @@ import mistune
 from psycopg2 import IntegrityError
 
 from odoo import SUPERUSER_ID, _, Command, api, fields, models
-from odoo.exceptions import UserError
+from odoo.exceptions import AccessError, UserError
 from odoo.tools import html_sanitize
 
 # Renders a session's markdown ``response``/``request`` for display, the same way the
@@ -747,6 +747,43 @@ class OtenyBot(models.Model):
             bot.bot_user_id = self.env.uid
         bot.discuss_channel_id = channel
         return {"ok": True, "bot_id": bot.id, "channel_id": channel.id}
+
+    def mint_uplink_key(self, key_name):
+        """Rotate the bot user's ``/json/2/`` key and return the plaintext, once.
+
+        Provisioning a bot hands it this key as its uplink credential. Odoo has no RPC way for
+        an administrator to make a key for ANOTHER user: ``res.users.apikeys.make_key`` sits
+        behind ``check_identity`` (an interactive password prompt), and ``generate`` only renews
+        the caller's own key. So the mint needed an ``odoo-bin shell`` on the server, which on
+        odoo.sh means SSH from an IP somebody whitelisted by hand. This method lets an
+        administrator's ``/json/2/`` key do it over HTTPS instead.
+
+        Only a system administrator may call it, and only for the user this bot record names
+        (``bot_user_id``), never for a login passed as an argument. The previous key of the
+        same name is revoked first, so a re-run rotates instead of piling up keys; a bot still
+        running on the old key loses its uplink until it is given the new one. The key is
+        global (scope None, which ``/json/2/`` requires) and never expires. Odoo stores only
+        its hash, so the return value is the one moment the plaintext exists: the caller must
+        not log it. Returns ``{ok, key, db, bot_user_id}``; ``db`` is the database the key
+        belongs to, which an odoo.sh caller cannot read any other way.
+        """
+        self.ensure_one()
+        if not self.env.is_system():
+            raise AccessError(_("Only an administrator can mint a bot's uplink key."))
+        if not self.bot_user_id:
+            raise UserError(_("Bot %s has no bot user to mint a key for.", self.name))
+        Key = self.env["res.users.apikeys"]
+        Key.sudo().search(
+            [("user_id", "=", self.bot_user_id.id), ("name", "=", key_name)])._remove()
+        # with_user() clears superuser mode, so sudo() goes LAST: only a superuser environment
+        # may create a key without an expiration date (_check_expiration_date).
+        key = Key.with_user(self.bot_user_id).sudo()._generate(None, key_name, None)
+        return {
+            "ok": True,
+            "key": key,
+            "db": self.env.cr.dbname,
+            "bot_user_id": self.bot_user_id.id,
+        }
 
     # --- channel admission: which rooms this bot may serve (the D248 two lanes) ---------- #
 

@@ -56,9 +56,41 @@ In the target database's Odoo shell (commit after each write):
 2. Mint the key: `Key.with_user(pilot).sudo()._generate(None,
    '<pilot_login>-uplink', None)`. Scope `None` (global), no expiry.
    Write the plaintext to a 0600 file. Never echo it.
+   Without an Odoo shell, mint it over `/json/2/` instead (next section).
 3. Probe the key with `POST /json/2/res.users/search_read` against the
    box. Expect HTTP 200 and the pilot's login back. A 401 means the
    mint failed or you hit the wrong database — fix this before step 3.
+
+### Mint the uplink key over `/json/2/` (no Odoo shell)
+
+An odoo.sh database has no Odoo shell without SSH, and SSH to an odoo.sh
+build works only from an IP somebody whitelisted by hand. Odoo itself has
+no RPC way for an administrator to make a key for another user:
+`res.users.apikeys.make_key` asks for the caller's password
+(`check_identity`), and `res.users.apikeys.generate` only renews the
+caller's own key.
+
+`oteny.bot.mint_uplink_key(key_name)` closes that gap. It is a record
+method: call `POST /json/2/oteny.bot/mint_uplink_key` with
+`{"ids": [<bot id>], "key_name": "<pilot_login>-uplink"}` and an
+administrator's bearer key.
+
+- It mints for the record's `bot_user_id` only, never for a login passed
+  as an argument. So create the `oteny.bot` row of step 4 first.
+- Only a system administrator may call it (`env.is_system()`); any other
+  caller gets an `AccessError`.
+- It revokes the bot user's earlier key of the same name first, so a
+  re-run rotates the key. A box that still holds the old key loses its
+  uplink until it gets the new one.
+- The key is global (scope `None`) and never expires, the same as the
+  shell mint above.
+- It returns `{ok, key, db, bot_user_id}`. `db` is the database name, which
+  an odoo.sh caller cannot read any other way. Odoo stores only the key's
+  hash, so this answer is the only copy of the plaintext: write it to a
+  0600 file and never print or log it.
+
+Proof: `oteny_bot/tests/test_oteny_bot.py`,
+`test_mint_uplink_key_rotates_the_bot_users_key_for_an_administrator_only`.
 
 ## 3. Deliver the key onto the box (Path B reuse)
 

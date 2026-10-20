@@ -103,6 +103,7 @@ free state. The only honest release is the occupant's existing exit.
 | Piece | Owns |
 |---|---|
 | `oteny.bot` | Bot row, Discuss home channel, dance latch |
+| `mint_uplink_key` | An administrator's `/json/2/` mint of the bot user's uplink key, so an odoo.sh database needs no Odoo shell: [pilot-bot-commissioning.md](references/pilot-bot-commissioning.md#mint-the-uplink-key-over-json2-no-odoo-shell) |
 | `oteny.bot.session` | One exchange + outcome. `origin_ref` is the clickable origin. `browser_status` is not the slot. |
 | `oteny.bot.turn` | Per-LLM-call detail |
 | `login_dance_until` / `login_dance_user_id` / `login_dance_token` | TTL latch. Never show the token. |
@@ -310,7 +311,7 @@ The riverflow door is
 
 | Tag | File |
 |---|---|
-| `oteny_bot` | `oteny_bot/tests/test_oteny_bot.py` — dance active, force-clear, stale `login_dance_stop` no-op, manager-only, `test_oteny_bots_app_uses_brand_icon` |
+| `oteny_bot` | `oteny_bot/tests/test_oteny_bot.py` — dance active, force-clear, stale `login_dance_stop` no-op, manager-only, `test_oteny_bots_app_uses_brand_icon`, `test_mint_uplink_key_rotates_the_bot_users_key_for_an_administrator_only` |
 | `test_form_session` | `oteny_bot/tests/test_form_session_partner.py` — Contacts list/form/set/save/refuse/edit/delete. Does not import `Form`. |
 | `test_bot_one_live_slot` | `riverflow/tests/test_bot_one_live_slot.py` — occupant-of-workflow, SLA-less park is not occupant |
 | `test_oteny_bot_live_slot_ui` | `crewradar_cuneus_sign/tests/test_oteny_bot_live_slot_ui.py` — idle / live / Relogin / Register Login / leftover park / dance / unknown / non-Barney |

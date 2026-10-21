@@ -1,3 +1,4 @@
+from . import test_alert_channel
 from . import test_cache
 from . import test_cloud_copy
 from . import test_cloud_store_errors

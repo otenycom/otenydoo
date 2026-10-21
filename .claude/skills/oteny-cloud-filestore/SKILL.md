@@ -59,11 +59,22 @@ production save keeps the file local.
    `cache_limit_mb` (the size limit of the read cache, default `100`; `0`
    turns the cache off; see Rollout Condition for the first production
    value) and `alert_channel_id` (the id of the `discuss.channel` for
-   outage messages).
+   outage messages; the install fills it, see step 5).
    `outage_since` and `not_server_wide_alerted` are internal state: do not
    edit them.
-5. Set `alert_channel_id`. The Discuss alert needs it. Without it, an outage
-   shows only in the log.
+5. Check `alert_channel_id`. The Discuss alert needs it. Without it, an
+   outage shows only in the log. On the install in a new database, the module
+   creates the channel "Cloud filestore alerts" with a welcome message and
+   points `alert_channel_id` at it (`data/discuss_channel.xml`, `noupdate`).
+   Nobody joins the channel automatically: the admins who act on an outage
+   join it themselves (Radar dev team, 21-Oct-2026). Set the parameter only
+   to send the alerts to another channel. A database where the module was
+   installed before this file (test3) has no channel until a version bump of
+   the module runs `-u`; the Radar dev team chose no migration for it. That
+   `-u` then also creates the parameter row, and it fails on the unique key
+   when an admin set `alert_channel_id` by hand before. Delete that row
+   before the update; the update creates it again for the new channel, and
+   the admin can point it back to their own channel afterwards.
 6. Put the write key in `odoo.conf` of the production server only:
    `cloud_filestore_write_access_key_id` and
    `cloud_filestore_write_secret_access_key`.
@@ -173,7 +184,7 @@ attachment (for example `ab/ab12...`).
 
 A save never fails and never loses the file. On a bucket error the file stays
 in the local filestore. The module posts one Discuss message in the channel
-`alert_channel_id` when the outage starts, and one when the bucket works
+`alert_channel_id` (by default the channel "Cloud filestore alerts") when the outage starts, and one when the bucket works
 again. Several workers at the same time still post once.
 
 A cron job, "Cloud filestore: upload local files to the bucket", runs every

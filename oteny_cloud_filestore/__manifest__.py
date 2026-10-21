@@ -13,6 +13,7 @@
     "data": [
         "security/ir.model.access.csv",
         "data/ir_config_parameter.xml",
+        "data/discuss_channel.xml",
         "data/ir_cron.xml",
         "views/cloud_filestore_cache_views.xml",
     ],

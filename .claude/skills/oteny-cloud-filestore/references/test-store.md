@@ -33,8 +33,15 @@ and tests only and stays small.
   `iam.disableServiceAccountKeyCreation`, which also blocks HMAC keys. A new
   key needs a short project-level exception: switch the policy off for the
   project, create the key, then remove the exception so the project inherits
-  the enforced policy again. Existing keys keep working. The production key
-  for `main/` needs the same step at the rollout.
+  the enforced policy again. Existing keys keep working. The first key
+  passed about 3 minutes after the exception was set.
+- **Production keys (21-Oct-2026):** `crewradar-filestore-main-write`
+  (`roles/storage.objectAdmin` on `main/` only) and
+  `crewradar-filestore-main-read` (`cloudFilestoreObjectGet` on `main/`
+  only), one HMAC key each, in 1Password vault Oteny as "CrewRadar cloud
+  filestore main write (GCS HMAC)" and "... main read (GCS HMAC)", with the
+  same fields as the dev items. All 11 live tests passed with them and
+  `key_prefix = main/`.
 - **Tools:** `gcloud` and `op` come from `nix shell nixpkgs#google-cloud-sdk`
   and `NIXPKGS_ALLOW_UNFREE=1 nix shell --impure nixpkgs#_1password-cli`;
   `op` needs the 1Password app setting "Integrate with 1Password CLI" and

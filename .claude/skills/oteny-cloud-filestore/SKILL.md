@@ -305,14 +305,13 @@ all of these are true (Ries, review of 19-Oct-2026):
   the same file (see Setup, step 7), and the start command of production is
   checked (below).
 - The DR copy and the read cache of plan 2 are deployed, and the new DR
-  script runs on CUNEUS40. Revised 20-Oct-2026 (Thijs, Ries to agree,
-  [plan 3](plans/2026-10-20-plan-3-go-live.md) Q1): the first CUNEUS40 night
-  with a real copy holds back the first lowering of `cache_limit_mb`, not
-  the write key, because at 10 GB production keeps every file local.
-- `cache_limit_mb` is set to `10240` (10 GB, above the 6 GB filestore), so
-  production keeps every file local while the bucket fills (Q3). The code
-  default of 100 would remove almost every local copy within hours. The
-  limit goes down in steps later, each after a look at the read times.
+  script is on CUNEUS40.
+- `cache_limit_mb` is set before `endpoint_url` and `bucket`, so the code
+  default of 100 never applies. Production went live on 21-Oct-2026 with
+  `256` (Thijs, Ries agrees; [plan 3](plans/2026-10-20-plan-3-go-live.md)
+  Q5) instead of the 10 GB first step of plan 2: the backups shrink at
+  once, and the bucket holds every file. Until the first CUNEUS40 night with
+  a real copy, the standby misses the files that left the local filestore.
 
 The Odoo.sh check of the `server_wide_modules` line is done (19-Oct-2026,
 `test3`, [plan 1c](plans/2026-10-19-plan-1c-odoosh-check.md)). The start
@@ -481,10 +480,10 @@ the review text: [plan 2](plans/2026-10-19-plan-2-rollout-blockers.md).
 1. [x] Chunked streaming of bucket downloads (D18), with the 404 before any
    header and a broken connection on a failure in the middle.
 2. [~] The DR copy (D16, D26, D27): `cloud_dump --into --seed` and the DR
-   night with three folders (radar `dr_sync.py`). Built; not yet run on
-   CUNEUS40 (the laptop could not reach it). Blocks the rollout.
+   night with three folders (radar `dr_sync.py`). Built; deployed on
+   CUNEUS40 on 21-Oct-2026, first night run 21-Oct-2026 22:00 UTC.
 3. [x] The read cache (D21): mark, write-through, fill on read, read counts,
-   eviction. First production limit 10240 MB (Rollout Condition).
+   eviction. Production limit 256 MB since 21-Oct-2026 (Rollout Condition).
 4. [x] Bucket deletes outside the garbage-collection lock (R13), in batches
    with `DeleteObjects` (accepted by Google, probe of 19-Oct-2026).
 - [x] N1: a missing store is exit 4 and fails the DR step; exit 2 ("skipped")

@@ -117,6 +117,7 @@ echo "print(env['res.company'].search([]).mapped('name'))" | \
 - **Read-only by default**: The auto-rollback makes shell safe for exploratory queries — nothing changes unless you explicitly commit.
 - **Omit tail/grep on first run**: Capture the full output to a file with `| tee`, then grep or tail the file separately. This avoids losing error context.
 - **Superuser context**: The shell runs as SUPERUSER_ID, so access rules don't apply. Keep this in mind when testing security-sensitive logic.
+- **A cached value needs a signal to reach the server**: the shell is its own process. A write that a cache holds, for example `ir.config_parameter.set_param`, clears only the shell's own cache, and the serving workers keep their copy until a restart. After `env.cr.commit()`, call `env.registry.signal_changes()` so that the workers drop it. A write over `/json/2/` needs no signal: the request ends in `retrying()` (`odoo/service/model.py`), which signals its cache changes itself. So on a hosted database where the shell needs SSH, an administrator's `/json/2/` key is the simpler way to set a parameter.
 - **No HTTP server running**: The `--no-http` flag means no web controllers or assets are available. The shell is purely ORM and database.
 - **Different database**: Change `-d crmain` to target another database (e.g., `-d cr-test`).
 - **`--shell-file` flag**: Only works in interactive (TTY) mode as a startup script for the REPL. Not useful for piped/automated execution.

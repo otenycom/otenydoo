@@ -136,6 +136,7 @@ Models with an `active` field need special handling because `active_test` contex
 - `crewradar.log.entry`
 - `crewradar.site`
 - `rivercreds.credential`
+- `rivercreds.plan.item`
 - `riverflow.auto.add.service`
 - `riverflow.service`
 - `riverflow.state.record`
@@ -156,6 +157,8 @@ entries = self.env['crewradar.log.entry'].search([
 # Good: filtered with active check
 active_entries = entries.filtered(lambda e: e.active)
 ```
+
+**Tombstone models retire rows instead of deleting them.** The models on `riverflow.tombstone.mixin` (`riverflow.check.result`, `rivercreds.plan.slot`, `rivercreds.plan.item`, `crewradar.plan.slot`, `crewradar.plan.item`, `crewradar.missing.timesheet`, `crewradar.timesheet.log.entry`, `crewradar.log.entry.vacation.scheme.segment`, and `riverflow.service` and `crewradar.log.entry`, where users also archive) set `to_be_deleted` and `active` False in a compute. Where `active_test=False` can reach the code, filter `("to_be_deleted", "=", False)`, or check `active` on a model without a user archive. See [Coding Patterns — Do Not Unlink Inside a Compute That a Read Can Trigger](references/coding-patterns.md#do-not-unlink-inside-a-compute-that-a-read-can-trigger).
 
 **This applies to One2many traversals too**: `self.log_entry_ids.filtered(...)` must include `e.active` in the lambda. The Odoo UI sets `active_test=False` on certain write operations, which cascades into compute methods. Without the explicit check, archived records appear in One2many fields and can pollute computed results with stale data.
 

@@ -196,6 +196,23 @@ def _check_number(self):
 
 Guard it with a test in the module that owns the base constraint: assert the method name is in `env[model]._constraint_methods` and compare its `_constrains` set. The test database installs every module, so the guard also catches an override in a module that sits higher in the tree. Real case: a client module overrode three `rivercreds.credential` checks without the decorator; for five months no credential of any type was checked for a number, expiry date or issuing country (the consuming business's skill bundle has the full record).
 
+### An `_order` needs a unique tie-breaker, and a queue loop sets its own order
+
+An `_order` on a field that is not unique (`create_date`, `date`, `sequence`, `name`) leaves the
+order of equal rows to PostgreSQL, and that order changes with the plan, a `LIMIT` (a bounded
+heap sort is not stable) and the load. Records that one transaction creates share their
+`create_date`, so `_order = "create_date desc"` alone puts them in any order. End every `_order`
+with `id` (`"create_date desc, id desc"`).
+
+A loop that consumes a queue (a cron that takes the next batch, a deadline loop) sets its own
+`order=` on the `search`, because the queue's order is a rule of the process and the model's
+`_order` is a choice for the list view. Take the oldest first (`order="id"`) unless the process
+says otherwise, so an old row never waits behind new ones when the batch has a `limit`.
+
+Found in radar (rivercreds `rivercreds.document.import.job`, 17-Oct-2026): the cron loops used
+`_order = "create_date desc"`, so a deadline test that expects the first job to be imported
+failed at random under the parallel test gate; the loops now search with `order="id"`.
+
 ## Compute Method Patterns
 
 ### registry.loaded Guard and Migration Pattern
@@ -723,6 +740,21 @@ A `store=False` Boolean in a form (a filter toggle above a list) belongs to the 
 - **Pick a widget that runs the onchange.** `boolean_toggle` autosaves by default: it calls `record.update(changes, {save: true})`, which Odoo turns into `withoutOnchange: true` plus an immediate save, so the `@api.onchange` never runs and the preference is never stored (the list still refreshes, because the save re-reads the compute, which is why nobody noticed). `selection_badge` and `radio` call `record.update()` without save, so the onchange runs. Found on 2026-09-14 after the toggle version had been live for four days with nothing stored.
 
 Real example (historical, crewradar 19.0.10.67 to 19.0.10.68; the control was retired in 19.0.10.69 in favour of oteny_shortcut Forms shortcuts, which keep no per-user memory at all — the pattern below stays valid for a preference that must be remembered): the Services tab **Show** control (`crewradar.service.filter.mixin.service_filter`, a required non-stored Selection with the `selection_badge` widget; first shipped as a `boolean_toggle` in 19.0.10.57, where the memory never fired) — documented in full in the consuming business's own skill bundle, § Services Tab Filters. Since 19.0.10.68 the control uses `crewradar_service_filter`, a subclass of the badge widget: `record.update()` also marks the record dirty, and a view preference must not show the save / discard buttons, so on a clean record the widget stores the choice with an ORM call (`set_service_filter`) and calls `record.load()`; the non-stored field re-reads its default, which reads the stored choice, and the record stays clean. On a dirty or new record it keeps `record.update()`, because a reload discards unsaved edits.
+
+### Depend on records that a compute creates through their parent's One2many
+
+When a compute creates child records (a plan row whose `_compute_item_ids` creates its
+items), a dependent on another model that reaches those children through a different
+inverse path (a log entry's `credential_plan_item_ids`, inverse of the item's stored related
+`log_entry_id`) is not marked: the children did not exist when the parent was marked, and
+their creation inside the compute does not reach the other path. Depend through the parent
+instead (`credential_plan_slot_ids.item_ids`, `credential_plan_slot_ids.item_ids.status`):
+a change that marks the parent's compute marks this dependent in the same step, and its
+compute then reads the fresh children. Real case: the log entry's
+`credential_auto_add_trigger` (crewradar_creds, 19-Oct-2026) never ran after an extension of
+the placement until its depends went through the rows. In a test, read the parent's field
+(the row's `item_ids`) before the dependent, as the end of a request computes them in that
+order.
 
 ### A dotted `@api.depends` cannot cross a non-stored, search-based One2many
 
@@ -1495,6 +1527,17 @@ def _compute_some_type_whitelist(self):
 ```
 
 The widget (`web/…/fields/selection/filterable_selection_field.js`) shows only options whose value is in `record.data[whitelist_fname]`, **always keeping the currently-stored value** even if outside the whitelist (so existing data never disappears). It also accepts `whitelisted_values` / `blacklisted_values` (static arrays) instead of a field name. Because a whitelist can only narrow the visible options — never enforce them at other entry points — pair it with a runtime guard where the value is consumed (e.g. an `@api.constrains`, or a client-side check before acting on it). Real example: `oteny_shortcut` scopes `ir.filters.shortcut_view_type` to the view types a filter's model actually has.
+
+## Comments and Formatting
+
+- **Write comments for the next reader of the business logic.** The reader codes at a
+  professional level; the comment says the purpose of the code and why it is as it is
+  (the business reason, the consideration, the trap it avoids). Do not narrate what the
+  code does, unless the code is complex or uses a trick.
+- **Keep existing comments**, unless they are no longer true. When you refactor, update
+  the comments that describe the changed code.
+- **Keep existing indentation and line breaks.** Python is formatted with Black; do not
+  reformat code you did not change.
 
 ## Date and Time
 

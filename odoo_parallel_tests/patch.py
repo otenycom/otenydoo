@@ -20,7 +20,7 @@ import sys
 import tempfile
 import time
 
-from . import config
+from . import config, tasks
 from .discovery import class_key, get_test_class_key, group_tests_by_class, order_classes_longest_first
 from .queue import claim_next, create_queue
 
@@ -191,6 +191,7 @@ def _parallel_run(suite, global_report):
     if actual_workers < worker_count:
         _logger.info("Using %d workers (fewer classes than requested)", actual_workers)
     actual_workers = fit_workers(db_name, actual_workers)
+    actual_workers = tasks.fit_workers(actual_workers)
 
     tmpdir = tempfile.mkdtemp(prefix="odoo_parallel_tests_")
     queue_dir = create_queue(tmpdir, [class_key(cls) for cls, _tests in ordered])

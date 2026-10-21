@@ -43,6 +43,14 @@ class TestOtenyArticleTree(TransactionCase):
         article.sudo().unlink()
         self.assertFalse(article.exists())
 
+    def test_article_has_no_chatter(self):
+        """An article is a document, not a conversation: the model keeps no
+        messages or followers, and the form shows no chatter."""
+        Article = self.env["oteny.article"]
+        self.assertNotIn("message_ids", Article._fields)
+        self.assertNotIn("message_follower_ids", Article._fields)
+        self.assertNotIn("<chatter", Article.get_view(view_type="form")["arch"])
+
 
 @tagged("oteny_article", "post_install", "-at_install")
 class TestOtenyArticleKnowledgeLinks(HttpCase):

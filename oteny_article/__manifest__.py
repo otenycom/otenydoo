@@ -1,6 +1,6 @@
 {
     "name": "Oteny Articles",
-    "version": "19.0.1.4",
+    "version": "19.0.1.5",
     "summary": "A small tree of HTML articles: prompts, rules and synced skills, without the Enterprise Knowledge app.",
     "description": """
 A plain article model for Odoo Community: a name, an emoji, an HTML body and a
@@ -12,7 +12,7 @@ read-only. Replaces knowledge.article for radar (community plan, D6).
     "website": "https://oteny.com",
     "license": "LGPL-3",
     "category": "Productivity",
-    "depends": ["base", "mail", "html_editor"],
+    "depends": ["base", "html_editor"],
     "data": [
         "security/ir.model.access.csv",
         "views/oteny_article_views.xml",

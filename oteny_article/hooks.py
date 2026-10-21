@@ -9,7 +9,10 @@ everything that points at an article by model name follows:
 - the xmlids of the modules that ship articles, so their data files load
   onto the copies instead of creating new rows; Knowledge's own gallery
   templates (module "knowledge", is_template) are not copied;
-- the chatter, the followers and the attachments (images in article bodies).
+- the attachments (images in article bodies).
+
+An article has no chatter, so the messages, followers and activities of the
+Knowledge articles stay behind; the uninstall of Knowledge deletes them.
 
 Many2one fields to knowledge.article (for example the parsing prompt of a
 credential type) keep their values: the ids are the same, and the upgrade of
@@ -76,15 +79,9 @@ def post_init_hook(env):
         """
     )
     xmlids = cr.rowcount
-    for table, column in (
-        ("mail_message", "model"),
-        ("mail_followers", "res_model"),
-        ("ir_attachment", "res_model"),
-        ("mail_activity", "res_model"),
-    ):
-        cr.execute(
-            f"UPDATE {table} SET {column} = 'oteny.article' WHERE {column} = 'knowledge.article'"
-        )
+    cr.execute(
+        "UPDATE ir_attachment SET res_model = 'oteny.article' WHERE res_model = 'knowledge.article'"
+    )
 
     # parent_path and the root article are stored computed values; the SQL
     # copy left them empty.

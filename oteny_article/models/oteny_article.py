@@ -13,11 +13,11 @@ class OtenyArticle(models.Model):
 
     _name = "oteny.article"
     _description = "Article"
-    _inherit = ["mail.thread", "html.field.history.mixin"]
+    _inherit = ["html.field.history.mixin"]
     _parent_store = True
     _order = "sequence, id"
 
-    name = fields.Char(required=True, tracking=True)
+    name = fields.Char(required=True)
     icon = fields.Char(string="Emoji")
     body = fields.Html(prefetch=False)
     active = fields.Boolean(default=True)

@@ -432,7 +432,13 @@ class KnowledgeSync(models.AbstractModel):
             record.write(changed)
 
     def _ensure_root_article(self, label, skills_dir, processed_paths, link_map):
-        """Find or create the root ``<Label> Skills`` article of one root."""
+        """Find or create the root article of one root.
+
+        The title is the first heading of the root's ``SKILL.MD``, as for every
+        other article; ``<label> Skills`` only when the index has none. The label
+        is a folder name ("user" on odoo.sh) and stays the tree's key
+        (``x_skill_root``), so a new title renames the root in place.
+        """
         Article = self.env["oteny.article"]
         root_name = f"{label} Skills"
         root_article = Article.search(
@@ -445,6 +451,7 @@ class KnowledgeSync(models.AbstractModel):
         if skill_md.exists():
             parsed = markdown_utils.parse_skill_file(skill_md)
             file_path = str(skill_md.relative_to(skills_dir.parent))
+            root_name = parsed["heading"] or root_name
             if not parsed["sync_to_knowledge"]:
                 _logger.info("Ignoring sync_to_knowledge=false on %s; the root index always syncs", file_path)
             processed_paths.add(file_path)

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+    <!-- The channel for the outage alerts. Nobody joins it automatically: the
+         admins who must act on an outage join it themselves. -->
+    <record id="channel_alerts" model="discuss.channel">
+        <field name="name">Cloud filestore alerts</field>
+        <field name="description">Alerts when the cloud filestore bucket stops working or works again.</field>
+    </record>
+
+    <record id="channel_alerts_welcome" model="mail.message">
+        <field name="model">discuss.channel</field>
+        <field name="res_id" ref="channel_alerts"/>
+        <field name="message_type">comment</field>
+        <field name="subtype_id" ref="mail.mt_comment"/>
+        <field name="body"><![CDATA[<p>This channel gets the alerts of the cloud filestore.</p>
+<p>You get one message when the file bucket stops working and one when it works again.
+During an outage, new files stay in the local filestore and nobody loses work.
+The catch-up job uploads them later.</p>
+<p>You also get a message when the module is not loaded as a server-wide module.</p>
+<p>To send the alerts to another channel, set the system parameter
+<code>oteny_cloud_filestore.alert_channel_id</code>.</p>]]></field>
+    </record>
+
+    <!-- Point the alerts at the channel. Noupdate keeps a channel that an admin
+         chose later. -->
+    <record id="param_alert_channel_id" model="ir.config_parameter">
+        <field name="key">oteny_cloud_filestore.alert_channel_id</field>
+        <field name="value" eval="str(ref('channel_alerts'))"/>
+    </record>
+</odoo>

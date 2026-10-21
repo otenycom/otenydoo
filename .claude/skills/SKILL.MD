@@ -12,6 +12,7 @@
 | [odoo-development](odoo-development/SKILL.md) | The Odoo 19 craft: module structure, coding patterns, XML, SCSS, tests, migrations, the parallel test runner. |
 | [oteny-shortcut](oteny-shortcut/SKILL.md) | Shortcuts and filters on any model's views. |
 | [oteny-audit](oteny-audit/SKILL.md) | The audit trail model and mixin. |
+| [oteny-cloud-filestore](oteny-cloud-filestore/SKILL.md) | File contents in an S3 bucket: production writes, a clone reads, the outage fallback, the setup. |
 | [oteny-bot](oteny-bot/SKILL.md) | The bridge to an Oteny business bot: channel, activity log, form session, the work contract. |
 | [riverflow](riverflow/SKILL.md) | The workflow engine: services, states, transitions, bot dispatch. |
 | [oteny-knowledge-sync](oteny-knowledge-sync/SKILL.md) | Publishes this tree (and a consuming business's own) into Odoo Knowledge: sync process, link resolution across roots, image embedding, troubleshooting. |

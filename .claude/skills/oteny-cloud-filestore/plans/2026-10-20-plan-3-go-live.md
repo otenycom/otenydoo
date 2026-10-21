@@ -1,7 +1,9 @@
 # Cloud Filestore Plan 3 — Go live on production (Wednesday 21-Oct-2026, night)
 
-> Status: AGREED (20-Oct-2026, Thijs; Q1 changes Ries's rollout condition and
-> needs his OK). Nothing in this plan has run yet. Answers in § 6.
+> Status: LIVE (21-Oct-2026, about 18:30 UTC). All tasks of §§ 3-4 are done (§ 7);
+> R1-R4 remain. Q5 (21-Oct-2026,
+> Thijs, Ries agrees) replaces the first limit of 10240 with 256 MB on the
+> go-live night, and Q6 moves T3 and T5 (§ 6). Answers in § 6.
 > Builds on: [plan 2](2026-10-19-plan-2-rollout-blockers.md) (built, on test3),
 > the Rollout Condition and Setup in [SKILL.md](../SKILL.md).
 
@@ -57,7 +59,7 @@ lowered later (§ 5).
 | W2 | Start of the evening window: `test1-to-main` (production gets the code; the module is still not installed), then wait for the build (§ 6 Q2) | Thijs runs it, Claude watches | production green after the build |
 | W2b | Make the private Discuss channel "Cloud Filestore" with the Radar dev team as members; its id goes into `alert_channel_id` (§ 6 Q3) | Thijs | channel exists |
 | W3 | Evening, start of the go-live: install `oteny_cloud_filestore` on production (Apps, update the module list, install). Without bucket settings it is in mode off, so nothing changes. | Thijs | module installed |
-| W4 | System parameters on production: `endpoint_url`, `region` (`auto`), `bucket`, `addressing_style` (`path`), `key_prefix` (`main/`), `read_access_key_id`, `read_secret_access_key` (the `main/` read key), `alert_channel_id` (§ 6 Q3), `cache_limit_mb = 10240`, `hold_days` stays 365 | Thijs | parameters set; mode is now clone (reads only, nothing uploaded) |
+| W4 | System parameters on production: `endpoint_url`, `region` (`auto`), `bucket`, `addressing_style` (`path`), `key_prefix` (`main/`), `read_access_key_id`, `read_secret_access_key` (the `main/` read key), `alert_channel_id` (§ 6 Q3), `cache_limit_mb = 256` (§ 6 Q5), `hold_days` stays 365 | Thijs | parameters set; mode is now clone (reads only, nothing uploaded) |
 | W5 | SSH to production (Allow my IP), add to `/home/odoo/.config/odoo/odoo.conf`: `server_wide_modules = base,rpc,web,oteny_cloud_filestore`, `cloud_filestore_write_access_key_id`, `cloud_filestore_write_secret_access_key`; restart (`odoosh-restart http` and `cron`) | Thijs | mode is production |
 | W6 | Check the start: the start command of an HTTP worker and of the cron worker (`/proc/<pid>/cmdline`) passes this `odoo.conf`; no "not a server-wide module" warning in the log; a test upload of one new attachment lands in `main/` and stays local (marked) | Claude + Thijs | written into § 7 |
 | W7 | The first push runs overnight by the upload cron (every 10 minutes, with progress reporting) | — | — |
@@ -94,6 +96,21 @@ was lowered.
 - **Q4 — Leftovers.** *Answer:* fix only the "bad query" log noise (T6)
   before the merge; the D25 gap, the faster first push and the other review
   minors wait.
+- **Q5 — Go live fully (21-Oct-2026).** *Situation:* at 10240 MB production
+  keeps every file local, so the backups do not shrink until a later plan.
+  *Answer (Thijs, Ries agrees, 21-Oct-2026):* go live fully on the go-live
+  night: `cache_limit_mb = 256` in W4 instead of 10240. The hourly eviction
+  then removes the local copies above 256 MB within hours, after each file's
+  upload is confirmed. Accepted risk until T5 runs on CUNEUS40:
+  the Odoo.sh backups and the CUNEUS40 standby miss the files that leave the
+  local filestore; the bucket holds them (soft delete 7 days, `hold_days`
+  365). This replaces the 10 GB first step of Q1 and of the Rollout
+  Condition.
+- **Q6 — Test1 and CUNEUS40 (21-Oct-2026).** *Answer (Thijs):* the install
+  was rehearsed often enough on test3 (plan 1c, plan 2), so T3 on test1 is
+  dropped; test1 only takes the code on the way to production. T5 (the new
+  `dr_sync.py` on CUNEUS40) is deployed on the go-live night, after W6, once
+  production is fully live.
 
 ## 7. Results
 
@@ -103,3 +120,53 @@ Filled in while the plan runs.
   that makes `cache.py` pass `log_exceptions=False`; a 1 s lock timeout now
   logs only the module's warning. `test_cache_write_never_waits_for_the_request_transaction`
   asserts no `odoo.sql_db` ERROR. 183 tests pass with the live tests.
+- **T2 (21-Oct-2026):** `feat/cloud-filestore` is merged into otenydoo `main`
+  (`bbe03fa`) and radar `dev` (`d226bf793`, pin on otenydoo `main`). Not yet
+  promoted to test1. `riverdeploy merge-branches` stopped with exit 1 and no
+  message because the radar checkout had local changes (the `git checkout`
+  of the feature failed); the radar half was merged by hand in a temporary
+  worktree. The git hooks need `~/odoo/venv/bin` on the PATH on Thijs's Mac,
+  because the hook's Python 3.12 path no longer exists.
+- **T4 (21-Oct-2026):** service accounts `crewradar-filestore-main-write`
+  (`roles/storage.objectAdmin` on the managed folder `main/`) and
+  `crewradar-filestore-main-read` (`cloudFilestoreObjectGet` on `main/`), one
+  HMAC key each, made with a short project exception to
+  `iam.disableServiceAccountKeyCreation` (the first key passed about 3
+  minutes after the exception). 1Password, vault Oteny: "CrewRadar cloud
+  filestore main write (GCS HMAC)" and "... main read (GCS HMAC)", same
+  fields as the dev items. All 11 live tests pass with the `main/` keys and
+  `key_prefix = main/` (`test_write_key_stays_in_its_folder`,
+  `test_read_key_cannot_list` among them); `main/` held no object after the
+  run.
+- **W2 (21-Oct-2026):** `dev-to-test1` green (0 failed, 0 error(s) of 5655
+  tests; test1 build without a warning in `ir.logging`), then `test1-to-main`
+  (radar `a19a6bc73`). T3 was dropped (Q6).
+- **W5 before W3/W4 (21-Oct-2026):** the GitHub webhooks were slow, so the
+  three `odoo.conf` lines went in as soon as the commit was on `main`, before
+  the build; the file was kept as `odoo.conf.bak-20261021`. Safe: Odoo 19
+  only logs "Failed to load server-wide module" for a module whose code is
+  missing, and without bucket parameters the module is in mode off. The
+  build's restart read the file (the two expected "unknown option" warnings
+  at 18:28:47 UTC). The write key went from 1Password to the server over the
+  stdin of SSH. The start command passes `--config
+  /home/odoo/.config/odoo/odoo.conf`.
+- **W3, W4 (21-Oct-2026, about 18:30 UTC):** module 19.0.1.4 installed over
+  `/json/2/`; the install made the alert channel (`alert_channel_id` 10244).
+  Parameters set with `cache_limit_mb = 256` first and `bucket`,
+  `endpoint_url` last. `database.is_neutralized` is false on production.
+- **W6, W7 (21-Oct-2026):** no warning or error in `ir.logging` after the
+  start. The upload cron was started at once by setting its `nextcall`
+  (a direct trigger runs a whole cron run inside one HTTP request): 110
+  objects in `main/` at 18:32:46 UTC, 7,126 at 18:53:49 UTC (about 5.5 files
+  per second). The cache grows during the push, because each confirmed upload
+  marks its local copy (3,050 rows, 660 MB at 18:42 UTC); the eviction
+  (started by hand by Thijs, then hourly) brings it down to 90 % of 256 MB.
+- **T5 (21-Oct-2026):** `deploy-cuneus40` done. Three faults in the DR chain
+  were found and fixed first (radar `cuneus-infrastructure`,
+  `references/disaster-recovery.md`): the Tailscale keys of `cuneus40` and
+  `cuneus-gcp-backup` had expired (10 and 17 Oct; key expiry now disabled;
+  the NAS off-site pull ran again at 18:53 UTC); Odoo.sh did not allow
+  CUNEUS40's IP `213.93.207.224` on port 22 (last good DR sync 20-Sep; now
+  allowed permanently); the Docker image build failed at `apt-get` since
+  10-Oct (passes with a fresh `odoo:19`). The first night with `cloud_copy`
+  is 21-Oct-2026 22:00 UTC.

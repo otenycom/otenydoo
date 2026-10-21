@@ -372,7 +372,9 @@ class KnowledgeSync(models.AbstractModel):
                 return tag
 
             try:
-                resolved = (md_dir / src).resolve()
+                # The markdown converter percent-encodes the src (spaces, an em
+                # dash), so decode it back to the file name on disk.
+                resolved = (md_dir / unquote(src)).resolve()
             except (OSError, ValueError):
                 _logger.warning("Could not resolve image '%s' in article '%s'", src, article_label)
                 return tag

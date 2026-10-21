@@ -146,6 +146,20 @@ class TestSkillSyncImages(TransactionCase):
         self.assertEqual(att.res_id, 0, "res_id left 0 for the caller to backfill after create")
         self.assertIn('src="/web/image/%d"' % att.id, new_body)
 
+    def test_percent_encoded_src_finds_the_file(self):
+        """The markdown converter percent-encodes a file name with spaces or an
+        em dash; the sync decodes it to find the file on disk."""
+        with tempfile.TemporaryDirectory() as tmp:
+            skills_root, md_dir = self._make_tree(tmp)
+            (md_dir / "Call \u2014 matrix.png").write_bytes(_png(color=(7, 7, 7)))
+            body = '<p><img src="Call%20%E2%80%94%20matrix.png" alt="t" /></p>'
+            new_body, created = self.sync._embed_body_images(
+                body, md_dir, skills_root, self.article
+            )
+
+        self.assertEqual(len(created), 1, "the decoded file name is found")
+        self.assertIn('src="/web/image/%d"' % created[0], new_body)
+
     @mute_logger("odoo.addons.oteny_knowledge_sync.models.knowledge_sync")
     def test_missing_file_is_left_untouched(self):
         # The sync warns and keeps the original src, which is right for a real

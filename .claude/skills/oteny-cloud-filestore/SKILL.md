@@ -325,6 +325,23 @@ the start command of production once (`/proc/<pid>/cmdline` of an HTTP worker
 and of the cron worker) and check that the log shows no "not a server-wide
 module" warning after the restart.
 
+A new build of a staging branch starts from the stock `odoo.conf` of
+Odoo.sh (21-Oct-2026, `test3`). After a restore of test3 from main and a
+`branch-to-test3`, the build id changed (`40107605` → `40285399`), and
+`/home/odoo/.config/odoo/odoo.conf` held only `dbfilter=`: no
+`server_wide_modules` line and no write key. A restore of test3 from main
+also drops the bucket parameters and leaves the module uninstalled, because
+main has neither. So after such a restore the module is installed, the
+bucket parameters are set again (`key_prefix` `dev/odoosh-test3/`), and the
+three `odoo.conf` lines are added again on the new build. The restore also
+sets `database.is_neutralized` again, so test3 is a clone (reads only) even
+with the write key, until that parameter is removed (plan 1c, step 3).
+A push onto a prefix that already holds the files is fast: on 21-Oct-2026
+the job checked 25,578 files on test3 in about 11 minutes (26 calls, 189
+uploaded, 24,884 already in the bucket, 0 not confirmed, 0 refused), about
+38 files per second against about 5.5 for the first push, because a file
+already in the bucket costs one head request and no put.
+
 ## Known Limits
 
 - Odoo's own tests in production mode:

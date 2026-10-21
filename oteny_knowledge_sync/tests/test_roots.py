@@ -44,12 +44,29 @@ class TestRoots(TransactionCase):
             tree = self._tree(label)
             self.assertEqual(len(tree), 3, label)
             root = tree.filtered(lambda a: not a.parent_id)
-            self.assertEqual(root.name, f"{label} Skills")
+            # The root is named after the first heading of its SKILL.MD.
+            self.assertEqual(root.name, f"{label.lower()} skills")
             skill_article = tree.filtered(lambda a: a.x_skill_file_path == f"skills/{skill}/SKILL.md")
             notes = tree.filtered(lambda a: a.x_skill_file_path == f"skills/{skill}/references/notes.md")
             self.assertEqual(skill_article.parent_id, root)
             self.assertEqual(notes.parent_id, skill_article)
             self.assertIn(f'href="/knowledge/article/{notes.id}"', skill_article.body)
+
+    def test_the_root_title_is_the_index_heading_not_the_folder_label(self):
+        """A label is a folder name ("user" on odoo.sh); the title users see is the
+        index heading. A rename keeps the root's id, so Knowledge links stay valid."""
+        self._configure(("user", self.root_a))
+        (self.root_a / ".claude" / "skills" / "SKILL.MD").write_text("Index without a heading.\n")
+        self.Sync.sync_skills_to_knowledge()
+        root = self._tree("user").filtered(lambda a: not a.parent_id)
+        self.assertEqual(root.name, "user Skills", "No heading: the label stays the fallback")
+
+        (self.root_a / ".claude" / "skills" / "SKILL.MD").write_text("# Crewradar Skills\n\nIndex.\n")
+        self.Sync.sync_skills_to_knowledge()
+        renamed = self._tree("user").filtered(lambda a: not a.parent_id)
+        self.assertEqual(renamed, root)
+        self.assertEqual(renamed.name, "Crewradar Skills")
+        self.assertEqual(renamed.x_skill_root, "user")
 
     def test_an_unchanged_run_writes_nothing(self):
         self._configure(("Alpha", self.root_a))

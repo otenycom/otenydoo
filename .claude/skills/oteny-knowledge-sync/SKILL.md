@@ -116,7 +116,7 @@ Regression: `oteny_knowledge_sync/tests/test_return.py`.
 
 | Source Path | Knowledge Location |
 |-------------|-------------------|
-| `.claude/skills/SKILL.MD` | Root skills article for that repository |
+| `.claude/skills/SKILL.MD` | Root skills article for that repository. Its first `#` heading is the root's title (`<label> Skills` when there is none). The label is the folder name (`user` on odoo.sh) or the label in the setting, and stays the tree's key (`x_skill_root`), so a new title renames the root in place and keeps its id |
 | `.claude/skills/<skill>/SKILL.md` | Child of root |
 | `.claude/skills/<skill>/references/<file>.md` | Child of `<skill>` |
 

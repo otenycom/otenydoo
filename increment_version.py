@@ -23,6 +23,7 @@ GENERIC_MODULES = [
     "oteny_backup_trigger",
     "oteny_article",
     "oteny_knowledge_sync",
+    "oteny_cloud_filestore",
     "riverflow",
     "odoo_parallel_tests",
 ]

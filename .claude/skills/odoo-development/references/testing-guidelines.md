@@ -40,7 +40,7 @@ cd <business-repo> && ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo-bin \
   --without-demo=True \
   --http-interface 127.0.0.1 \
   --test-enable \
-  --test-tags=oteny_audit,oteny_shortcut,oteny_bot,oteny_backup_trigger,odoo_parallel_tests,oteny_knowledge_sync,riverflow,rivercreds,crewradar,crewradar_wilma,crewradar_cuneus_sign,crewradar_creds,crewradar_sign,crewradar_marinetraffic \
+  --test-tags=oteny_audit,oteny_shortcut,oteny_bot,oteny_backup_trigger,odoo_parallel_tests,oteny_knowledge_sync,oteny_cloud_filestore,riverflow,rivercreds,crewradar,crewradar_wilma,crewradar_cuneus_sign,crewradar_creds,crewradar_sign,crewradar_marinetraffic \
   -d cr-test \
   -r ries -w ries \
   --max-cron-threads 0 \
@@ -848,6 +848,8 @@ This prevents `ValueError` or `AttributeError` during fresh module install on Od
 | "External requests verboten" | Test class has `standard` tag — add `-standard` to `@tagged()` for live API tests |
 | Odoo.sh build red despite passing tests | WARNING/ERROR in `ir_logging` from fake PDFs, SQL constraint noise, or `_logger.warning()` in fallback code — see [CI-Safe Test Patterns](#ci-safe-test-patterns-odoosh) |
 | Flaky CI from third-party API outages | Live integration tests hard-fail on transient errors — use `skipTest()` pattern for graceful degradation |
+| A list comparison in a test helper always passes | `[...].sort(...)` sorts in place and returns `None`, so `assertEqual(a.sort(), b.sort())` compares `None` with `None`. Use `sorted(...)`. Found in crewradar's airfare `assertInvoice` (2026-10-06): its quantities had never been compared, and five expectations were wrong. |
+| A `fields.Json` value written as `[]` reads back as `False` | Iterate over `record.json_field or []`, never over the field itself |
 | `assertEqual(sum(records.mapped("monetary_field")), stored_total)` fails with `9131.779999999999 != 9131.78` | Python float arithmetic accumulates imprecision when summing many values. Wrap the sum in `currency.round(...)` before comparing: `assertEqual(currency.round(sum(records.mapped("amount"))), stored_total)`. The individual values are already correct — only the sum needs rounding. |
 | SQL-scaffolded rows lose their computed children mid-test | Rows inserted via raw SQL have NULL stored-compute columns and **no recompute queued**. If a later flush triggers a dependent compute, it reads those NULLs as real values — e.g. a `rivercreds.plan.slot` scaffolded without `requirement_start`/`requirement_end` hits the "no requirement window" branch of `_compute_item_ids`, which **deletes all the slot's items** (scaffolded ones included) and regenerates none. Symptom: a fixture that survives simple tests breaks in tests that run a heavier save (an import, a wizard). Fix: scaffold every stored-compute column a downstream compute reads (the WP slot scaffold in `test_wp_close_with_existing_permit.py` includes the requirement window for this reason). |
 

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+    <!-- The outage state always exists as a row, so the alert can lock it with plain SQL. -->
+    <record id="param_outage_since" model="ir.config_parameter">
+        <field name="key">oteny_cloud_filestore.outage_since</field>
+        <field name="value" eval="''"/>
+    </record>
+    <!-- The size limit of the read cache in MB (D21); 0 keeps no cache copies. -->
+    <record id="param_cache_limit_mb" model="ir.config_parameter">
+        <field name="key">oteny_cloud_filestore.cache_limit_mb</field>
+        <field name="value">100</field>
+    </record>
+</odoo>

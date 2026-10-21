@@ -41,7 +41,7 @@ ALLOW = "customer-template: allow"
 # The shared trees a tenant, an author or the next platform change reads.
 SCOPES = (
     "oteny_shortcut", "oteny_audit", "oteny_backup_trigger", "oteny_bot", "riverflow",
-    "odoo_parallel_tests", "oteny_knowledge_sync", "talents",
+    "odoo_parallel_tests", "oteny_knowledge_sync", "oteny_cloud_filestore", "talents",
 )
 EXCLUDED_PREFIXES = ("tests/fixtures/",)
 TEXT_SUFFIXES = {".yaml", ".yml", ".json", ".toml", ".sh", ".txt", ".xml", ".js", ".html"}

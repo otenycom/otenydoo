@@ -22,6 +22,7 @@ GENERIC_MODULES = [
     "oteny_bot",
     "oteny_backup_trigger",
     "oteny_article",
+    "oteny_home",
     "oteny_knowledge_sync",
     "oteny_cloud_filestore",
     "riverflow",

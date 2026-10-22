@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <t t-name="oteny_home.HomeScreen">
+        <div class="o_oteny_home h-100 overflow-auto">
+            <div class="container py-4 py-md-5">
+                <div class="o_oteny_home_search position-relative mx-auto mb-4 mb-md-5">
+                    <i class="fa fa-search position-absolute top-50 translate-middle-y" aria-hidden="true"/>
+                    <input t-ref="search" type="search" class="form-control"
+                        placeholder="Search apps..." aria-label="Search apps"
+                        t-model="state.search" t-on-keydown="onSearchKeydown"/>
+                </div>
+                <t t-set="shownApps" t-value="apps"/>
+                <div t-if="shownApps.length" class="o_oteny_home_apps row g-3 g-md-4 user-select-none">
+                    <div t-foreach="shownApps" t-as="app" t-key="app.id" class="col-4 col-sm-3 col-md-2">
+                        <a class="o_oteny_home_app d-flex flex-column align-items-center p-1 text-decoration-none"
+                            t-att-href="app.href" t-att-data-menu-xmlid="app.xmlid"
+                            t-on-click.prevent="() => this.openApp(app)">
+                            <img t-if="app.webIconData" class="o_oteny_home_icon"
+                                t-att-src="app.webIconData" alt=""/>
+                            <div t-else="" class="o_oteny_home_icon d-flex align-items-center justify-content-center"
+                                t-attf-style="background-color: {{app.webIcon.backgroundColor}};">
+                                <i t-att-class="app.webIcon.iconClass" t-attf-style="color: {{app.webIcon.color}};"/>
+                            </div>
+                            <span class="o_oteny_home_caption w-100 text-center text-truncate mt-2" t-esc="app.label"/>
+                        </a>
+                    </div>
+                </div>
+                <div t-else="" class="o_oteny_home_no_result text-center text-muted mt-5">No app matches your search.</div>
+            </div>
+        </div>
+    </t>
+
+</templates>

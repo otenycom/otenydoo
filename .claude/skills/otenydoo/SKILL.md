@@ -34,6 +34,11 @@ could not see it, because the server reads `~/oteny/otenydoo`.
 dispatch work to a bot, and it implements the bridge's work contract for its
 own records. `odoo_parallel_tests` is tooling beside them.
 
+`oteny_home` — the home screen at `/odoo/home` for Odoo Community: every app
+as an icon with search; the web client opens it when the URL names no action,
+and the apps button opens it. No module depends on it; it is installed from
+Apps.
+
 ## How a business extends a generic module
 
 Through inheritance and hooks, in the business's own repository. When riverflow

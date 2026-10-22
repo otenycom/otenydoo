@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <t t-inherit="web.NavBar.AppsMenu" t-inherit-mode="extension">
+        <xpath expr="//div[hasclass('o_navbar_apps_menu')]/Dropdown" position="replace">
+            <a href="/odoo/home" class="o_oteny_home_toggle" data-hotkey="h" title="Home"
+                t-on-click.prevent="openHomeScreen">
+                <i class="oi oi-apps"/>
+            </a>
+        </xpath>
+    </t>
+
+</templates>

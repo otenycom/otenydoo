@@ -3,7 +3,6 @@ import unittest
 from unittest.mock import patch
 
 from odoo.tests import TransactionCase, tagged
-from odoo.tools import config
 
 from ..models import ir_attachment as ir_attachment_module
 from ..tools.cloud_store import CloudStore
@@ -51,13 +50,13 @@ class TestEndToEndLive(TransactionCase):
         )
         self.addCleanup(self._delete_created_objects)
 
-        self.write_options = {
-            "cloud_filestore_write_access_key_id": live["write_access_key_id"],
-            "cloud_filestore_write_secret_access_key": live["write_secret_access_key"],
-        }
-        patcher = patch.dict(config.options, self.write_options)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        self.write_key = self.startPatcher(
+            patch.object(
+                ir_attachment_module,
+                "_cloud_filestore_write_key",
+                return_value=(live["write_access_key_id"], live["write_secret_access_key"]),
+            )
+        )
 
     def _delete_created_objects(self):
         for name in self.created_names:
@@ -83,9 +82,8 @@ class TestEndToEndLive(TransactionCase):
     def test_clone_reads_with_read_key(self):
         attachment, content = self._create_attachment()
 
-        # Switch to a clone: the write options leave odoo.conf.
-        for option in self.write_options:
-            config.options.pop(option, None)
+        # Switch to a clone: the write key leaves odoo.conf.
+        self.write_key.return_value = (None, None)
         self.assertEqual(self.env["ir.attachment"]._cloud_filestore_mode(), "clone")
         attachment.invalidate_recordset(["raw"])
         self.assertEqual(attachment.raw, content, "a clone reads the object with the read key")

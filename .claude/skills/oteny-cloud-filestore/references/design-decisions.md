@@ -523,6 +523,21 @@ so no code depends on the provider. What changes in the earlier decisions:
   its storage during the 7 days. The bucket deletes only objects past the
   hold time, so that cost is small.
 
+**D29 — The write key has its own section in `odoo.conf` (revises D3).**
+(Radar dev team, 22-Oct-2026.) The write key lives in the section
+`[oteny_cloud_filestore]` (keys `write_access_key_id` and
+`write_secret_access_key`), not under `[options]`. Odoo 19 reads only
+`[options]` and logs "unknown option … stored as-is" at WARNING level for
+every key there that it does not know (`odoo/tools/config.py`,
+`_load_file_options`), at every start of every process. On Odoo.sh those
+warnings reach `ir_logging` during a build, so each build of production
+showed warnings after the go-live of 21-Oct-2026. Odoo never looks at other
+sections, so the module reads its own section from the file that
+`config["config"]` names, once per process; a changed key takes effect
+after a restart, as before. The rule of D3 stays: only a server whose
+`odoo.conf` holds the key, with a database that is not neutralized, writes.
+There is no fallback to the old `[options]` names: one way to configure.
+
 ## 3. Research facts that shape the design
 
 - **File contents never change in place.** Odoo names each stored file after

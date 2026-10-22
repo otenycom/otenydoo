@@ -8,10 +8,13 @@ from odoo.tools import config
 
 from ..models import ir_attachment as ir_attachment_module
 
-WRITE_OPTIONS = {
-    "cloud_filestore_write_access_key_id": "write-id",
-    "cloud_filestore_write_secret_access_key": "write-secret",
-}
+WRITE_KEY = ("write-id", "write-secret")
+NO_WRITE_KEY = (None, None)
+
+
+def write_key(value):
+    """Patch the write key that odoo.conf gives the module."""
+    return patch.object(ir_attachment_module, "_cloud_filestore_write_key", return_value=value)
 
 
 @tagged("oteny_cloud_filestore", "post_install", "-at_install")
@@ -37,29 +40,26 @@ class TestCloudFilestoreMode(TransactionCase):
         params.set_param("oteny_cloud_filestore.read_secret_access_key", "read-secret")
 
     def test_mode_off_without_bucket(self):
-        with patch.dict(config.options, WRITE_OPTIONS):
+        with write_key(WRITE_KEY):
             self.assertEqual(self.attachment._cloud_filestore_mode(), "off")
             self.assertIsNone(self.attachment._cloud_filestore_store())
 
     def test_mode_production(self):
         self._configure_bucket()
         self.env["ir.config_parameter"].sudo().set_param("database.is_neutralized", "")
-        with patch.dict(config.options, WRITE_OPTIONS):
+        with write_key(WRITE_KEY):
             self.assertEqual(self.attachment._cloud_filestore_mode(), "production")
             self.assertIsNotNone(self.attachment._cloud_filestore_store())
 
     def test_mode_clone_without_key(self):
         self._configure_bucket()
-        with patch.dict(
-            config.options,
-            {k: None for k in WRITE_OPTIONS},
-        ):
+        with write_key(NO_WRITE_KEY):
             self.assertEqual(self.attachment._cloud_filestore_mode(), "clone")
 
     def test_mode_neutralized_with_key_is_clone(self):
         self._configure_bucket()
         self.env["ir.config_parameter"].sudo().set_param("database.is_neutralized", "True")
-        with patch.dict(config.options, WRITE_OPTIONS):
+        with write_key(WRITE_KEY):
             self.assertEqual(self.attachment._cloud_filestore_mode(), "clone")
             # The write key in odoo.conf must never reach the store.
             with patch.object(ir_attachment_module, "CloudStore") as store_class:
@@ -74,14 +74,14 @@ class TestCloudFilestoreMode(TransactionCase):
         params = self.env["ir.config_parameter"].sudo()
         params.set_param("oteny_cloud_filestore.read_access_key_id", "")
         params.set_param("oteny_cloud_filestore.read_secret_access_key", "")
-        with patch.dict(config.options, {k: None for k in WRITE_OPTIONS}):
+        with write_key(NO_WRITE_KEY):
             with patch.object(ir_attachment_module, "CloudStore") as store_class:
                 self.assertIsNone(self.attachment._cloud_filestore_store())
         store_class.assert_not_called()
 
     def test_store_uses_read_key_in_clone(self):
         self._configure_bucket()
-        with patch.dict(config.options, {k: None for k in WRITE_OPTIONS}):
+        with write_key(NO_WRITE_KEY):
             with patch.object(ir_attachment_module, "CloudStore") as store_class:
                 self.attachment._cloud_filestore_store()
         kwargs = store_class.call_args.kwargs
@@ -92,7 +92,7 @@ class TestCloudFilestoreMode(TransactionCase):
         self._configure_bucket()
         self.env["ir.config_parameter"].sudo().set_param("database.is_neutralized", "")
         ir_attachment_module._STORE_CACHE.clear()
-        with patch.dict(config.options, WRITE_OPTIONS):
+        with write_key(WRITE_KEY):
             with patch.object(ir_attachment_module, "CloudStore") as store_class:
                 first = self.attachment._cloud_filestore_store()
                 second = self.attachment._cloud_filestore_store()
@@ -117,7 +117,7 @@ class TestCloudFilestoreMode(TransactionCase):
         self.startPatcher(patch.object(model, "_storage", return_value="file"))
         # The alert runs in its own cursor: keep it out of this test database.
         alert = self.startPatcher(patch.object(model, "_cloud_filestore_alert"))
-        self.startPatcher(patch.dict(config.options, WRITE_OPTIONS))
+        self.startPatcher(write_key(WRITE_KEY))
         self.assertEqual(self.attachment._cloud_filestore_mode(), "production")
         with self.assertLogs("odoo.addons.oteny_cloud_filestore.models.ir_attachment", "WARNING") as logs:
             attachment = self.attachment.create({"name": "user.bin", "raw": b"stays local"})
@@ -130,3 +130,36 @@ class TestCloudFilestoreMode(TransactionCase):
         with self.assertLogs("odoo.addons.oteny_cloud_filestore.models.ir_attachment", "WARNING"):
             self.assertEqual(attachment._file_read(attachment.store_fname), b"")
         self.assertEqual(ir_attachment_module._STORE_CACHE, {})
+
+    def test_write_key_comes_from_its_own_section(self):
+        """Odoo warns about an unknown key in [options], so the write key has its own section."""
+        rcfile = self._odoo_conf(
+            "[options]\n"
+            "cloud_filestore_write_access_key_id = old-id\n"
+            "cloud_filestore_write_secret_access_key = old-secret\n"
+            "\n"
+            "[oteny_cloud_filestore]\n"
+            "write_access_key_id = write-id\n"
+            "write_secret_access_key = write-secret\n"
+        )
+        with patch.dict(config.options, {"config": rcfile}):
+            self.assertEqual(ir_attachment_module._cloud_filestore_write_key(), WRITE_KEY)
+
+    def test_write_key_in_options_is_not_read(self):
+        rcfile = self._odoo_conf(
+            "[options]\n"
+            "cloud_filestore_write_access_key_id = old-id\n"
+            "cloud_filestore_write_secret_access_key = old-secret\n"
+        )
+        with patch.dict(config.options, {"config": rcfile}):
+            self.assertEqual(ir_attachment_module._cloud_filestore_write_key(), NO_WRITE_KEY)
+            self._configure_bucket()
+            self.assertEqual(self.attachment._cloud_filestore_mode(), "clone")
+
+    def _odoo_conf(self, text):
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        rcfile = os.path.join(folder, "odoo.conf")
+        with open(rcfile, "w") as handle:
+            handle.write(text)
+        return rcfile

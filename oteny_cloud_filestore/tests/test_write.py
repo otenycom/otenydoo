@@ -4,8 +4,8 @@ import tempfile
 from unittest.mock import patch
 
 from odoo.tests import TransactionCase, tagged
-from odoo.tools import config
 
+from ..models import ir_attachment as ir_attachment_module
 from ..tools import cloud_store
 from ..tools.cloud_store import CloudStoreError, CloudStoreUnavailable
 from .common import FakeCloudStore, patch_read_cache
@@ -167,12 +167,8 @@ class TestCloudFilestoreWrite(TransactionCase):
         self.params.set_param("oteny_cloud_filestore.read_access_key_id", read_key)
         self.params.set_param("oteny_cloud_filestore.read_secret_access_key", read_key + "secret")
         self.startPatcher(
-            patch.dict(
-                config.options,
-                {
-                    "cloud_filestore_write_access_key_id": write_key,
-                    "cloud_filestore_write_secret_access_key": write_key + "secret",
-                },
+            patch.object(
+                ir_attachment_module, "_cloud_filestore_write_key", return_value=(write_key, write_key + "secret")
             )
         )
         outage = CloudStoreUnavailable("store answered 503")

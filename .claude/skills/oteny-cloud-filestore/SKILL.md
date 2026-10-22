@@ -313,7 +313,9 @@ all of these are true (Ries, review of 19-Oct-2026):
 - `cache_limit_mb` is set before `endpoint_url` and `bucket`, so the code
   default of 100 never applies. Production went live on 21-Oct-2026 with
   `256` (Thijs, Ries agrees; [plan 3](plans/2026-10-20-plan-3-go-live.md)
-  Q5) instead of the 10 GB first step of plan 2: the backups shrink at
+  Q5) instead of the 10 GB first step of plan 2; on 22-Oct-2026 Thijs
+  lowered it to `128`, because at 256 MB the cache held about 8,700 small
+  copies: the backups shrink at
   once, and the bucket holds every file. Until the first CUNEUS40 night with
   a real copy, the standby misses the files that left the local filestore.
 
@@ -487,7 +489,7 @@ the review text: [plan 2](plans/2026-10-19-plan-2-rollout-blockers.md).
    night with three folders (radar `dr_sync.py`). Built; deployed on
    CUNEUS40 on 21-Oct-2026, first night run 21-Oct-2026 22:00 UTC.
 3. [x] The read cache (D21): mark, write-through, fill on read, read counts,
-   eviction. Production limit 256 MB since 21-Oct-2026 (Rollout Condition).
+   eviction. Production limit 128 MB since 22-Oct-2026 (Rollout Condition).
 4. [x] Bucket deletes outside the garbage-collection lock (R13), in batches
    with `DeleteObjects` (accepted by Google, probe of 19-Oct-2026).
 - [x] N1: a missing store is exit 4 and fails the DR step; exit 2 ("skipped")

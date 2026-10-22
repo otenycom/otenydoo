@@ -180,3 +180,7 @@ Filled in while the plan runs.
   hourly run of 20:08 UTC brought the cache to 254 MB (8,879 rows) by 20:11
   UTC. Local filestore: 350 MB in 9,260 files (before: 5.1 GB); `/home/odoo`
   782 MB of 22 GB.
+- **Limit 128 MB (22-Oct-2026, Thijs):** at 256 MB the cache held 8,738
+  copies (242 MB, average 29 KB; none above 1 MB, because the keep value of
+  GDSF favours small files). Thijs lowered `cache_limit_mb` to `128`; the
+  eviction of 07:10 UTC brought the cache to 7,138 copies, 122,228,856 bytes.

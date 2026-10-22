@@ -39,6 +39,11 @@ as an icon with search; the web client opens it when the URL names no action,
 and the apps button opens it. No module depends on it; it is installed from
 Apps.
 
+`oteny_color_scheme` — light and dark mode for Odoo Community: a Theme
+preference per user (System, Light, Dark) and our own dark colours in
+`web.assets_web_dark`; System follows the operating system through the
+`color_scheme` cookie. Installed from Apps.
+
 ## How a business extends a generic module
 
 Through inheritance and hooks, in the business's own repository. When riverflow

@@ -17,6 +17,11 @@ top bar opens it.
     "assets": {
         "web.assets_backend": [
             "oteny_home/static/src/**/*",
+            ("remove", "oteny_home/static/src/**/*.dark.scss"),
+        ],
+        # Used when a module gives Odoo Community a dark mode (oteny_color_scheme).
+        "web.assets_web_dark": [
+            "oteny_home/static/src/**/*.dark.scss",
         ],
         "web.assets_unit_tests": [
             "oteny_home/static/tests/**/*",

@@ -1,0 +1,11 @@
+// Dark mode: Bootstrap lightens a colour with tint-color() and darkens it with
+// shade-color(). On a dark page the two swap, so a "lighter" alert or table
+// background comes out darker and keeps its contrast.
+
+@function tint-color($color, $weight) {
+    @return mix(#000, $color, $weight);
+}
+
+@function shade-color($color, $weight) {
+    @return mix(#fff, $color, $weight);
+}

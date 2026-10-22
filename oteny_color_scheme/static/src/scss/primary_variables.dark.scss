@@ -1,0 +1,124 @@
+// Dark mode: the colour variables of the web client.
+//
+// Loaded only into web.assets_web_dark, before web's primary_variables.scss,
+// so these values win over its !default ones. The web client paints
+// backgrounds with $o-white and text with $o-black, so dark mode swaps the two
+// and turns the grey scale around: gray-100 is the darkest grey.
+
+// = Colors
+$o-white: #000 !default;
+$o-black: #fff !default;
+
+$o-gray-100: #1a1d24 !default;
+$o-gray-200: #242833 !default;
+$o-gray-300: #363b48 !default;
+$o-gray-400: #4f5564 !default;
+$o-gray-500: #6a7080 !default;
+$o-gray-600: #868b99 !default;
+$o-gray-700: #b4b7c0 !default;
+$o-gray-800: #d3d5da !default;
+$o-gray-900: #e9eaec !default;
+
+// The brand and action colour keep the purple of Odoo Community, lighter so
+// that they read on dark grey.
+$o-brand-primary: #8a7cb8 !default;
+$o-action: #a597d4 !default;
+
+$o-success: #2fbf63 !default;
+$o-info: #5aaef0 !default;
+$o-warning: #f2b153 !default;
+$o-danger: #d9434b !default;
+
+$light: $o-gray-300 !default;
+$dark: $o-gray-700 !default;
+
+$o-theme-text-colors: (
+    "primary": #b3a6e0,
+    "success": #45d27a,
+    "info": #74bdf5,
+    "warning": #f5be6e,
+    "danger": #ff6b70,
+) !default;
+
+// = Text
+$o-main-link-color: $o-action !default;
+$o-main-favorite-color: #ffd23f !default;
+$o-main-code-color: #e083b5 !default;
+
+// = Webclient
+$o-webclient-color-scheme: dark !default;
+$o-webclient-background-color: $o-gray-100 !default;
+$o-view-background-color: $o-gray-200 !default;
+$o-shadow-color: #000 !default;
+
+// = Components
+$o-component-active-bg: mix($o-action, $o-gray-300, 15%) !default;
+$o-form-lightsecondary: $o-gray-300 !default;
+$o-input-border-required: $o-gray-700 !default;
+$o-list-group-active-bg: mix($o-info, $o-gray-200, 35%) !default;
+
+// = Navbar: a dark tone of the Odoo Community purple, light entries.
+$o-navbar-background: mix(#71639e, $o-gray-100, 28%) !default;
+$o-navbar-border-bottom: 1px solid $o-gray-300 !default;
+$o-navbar-entry-color: rgba(#fff, 0.85) !default;
+$o-navbar-entry-color--hover: #fff !default;
+$o-navbar-entry-bg--hover: rgba(#fff, 0.08) !default;
+
+// = Buttons: text on a coloured button stays light ($o-black is white here).
+$o-btns-bs-override: () !default;
+$o-btns-bs-override: map-merge(
+    (
+        "primary": (
+            background: $o-brand-primary,
+            border: $o-brand-primary,
+            color: $o-black,
+            hover-background: lighten($o-brand-primary, 6%),
+            hover-border: lighten($o-brand-primary, 6%),
+            hover-color: $o-black,
+            active-background: lighten($o-brand-primary, 12%),
+            active-border: lighten($o-brand-primary, 12%),
+            active-color: $o-black,
+        ),
+        "secondary": (
+            background: $o-gray-300,
+            border: $o-gray-300,
+            color: $o-gray-900,
+            hover-background: $o-gray-400,
+            hover-border: $o-gray-400,
+            hover-color: $o-black,
+            active-background: mix($o-action, $o-gray-200, 20%),
+            active-border: $o-action,
+            active-color: $o-black,
+        ),
+        "light": (
+            background: $o-gray-200,
+            border: $o-gray-200,
+            color: $o-gray-900,
+            hover-background: $o-gray-300,
+            hover-border: $o-gray-300,
+            hover-color: $o-black,
+            active-background: mix($o-action, $o-gray-200, 20%),
+            active-border: $o-action,
+            active-color: $o-black,
+        ),
+    ),
+    $o-btns-bs-override
+);
+
+$o-btns-bs-outline-override: () !default;
+$o-btns-bs-outline-override: map-merge(
+    (
+        "secondary": (
+            background: transparent,
+            border: $o-gray-400,
+            color: $o-gray-900,
+            hover-background: $o-gray-300,
+            hover-border: $o-gray-400,
+            hover-color: $o-black,
+            active-background: mix($o-action, $o-gray-200, 20%),
+            active-border: $o-action,
+            active-color: $o-black,
+        ),
+    ),
+    $o-btns-bs-outline-override
+);

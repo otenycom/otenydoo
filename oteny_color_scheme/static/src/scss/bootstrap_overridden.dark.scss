@@ -1,0 +1,64 @@
+// Dark mode: the Bootstrap variables whose light defaults do not fit a dark
+// page. Loaded before web's bootstrap_overridden.scss.
+
+// = Shadows are black on a dark page ($o-white is black here).
+$box-shadow: 0 0.5rem 1rem rgba($o-white, 0.35) !default;
+$box-shadow-sm: 0 0.125rem 0.25rem rgba($o-white, 0.2) !default;
+$box-shadow-lg: 0 1rem 3rem rgba($o-white, 0.35) !default;
+$box-shadow-inset: inset 0 1px 2px rgba($o-white, 0.2) !default;
+
+$component-active-bg: $o-gray-300 !default;
+$min-contrast-ratio: 4.5 !default;
+
+// = Links
+$link-shade-percentage: 15% !default;
+
+// = Tables
+$table-bg: $o-view-background-color !default;
+$table-border-color: $o-gray-300 !default;
+$table-group-separator-color: $o-gray-300 !default;
+$table-bg-scale: -70% !default;
+$table-striped-bg-factor: 0.03 !default;
+$table-hover-bg-factor: 0.1 !default;
+$table-active-bg-factor: 0.1 !default;
+
+// = Forms
+$input-border-color: $o-gray-400 !default;
+$input-placeholder-color: $o-gray-600 !default;
+$input-focus-bg: inherit !default;
+$form-range-track-bg: $o-gray-300 !default;
+$form-switch-color: rgba($o-black, 0.5) !default;
+$form-switch-focus-color: $o-black !default;
+$form-switch-checked-color: $o-view-background-color !default;
+
+// = Dropdowns, tooltips, popovers: one step above the view.
+$dropdown-bg: $o-gray-200 !default;
+$dropdown-border-color: $o-gray-300 !default;
+$dropdown-header-color: $o-gray-700 !default;
+$tooltip-color: $o-gray-900 !default;
+$tooltip-bg: $o-gray-300 !default;
+$popover-bg: $o-gray-200 !default;
+$popover-border-color: $o-gray-300 !default;
+
+// = Tabs: the active tab has the colour of the sheet below it.
+$nav-tabs-link-active-bg: $o-view-background-color !default;
+$nav-pills-link-active-color: $o-black !default;
+
+// = Toasts
+$toast-background-color: rgba($o-gray-200, 0.9) !default;
+
+// = Cards, list groups, modals
+$card-cap-bg: $o-view-background-color !default;
+$list-group-bg: $o-view-background-color !default;
+$modal-backdrop-bg: #000 !default;
+
+// = Alerts: a dark tint of the colour, light text.
+$alert-bg-scale: -70% !default;
+$alert-border-scale: -40% !default;
+$alert-color-scale: 80% !default;
+
+// = Text marked with <mark>, keyboard keys
+$mark-bg: #6b5a2a !default;
+$mark-color: $o-gray-900 !default;
+$kbd-color: $o-gray-900 !default;
+$kbd-bg: $o-gray-300 !default;

@@ -170,3 +170,13 @@ Filled in while the plan runs.
   allowed permanently); the Docker image build failed at `apt-get` since
   10-Oct (passes with a fresh `odoo:19`). The first night with `cloud_copy`
   is 21-Oct-2026 22:00 UTC.
+- **R1 (21-Oct-2026, evening instead of the next morning):** the first push
+  ended at 20:02:31 UTC (25,156 objects in `main/`; every call `0 not
+  confirmed, 0 refused`; no warning in `ir.logging`; the alert channel holds
+  only its welcome message). The eviction of 19:13 UTC stopped at 497 MB with
+  "0 candidates left": a mark sets `last_read` to now, and the eviction skips
+  copies read in the last 5 minutes (`EVICT_PROTECT_MINUTES`), so during the
+  push every copy above the limit was protected. Expected, not a fault. The
+  hourly run of 20:08 UTC brought the cache to 254 MB (8,879 rows) by 20:11
+  UTC. Local filestore: 350 MB in 9,260 files (before: 5.1 GB); `/home/odoo`
+  782 MB of 22 GB.

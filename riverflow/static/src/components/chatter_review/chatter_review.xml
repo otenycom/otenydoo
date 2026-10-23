@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <!-- Mark as Reviewed in the chatter top bar, after Send message, Log note and
+         Activity (plan riverflow/plans/mark-as-reviewed-in-chatter.md, D1). -->
+    <t t-inherit="mail.Chatter" t-inherit-mode="extension">
+        <xpath expr="//span[hasclass('o-mail-Chatter-topbarGrow')]" position="before">
+            <div t-if="state.thread.unreviewedMessageCount > 0"
+                class="o-riverflow-ChatterReview d-flex align-items-stretch flex-shrink-0 ms-2"
+                t-att-class="{ 'my-2': !props.compactHeight }">
+                <span class="o-riverflow-ChatterReview-count d-flex align-items-center text-nowrap px-2"
+                    title="Messages from outside senders that nobody has marked as reviewed">
+                    <span class="o-riverflow-ChatterReview-dot me-2" aria-hidden="true"/>
+                    <span><span class="fw-bold" t-esc="state.thread.unreviewedMessageCount"/> to review</span>
+                </span>
+                <button class="o-riverflow-ChatterReview-button btn text-nowrap px-2"
+                    title="Read the messages first. Marking them as reviewed means you take them on."
+                    t-on-click="onClickMarkReviewed">
+                    <i class="fa fa-check me-1" aria-hidden="true"/>Mark as Reviewed
+                </button>
+            </div>
+        </xpath>
+    </t>
+</templates>

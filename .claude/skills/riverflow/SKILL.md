@@ -1146,6 +1146,8 @@ reads).
 
 ### Chatter Mixin (`riverflow.mail.thread.review.mixin`)
 
+Every model with the mixin shows the review count and **Mark as Reviewed** in its chatter top bar, with no change to its views; the count comes with the thread data and the bus (riverflow 19.0.1.1358, [plan](plans/mark-as-reviewed-in-chatter.md)). User guide: [Reviewing messages](references/review-messages.md).
+
 The mixin also copies a message from an outside sender into the Responsible team's Discuss channel. A staff user's message to a colleague of another team is copied by a separate `mail.thread` hook (`models/mail_thread.py`) into the colleague's home team channel, on every record with a chatter. Which messages reach which team channel, and why, is in [Team Channels](references/team-channels.md).
 
 The mixin extends `mail.thread` and adds message classification used by `riverflow.service` and `crewradar.log.entry`. Key fields:

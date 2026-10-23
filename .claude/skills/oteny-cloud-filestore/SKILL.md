@@ -75,9 +75,17 @@ production save keeps the file local.
    when an admin set `alert_channel_id` by hand before. Delete that row
    before the update; the update creates it again for the new channel, and
    the admin can point it back to their own channel afterwards.
-6. Put the write key in `odoo.conf` of the production server only:
-   `cloud_filestore_write_access_key_id` and
-   `cloud_filestore_write_secret_access_key`.
+6. Put the write key in `odoo.conf` of the production server only, in a
+   section of its own (D29):
+
+   ```ini
+   [oteny_cloud_filestore]
+   write_access_key_id = ...
+   write_secret_access_key = ...
+   ```
+
+   Not under `[options]`: Odoo logs an "unknown option" warning for every
+   key there that it does not know, at every start.
 7. Add the module to the server-wide modules in `odoo.conf`, with the
    modules that the server already lists:
    `server_wide_modules = base,rpc,web,oteny_cloud_filestore`. Keep `rpc`:
@@ -101,10 +109,8 @@ production save keeps the file local.
    `not_server_wide_alerted` holds the time of that alert. When the module
    is server-wide again, the job clears the parameter, so a later loss of
    the line alerts again.
-8. Restart Odoo, so the options are read. At every start, Odoo logs an
-   "unknown option ... stored as-is" warning for each of the two options.
-   This is expected: Odoo does not know the options, and the module reads
-   them.
+8. Restart Odoo, so the file is read. The module reads its section once
+   per process, so a changed key also needs a restart.
 
 The write key lives only in `odoo.conf`, so a database copy cannot carry it.
 The read key is in a system parameter, so a clone has it from the copy.
@@ -270,10 +276,8 @@ The order matters. In production mode the upload cron runs every 10 minutes,
 and every save removes its local copy after the put. Both would undo a
 download.
 
-1. Remove the two write options
-   (`cloud_filestore_write_access_key_id` and
-   `cloud_filestore_write_secret_access_key`) from `odoo.conf` of the
-   production server, and restart Odoo. Odoo is now in clone mode. New saves
+1. Remove the section `[oteny_cloud_filestore]` (the write key) from
+   `odoo.conf` of the production server, and restart Odoo. Odoo is now in clone mode. New saves
    stay on the local disk, the upload cron does nothing, and reads still come
    from the bucket with the read key.
 2. Run this in `odoo-bin shell`, and commit after each run:
@@ -309,7 +313,9 @@ all of these are true (Ries, review of 19-Oct-2026):
 - `cache_limit_mb` is set before `endpoint_url` and `bucket`, so the code
   default of 100 never applies. Production went live on 21-Oct-2026 with
   `256` (Thijs, Ries agrees; [plan 3](plans/2026-10-20-plan-3-go-live.md)
-  Q5) instead of the 10 GB first step of plan 2: the backups shrink at
+  Q5) instead of the 10 GB first step of plan 2; on 22-Oct-2026 Thijs
+  lowered it to `128`, because at 256 MB the cache held about 8,700 small
+  copies: the backups shrink at
   once, and the bucket holds every file. Until the first CUNEUS40 night with
   a real copy, the standby misses the files that left the local filestore.
 
@@ -483,7 +489,7 @@ the review text: [plan 2](plans/2026-10-19-plan-2-rollout-blockers.md).
    night with three folders (radar `dr_sync.py`). Built; deployed on
    CUNEUS40 on 21-Oct-2026, first night run 21-Oct-2026 22:00 UTC.
 3. [x] The read cache (D21): mark, write-through, fill on read, read counts,
-   eviction. Production limit 256 MB since 21-Oct-2026 (Rollout Condition).
+   eviction. Production limit 128 MB since 22-Oct-2026 (Rollout Condition).
 4. [x] Bucket deletes outside the garbage-collection lock (R13), in batches
    with `DeleteObjects` (accepted by Google, probe of 19-Oct-2026).
 - [x] N1: a missing store is exit 4 and fails the DR step; exit 2 ("skipped")

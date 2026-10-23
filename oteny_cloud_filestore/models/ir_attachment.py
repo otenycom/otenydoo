@@ -1,4 +1,5 @@
 import bisect
+import configparser
 import functools
 import hashlib
 import logging
@@ -31,6 +32,9 @@ from ..tools.cloud_store import (
 _logger = logging.getLogger(__name__)
 
 PARAM_PREFIX = "oteny_cloud_filestore."
+# The section of odoo.conf that holds the write key. Odoo reads only [options] and logs an
+# "unknown option" warning for every key it does not know there; it never looks at other sections.
+WRITE_KEY_SECTION = "oteny_cloud_filestore"
 
 DEFAULT_HOLD_DAYS = 365
 # Odoo.sh keeps backups for 3 to 4 months. A bucket object must outlive every
@@ -196,6 +200,28 @@ def _cloud_filestore_param(env, key, default=""):
     return env["ir.config_parameter"].sudo().get_param(PARAM_PREFIX + key, default) or default
 
 
+@functools.cache
+def _cloud_filestore_read_write_key(rcfile):
+    """Read the write key from the [oteny_cloud_filestore] section of `rcfile` once per process.
+
+    Like the options of [options], a changed key takes effect after a restart.
+    """
+    parser = configparser.RawConfigParser()
+    parser.read([rcfile])
+    if not parser.has_section(WRITE_KEY_SECTION):
+        return None, None
+    section = parser[WRITE_KEY_SECTION]
+    return section.get("write_access_key_id") or None, section.get("write_secret_access_key") or None
+
+
+def _cloud_filestore_write_key():
+    """Return (access key id, secret) of the write key in odoo.conf, or (None, None)."""
+    rcfile = config.get("config")
+    if not rcfile:
+        return None, None
+    return _cloud_filestore_read_write_key(rcfile)
+
+
 def cloud_filestore_mode(env):
     """Return "off", "production" or "clone".
 
@@ -211,10 +237,8 @@ def cloud_filestore_mode(env):
     """
     if not (_cloud_filestore_param(env, "endpoint_url") and _cloud_filestore_param(env, "bucket")):
         return "off"
-    has_write_key = bool(
-        config.get("cloud_filestore_write_access_key_id")
-        and config.get("cloud_filestore_write_secret_access_key")
-    )
+    access_key_id, secret_access_key = _cloud_filestore_write_key()
+    has_write_key = bool(access_key_id and secret_access_key)
     is_neutralized = bool(env["ir.config_parameter"].sudo().get_param("database.is_neutralized"))
     if has_write_key and not is_neutralized:
         return "production"
@@ -227,8 +251,7 @@ def cloud_filestore_store(env):
     if mode == "off":
         return None
     if mode == "production":
-        access_key_id = config.get("cloud_filestore_write_access_key_id")
-        secret_access_key = config.get("cloud_filestore_write_secret_access_key")
+        access_key_id, secret_access_key = _cloud_filestore_write_key()
     else:
         access_key_id = _cloud_filestore_param(env, "read_access_key_id")
         secret_access_key = _cloud_filestore_param(env, "read_secret_access_key")

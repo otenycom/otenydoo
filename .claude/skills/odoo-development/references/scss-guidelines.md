@@ -198,6 +198,12 @@ $o-dashboard-color: $o-info;
 }
 ```
 
+A Sass function or variable inside a CSS custom property is not evaluated:
+`--X: rgba($black, 0.1)` reaches the browser as literal text, and the browser
+drops the property that reads it. Interpolate (`--X: #{rgba($black, 0.1)}`) or
+write plain CSS (`rgba(0, 0, 0, 0.1)`). Seen 23-Oct-2026 in `oteny_home`: the
+icon tiles of the home screen had no shadow at all.
+
 ### Avoid `:root`
 
 Don't define CSS variables on `:root` - Odoo handles global design via SCSS. Exceptions: templates shared across bundles needing contextual awareness.

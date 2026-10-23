@@ -32,9 +32,11 @@
     }
 
     .o_oteny_home_app {
-        --OtenyHomeIcon-box-shadow: inset 0 0 0 1px rgba($black, 0.08), 0 1px 1px rgba($black, 0.02),
-            0 2px 2px rgba($black, 0.02), 0 4px 4px rgba($black, 0.02), 0 8px 8px rgba($black, 0.02),
-            0 16px 16px rgba($black, 0.02);
+        // A hairline edge, a tight contact shadow and a wide soft drop shadow.
+        // Plain CSS colours: Sass does not evaluate rgba($black, ...) inside a
+        // custom property, and the browser drops the whole shadow.
+        --OtenyHomeIcon-box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.07), 0 1px 2px rgba(0, 0, 0, 0.06),
+            0 3px 6px rgba(0, 0, 0, 0.05), 0 12px 24px -6px rgba(0, 0, 0, 0.12);
         --OtenyHomeIcon-transform: none;
         --OtenyHomeIcon-transition: box-shadow ease-in 0.1s, transform ease-in 0.1s;
 
@@ -44,9 +46,8 @@
 
         &:hover,
         &:focus-visible {
-            --OtenyHomeIcon-box-shadow: inset 0 0 0 1px rgba($black, 0.08), 0 2px 2px rgba($black, 0.03),
-                0 4px 4px rgba($black, 0.03), 0 8px 8px rgba($black, 0.03), 0 12px 12px rgba($black, 0.03),
-                0 24px 24px rgba($black, 0.03);
+            --OtenyHomeIcon-box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.09), 0 2px 4px rgba(0, 0, 0, 0.07),
+                0 8px 16px rgba(0, 0, 0, 0.07), 0 20px 36px -8px rgba(0, 0, 0, 0.16);
             --OtenyHomeIcon-transform: translateY(-2px);
         }
 

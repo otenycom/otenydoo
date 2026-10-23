@@ -32,3 +32,4 @@ from . import test_kanban_drop
 from . import test_state_deadline_on_entry
 from . import test_template_note_copy
 from . import test_transition_from_archived_record
+from . import test_state_record_unique

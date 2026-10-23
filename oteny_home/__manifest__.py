@@ -1,6 +1,6 @@
 {
     "name": "Oteny Home Screen",
-    "version": "19.0.1.6",
+    "version": "19.0.1.7",
     "summary": "A start screen with every app as an icon, for Odoo Community.",
     "description": """
 Odoo Community opens the first app after login and lists the apps only in a

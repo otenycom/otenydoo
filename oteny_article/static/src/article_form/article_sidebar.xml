@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <t t-name="oteny_article.ArticleSidebar">
+        <aside class="o_oteny_article_sidebar">
+            <div class="o_oteny_article_search position-relative">
+                <i class="fa fa-search position-absolute top-50 translate-middle-y" />
+                <input type="search" class="form-control" placeholder="Search articles"
+                    t-att-value="state.search" t-on-input="onSearchInput" t-on-keydown="onSearchKeydown" />
+            </div>
+
+            <nav class="o_oteny_article_toc">
+                <t t-if="state.search.trim()">
+                    <t t-set="results" t-value="searchResults" />
+                    <a t-foreach="results" t-as="node" t-key="node.id" href="#"
+                        class="o_oteny_article_result" t-on-click.prevent="() => this.openFromSearch(node)">
+                        <span class="o_oteny_article_row_title">
+                            <span t-if="node.icon" class="o_oteny_article_row_icon" t-esc="node.icon" />
+                            <span class="text-truncate" t-esc="node.name" />
+                        </span>
+                        <small t-if="node.parent_id" class="o_oteny_article_result_path text-truncate"
+                            t-esc="pathOf(node)" />
+                    </a>
+                    <div t-if="!results.length" class="o_oteny_article_empty">No article matches.</div>
+                </t>
+                <t t-else="">
+                    <t t-foreach="state.roots" t-as="node" t-key="node.id">
+                        <t t-call="oteny_article.ArticleSidebar.Node">
+                            <t t-set="depth" t-value="0" />
+                        </t>
+                    </t>
+                </t>
+            </nav>
+
+            <footer class="o_oteny_article_sidebar_footer">
+                <a href="#" t-on-click.prevent="openList"><i class="fa fa-list-ul me-2" />All articles</a>
+            </footer>
+        </aside>
+    </t>
+
+    <t t-name="oteny_article.ArticleSidebar.Node">
+        <div t-attf-class="o_oteny_article_node {{ depth ? '' : 'o_oteny_article_node_root' }}">
+            <a href="#" t-att-data-article-id="node.id"
+                t-attf-class="o_oteny_article_row {{ node.id === props.activeId ? 'active' : '' }}"
+                t-attf-style="--OtenyArticleRow-depth: {{ depth }}" t-on-click.prevent="() => this.open(node)">
+                <span class="o_oteny_article_chevron" t-on-click.stop.prevent="() => this.toggle(node)">
+                    <i t-if="node.children.length"
+                        t-attf-class="fa {{ state.expanded[node.id] ? 'fa-angle-down' : 'fa-angle-right' }}" />
+                </span>
+                <span t-if="node.icon" class="o_oteny_article_row_icon" t-esc="node.icon" />
+                <span class="text-truncate" t-esc="node.name" />
+            </a>
+            <t t-if="state.expanded[node.id]">
+                <t t-foreach="node.children" t-as="child" t-key="child.id">
+                    <t t-call="oteny_article.ArticleSidebar.Node">
+                        <t t-set="node" t-value="child" />
+                        <t t-set="depth" t-value="depth + 1" />
+                    </t>
+                </t>
+            </t>
+        </div>
+    </t>
+
+</templates>

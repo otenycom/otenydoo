@@ -3,13 +3,18 @@
 A database that comes from Odoo Enterprise holds its prompts, rules and synced
 skills in knowledge.article. When oteny_article is installed there (the
 phase 1 upgrade of the move to Community, while Knowledge is still
-installed), every article is copied into oteny.article with the same id, and
-everything that points at an article by model name follows:
+installed), each workspace and shared article is copied into oteny.article
+with the same id, and everything that points at an article by model name
+follows:
 
 - the xmlids of the modules that ship articles, so their data files load
   onto the copies instead of creating new rows; Knowledge's own gallery
   templates (module "knowledge", is_template) are not copied;
 - the attachments (images in article bodies).
+
+A private article is not copied: it is the page of one user that nobody else
+sees. On radar these are the "Welcome <user>" pages that Knowledge makes for
+every new user and a few empty pages; the uninstall of Knowledge deletes them.
 
 An article has no chatter, so the messages, followers and activities of the
 Knowledge articles stay behind; the uninstall of Knowledge deletes them.
@@ -62,6 +67,7 @@ def post_init_hook(env):
         SELECT {selected}
           FROM knowledge_article
          WHERE NOT COALESCE(is_template, FALSE)
+           AND category != 'private'
         ON CONFLICT (id) DO NOTHING
         """
     )
@@ -80,7 +86,12 @@ def post_init_hook(env):
     )
     xmlids = cr.rowcount
     cr.execute(
-        "UPDATE ir_attachment SET res_model = 'oteny.article' WHERE res_model = 'knowledge.article'"
+        """
+        UPDATE ir_attachment
+           SET res_model = 'oteny.article'
+         WHERE res_model = 'knowledge.article'
+           AND res_id IN (SELECT id FROM oteny_article)
+        """
     )
 
     # parent_path and the root article are stored computed values; the SQL

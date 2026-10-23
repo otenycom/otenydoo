@@ -51,6 +51,15 @@ class TestOtenyArticleTree(TransactionCase):
         self.assertNotIn("message_follower_ids", Article._fields)
         self.assertNotIn("<chatter", Article.get_view(view_type="form")["arch"])
 
+    def test_menu_opens_the_first_top_level_article(self):
+        """The Articles menu opens the form of the top-level article with the
+        lowest sequence; the form's left column shows the tree."""
+        first = self.env["oteny.article"].create({"name": "Manual", "sequence": -100})
+        action = self.env["oteny.article"].action_open_articles()
+        self.assertEqual(action["res_id"], first.id)
+        self.assertEqual(action["views"], [(False, "form")])
+        self.assertIn('js_class="oteny_article_form"', self.env["oteny.article"].get_view(view_type="form")["arch"])
+
 
 @tagged("oteny_article", "post_install", "-at_install")
 class TestOtenyArticleKnowledgeLinks(HttpCase):

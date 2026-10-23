@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <t t-name="oteny_article.ArticleFormView" t-inherit="web.FormView" t-inherit-mode="primary">
+        <xpath expr="//div[hasclass('o_form_view_container')]" position="before">
+            <ArticleSidebar t-if="!env.inDialog and !env.isSmall" activeId="model.root.resId or false"
+                version="sidebar.version" openArticle.bind="openArticle" />
+        </xpath>
+    </t>
+
+</templates>

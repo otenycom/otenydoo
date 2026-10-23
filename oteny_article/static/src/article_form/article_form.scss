@@ -1,0 +1,301 @@
+// The article form reads like a document: a quiet left column with the search
+// box and the tree of contents, and a centred page on a plain background.
+// Every colour comes from an Odoo or Bootstrap variable, so the dark bundle
+// (oteny_color_scheme) compiles its own colours from this file.
+
+.o_action_manager > .o_form_view.o_oteny_article_form {
+    $-sidebar-width: 18.5rem;
+
+    flex-direction: row;
+    height: 100%;
+
+    .o_form_view_container {
+        min-width: 0;
+    }
+
+    .o_content {
+        background-color: $o-view-background-color;
+    }
+
+    .o_form_renderer {
+        max-width: none;
+    }
+
+    .o_form_sheet_bg {
+        max-width: none;
+        margin: 0;
+        padding: 0;
+    }
+
+    .o_form_sheet {
+        position: relative;
+        margin: 0 auto;
+        border: 0;
+        max-width: 52rem;
+        padding: 2.5rem 3rem 5rem;
+    }
+
+    .o_oteny_article_sidebar {
+        display: flex;
+        flex: 0 0 $-sidebar-width;
+        flex-direction: column;
+        width: $-sidebar-width;
+        border-right: $border-width solid $border-color;
+        background-color: $o-gray-100;
+    }
+}
+
+.o_oteny_article_sidebar {
+    .o_oteny_article_search {
+        padding: 1rem 0.875rem 0.75rem;
+
+        .fa-search {
+            left: 1.65rem;
+            color: $o-gray-500;
+            pointer-events: none;
+        }
+
+        input {
+            border-color: $border-color;
+            border-radius: $border-radius-pill;
+            padding-left: 2.1rem;
+            background-color: $o-view-background-color;
+        }
+    }
+
+    .o_oteny_article_toc {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        padding: 0 0.5rem 1rem;
+    }
+
+    .o_oteny_article_node_root {
+        margin-top: 0.25rem;
+
+        > .o_oteny_article_row {
+            font-weight: $font-weight-bold;
+        }
+    }
+
+    .o_oteny_article_row,
+    .o_oteny_article_result {
+        border-radius: $border-radius;
+        color: $o-main-text-color;
+        text-decoration: none;
+
+        &:hover {
+            background-color: rgba($o-main-text-color, 0.06);
+        }
+    }
+
+    .o_oteny_article_row {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        min-height: 1.9rem;
+        padding: 0.2rem 0.5rem 0.2rem calc(0.25rem + var(--OtenyArticleRow-depth) * 0.9rem);
+
+        &.active {
+            background-color: $o-component-active-bg;
+            color: $o-action;
+            font-weight: $font-weight-bold;
+        }
+    }
+
+    .o_oteny_article_chevron {
+        display: inline-flex;
+        flex: 0 0 1rem;
+        justify-content: center;
+        color: $o-gray-500;
+
+        &:hover {
+            color: $o-main-text-color;
+        }
+    }
+
+    .o_oteny_article_row_icon {
+        flex: 0 0 auto;
+        width: 1.25rem;
+        text-align: center;
+    }
+
+    .o_oteny_article_result {
+        display: flex;
+        flex-direction: column;
+        padding: 0.35rem 0.6rem;
+    }
+
+    .o_oteny_article_row_title {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        min-width: 0;
+    }
+
+    .o_oteny_article_result_path,
+    .o_oteny_article_empty {
+        color: $o-gray-600;
+    }
+
+    .o_oteny_article_empty {
+        padding: 0.5rem 0.6rem;
+    }
+
+    .o_oteny_article_sidebar_footer {
+        border-top: $border-width solid $border-color;
+        padding: 0.75rem 1.25rem;
+
+        a {
+            color: $o-gray-600;
+
+            &:hover {
+                color: $o-main-text-color;
+            }
+        }
+    }
+}
+
+.o_oteny_article .o_form_renderer {
+    .o_oteny_article_parent {
+        min-height: 1.5rem;
+        margin-bottom: 0.25rem;
+        color: $o-gray-600;
+        font-size: $font-size-sm;
+
+        .o_field_many2one {
+            max-width: 22rem;
+        }
+    }
+
+    .o_oteny_article_title h1 {
+        font-size: 2.25rem;
+        font-weight: $font-weight-bold;
+        letter-spacing: -0.02em;
+        line-height: 1.2;
+
+        > .o_field_widget {
+            flex: 1 1 auto;
+            width: auto;
+            margin-bottom: 0;
+        }
+
+        > .o_field_widget.o_oteny_article_icon {
+            flex: 0 0 1.5em;
+            width: 1.5em;
+
+            input {
+                text-align: center;
+            }
+        }
+    }
+
+    .o_oteny_article_meta {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        margin: 0.5rem 0 2rem;
+        border-bottom: $border-width solid $border-color;
+        padding-bottom: 1rem;
+        color: $o-gray-600;
+        font-size: $font-size-sm;
+
+        > span {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+
+        .o_field_widget {
+            width: auto;
+            margin-bottom: 0;
+        }
+    }
+
+    .o_oteny_article_body {
+        width: 100%;
+        font-size: 0.975rem;
+        line-height: 1.7;
+
+        h1, h2, h3, h4 {
+            margin: 1.6em 0 0.6em;
+            font-weight: $font-weight-bold;
+            letter-spacing: -0.01em;
+        }
+
+        h1 { font-size: 1.6rem; }
+        h2 { font-size: 1.35rem; }
+        h3 { font-size: 1.15rem; }
+
+        > :first-child,
+        .odoo-editor-editable > :first-child {
+            margin-top: 0;
+        }
+
+        p, ul, ol {
+            margin-bottom: 0.9em;
+        }
+
+        code {
+            border-radius: $border-radius-sm;
+            padding: 0.1em 0.35em;
+            background-color: rgba($o-main-text-color, 0.06);
+            color: inherit;
+            font-size: 0.875em;
+        }
+
+        pre {
+            border: $border-width solid $border-color;
+            border-radius: $border-radius-lg;
+            padding: 1rem 1.25rem;
+            background-color: $o-gray-100;
+            font-size: 0.85rem;
+            line-height: 1.55;
+
+            code {
+                padding: 0;
+                background-color: transparent;
+            }
+        }
+
+        table {
+            margin-bottom: 1.25em;
+            border-collapse: collapse;
+            width: 100%;
+            font-size: 0.9rem;
+
+            th, td {
+                border: $border-width solid $border-color;
+                padding: 0.45rem 0.7rem;
+                vertical-align: top;
+            }
+
+            th {
+                background-color: $o-gray-100;
+                font-weight: $font-weight-bold;
+            }
+        }
+
+        blockquote {
+            margin: 0 0 1em;
+            border-left: 3px solid $o-gray-300;
+            padding: 0.25rem 0 0.25rem 1rem;
+            color: $o-gray-700;
+        }
+
+        a {
+            color: $o-action;
+        }
+    }
+
+    .o_oteny_article_children {
+        margin-top: 3rem;
+
+        h5 {
+            color: $o-gray-600;
+            font-size: $font-size-sm;
+            font-weight: $font-weight-bold;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+    }
+}

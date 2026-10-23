@@ -32,11 +32,12 @@ The toggle button itself stays available on these forms, so the user can flip ba
 
 ### When the Toggle Is Hidden
 
-The toggle button is hidden in three cases:
+The toggle button is hidden in four cases:
 
 1. **Inside dialogs** (`target='new'` wizards) — the wide/narrow choice is meaningless on a transient dialog.
 2. **Below the XXL breakpoint** (viewport `< ~1400px`) — at smaller widths Odoo already stacks the chatter beneath the sheet, so wide mode would have no visible effect. Resizing the browser window across the XXL boundary makes the button appear/disappear live.
 3. **System parameter disabled** — see below.
+4. **A form controller that opts out** — it calls `useSubEnv({ formWide: undefined })` in its `setup()`, after `super.setup()`, so the compiled `t-if` finds no `env.formWide`. A form with its own reading width and no chatter does this, for example the article form of [oteny-article](../../oteny-article/SKILL.md).
 
 ### Where the Wide Setting Comes From
 

@@ -51,3 +51,17 @@ class OtenyArticle(models.Model):
     def _compute_root_article_id(self):
         for article in self:
             article.root_article_id = article.parent_id.root_article_id or article
+
+    @api.model
+    def action_open_articles(self):
+        """The Articles menu: the form of the first top-level article.
+
+        The form shows the whole tree in its left column, so the menu opens on
+        an article instead of a list. The first article is the top-level one
+        with the lowest sequence; without any article, the list opens.
+        """
+        action = self.env["ir.actions.act_window"]._for_xml_id("oteny_article.action_oteny_article")
+        first = self.search([("parent_id", "=", False)], limit=1)
+        if first:
+            action.update(res_id=first.id, view_mode="form", views=[(False, "form")], context={})
+        return action

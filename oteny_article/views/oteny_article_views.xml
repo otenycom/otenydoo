@@ -20,39 +20,48 @@
         <field name="name">oteny.article.form</field>
         <field name="model">oteny.article</field>
         <field name="arch" type="xml">
-            <form>
+            <!-- The js_class adds the left column: a search box and the tree of
+                 contents. The sheet is a reading page: parent, title, body. -->
+            <form js_class="oteny_article_form" class="o_oteny_article">
                 <sheet>
                     <widget name="web_ribbon" title="Archived" bg_color="text-bg-danger" invisible="active" />
-                    <div class="oe_title">
+                    <div class="o_oteny_article_parent">
+                        <field name="parent_id" placeholder="Top-level article" readonly="is_locked"
+                            options="{'no_create': True}" />
+                    </div>
+                    <div class="oe_title o_oteny_article_title">
                         <h1 class="d-flex gap-2">
-                            <field name="icon" class="flex-grow-0" style="width: 2.5em;" readonly="is_locked" />
-                            <field name="name" placeholder="Article title" readonly="is_locked" />
+                            <field name="icon" class="o_oteny_article_icon" placeholder="📄"
+                                readonly="is_locked" />
+                            <field name="name" placeholder="Article title" readonly="is_locked" widget="text"
+                                options="{'line_breaks': False}" class="text-break" />
                         </h1>
                     </div>
-                    <group>
-                        <group>
-                            <field name="parent_id" readonly="is_locked" />
-                        </group>
-                        <group>
-                            <field name="is_locked" groups="base.group_system" />
-                            <field name="active" invisible="1" />
-                        </group>
-                    </group>
-                    <notebook>
-                        <page string="Article" name="body">
-                            <field name="body" readonly="is_locked" options="{'collaborative': false}" />
-                        </page>
-                        <page string="Child Articles" name="children">
-                            <field name="child_ids" context="{'default_parent_id': id}">
-                                <list>
-                                    <field name="sequence" widget="handle" />
-                                    <field name="icon" string=" " width="30px" />
-                                    <field name="name" />
-                                    <field name="is_locked" />
-                                </list>
-                            </field>
-                        </page>
-                    </notebook>
+                    <div class="o_oteny_article_meta">
+                        <span invisible="not is_locked">
+                            <i class="fa fa-lock me-1" />Read-only: code or module data owns this article
+                        </span>
+                        <span invisible="is_locked">
+                            Last changed <field name="write_date" options="{'show_time': false}" />
+                        </span>
+                        <span groups="base.group_system" class="ms-auto">
+                            <field name="is_locked" widget="boolean_toggle" />Locked
+                        </span>
+                        <field name="active" invisible="1" />
+                    </div>
+                    <field name="body" class="o_oteny_article_body" readonly="is_locked"
+                        placeholder="Write the article here…" options="{'collaborative': false}" />
+                    <div class="o_oteny_article_children" invisible="is_locked or not child_ids">
+                        <h5>Child Articles</h5>
+                        <field name="child_ids" context="{'default_parent_id': id}">
+                            <list>
+                                <field name="sequence" widget="handle" />
+                                <field name="icon" string=" " width="30px" />
+                                <field name="name" />
+                                <field name="is_locked" />
+                            </list>
+                        </field>
+                    </div>
                 </sheet>
             </form>
         </field>
@@ -85,6 +94,15 @@
         <field name="context">{'search_default_group_root': 1}</field>
     </record>
 
-    <menuitem id="menu_oteny_article_root" name="Articles" action="action_oteny_article" sequence="85"
+    <!-- The menu opens the first top-level article; the form's left column
+         holds the tree. The list stays reachable from that column. -->
+    <record id="action_oteny_article_home" model="ir.actions.server">
+        <field name="name">Articles</field>
+        <field name="model_id" ref="model_oteny_article" />
+        <field name="state">code</field>
+        <field name="code">action = model.action_open_articles()</field>
+    </record>
+
+    <menuitem id="menu_oteny_article_root" name="Articles" action="action_oteny_article_home" sequence="85"
         web_icon="oteny_article,static/description/icon.svg" />
 </odoo>

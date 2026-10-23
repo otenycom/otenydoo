@@ -41,4 +41,7 @@ export const colorSchemeService = {
     },
 };
 
-registry.category("services").add("color_scheme", colorSchemeService);
+// Its own key: web_enterprise adds a service "color_scheme" too, and both are
+// installed while a database moves from Enterprise to Community (phase 1 of the
+// switch), so the same key stopped the web client from loading.
+registry.category("services").add("oteny_color_scheme", colorSchemeService);

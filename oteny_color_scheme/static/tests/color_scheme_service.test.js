@@ -3,6 +3,7 @@ import { animationFrame } from "@odoo/hoot-mock";
 import { patchWithCleanup } from "@web/../tests/web_test_helpers";
 import { browser } from "@web/core/browser/browser";
 import { cookie } from "@web/core/browser/cookie";
+import { registry } from "@web/core/registry";
 import { _makeUser, user } from "@web/core/user";
 
 import { colorSchemeService } from "@oteny_color_scheme/color_scheme_service";
@@ -56,4 +57,8 @@ test("A browser that refuses the cookie gets no reload", async () => {
     patchWithCleanup(cookie, { set: () => {} });
     await colorSchemeService.start();
     expect.verifySteps([]);
+});
+
+test("the service has its own key, so web_enterprise's color_scheme service can load beside it", async () => {
+    expect(registry.category("services").get("oteny_color_scheme")).toBe(colorSchemeService);
 });

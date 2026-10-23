@@ -2,8 +2,25 @@ import { Component, onMounted, useRef, useState } from "@odoo/owl";
 import { _t } from "@web/core/l10n/translation";
 import { registry } from "@web/core/registry";
 import { useBus, useService } from "@web/core/utils/hooks";
+import { session } from "@web/session";
 import { standardActionServiceProps } from "@web/webclient/actions/action_service";
 import { computeAppsAndMenuItems } from "@web/webclient/menus/menu_helpers";
+
+/**
+ * The apps in the order of the home screen: the apps of ``first_apps`` in that
+ * order, then the other apps by name; the apps of ``hidden_apps`` are left out.
+ * Both lists hold menu xmlids (the system parameters oteny_home.first_apps and
+ * oteny_home.hidden_apps, sent in the session info).
+ */
+export function orderApps(apps, { first_apps = [], hidden_apps = [] } = {}) {
+    const rank = (app) => {
+        const index = first_apps.indexOf(app.xmlid);
+        return index === -1 ? first_apps.length : index;
+    };
+    return apps
+        .filter((app) => !hidden_apps.includes(app.xmlid))
+        .sort((a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label));
+}
 
 /**
  * The start screen: every app the user can open, as an icon with its name.
@@ -28,7 +45,8 @@ export class HomeScreen extends Component {
     }
 
     get apps() {
-        const { apps } = computeAppsAndMenuItems(this.menuService.getMenuAsTree("root"));
+        const { apps: allApps } = computeAppsAndMenuItems(this.menuService.getMenuAsTree("root"));
+        const apps = orderApps(allApps, session.oteny_home);
         const search = this.state.search.trim().toLowerCase();
         if (!search) {
             return apps;

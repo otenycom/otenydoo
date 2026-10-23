@@ -102,6 +102,45 @@ So: **verify the row in the database** after such a migration rather than trusti
 
 Re-importing the whole file resets **every** record in it to its XML values, which is usually what you want but is worth stating in the migration docstring. It also creates nothing it should not: `_load_records` matches on xml id, so existing rows are updated in place.
 
+## A value that a module writes once on another module's record
+
+A `post_init_hook` that writes on a record of another module runs once, at the
+install. When that record comes from a data file without `noupdate` (for
+example `base.lang_en`), every later update of its own module loads the file
+again and puts the original value back. `-u base` is such an update, and so is
+`-u all` or an Odoo version upgrade. Found on 23-Oct-2026: crewradar's hook set
+the en_US date format `%d-%b-%y` and week start Monday, and a `-u all` turned
+them into Odoo's `%m/%d/%Y` and Sunday.
+
+Write such a value from a `<function>` in a data file of your own module,
+without `noupdate`. Odoo calls the function at every install and every update of
+the module, and the module is updated after the module it depends on, in the
+same run. Keep the method idempotent:
+
+```xml
+<!-- crewradar/data/res_lang_data.xml -->
+<function model="res.lang" name="_crewradar_set_default_date_format"/>
+```
+
+The cost: a change that an admin makes to that value on screen is undone at the
+next update of the module. Test the update path with
+`convert_file(env, "<module>", "data/<file>.xml", {}, mode="update", noupdate=False)`
+(`crewradar/tests/test_res_lang_date_format.py`).
+
+## An old test database lacks what a skipped migration wrote
+
+A migration runs only when the installed version of its module is lower than
+the migration's folder. A test database that is already at a higher version
+(after earlier work on a branch) skips a migration that a merge brings in. When
+that migration writes a value on a `noupdate` record, the old database keeps
+the old value, and a test of the new value fails there, while it passes on a
+fresh install, which loads the value from the XML. Found on 23-Oct-2026: after
+the merge of the AUV contact type, `TestAuvContactRecipients` failed on
+`cr-test-ce` (at `crewradar_cuneus_sign` 19.0.6.273, past the migration
+19.0.6.269) and passed on a fresh database. Before you treat such a failure as a
+fault, run the test on a freshly installed database. A staging database that is
+past the version skips the migration the same way.
+
 ## Policy alternatives (explicit trade-offs)
 
 - Set **`noupdate="0"`** on the whole data file: every `-u` reapplies all declared fields — good for automation, weaker protection of database-specific tweaks.

@@ -36,13 +36,25 @@ own records. `odoo_parallel_tests` is tooling beside them.
 
 `oteny_home` — the home screen at `/odoo/home` for Odoo Community: every app
 as an icon with search; the web client opens it when the URL names no action,
-and the apps button opens it. No module depends on it; it is installed from
-Apps.
+and the apps button opens it. The order is the same for every user: the apps of
+the system parameter `oteny_home.first_apps` first, in that order, then the
+other apps by name; the apps of `oteny_home.hidden_apps` are left out, also from
+the search (both hold menu xmlids, comma-separated; `models/ir_http.py` sends
+them in the session info). A business module that depends on it sets both in
+its own data. A hidden app stays reachable by its address.
 
 `oteny_color_scheme` — light and dark mode for Odoo Community: a Theme
 preference per user (System, Light, Dark) and our own dark colours in
 `web.assets_web_dark`; System follows the operating system through the
-`color_scheme` cookie. Installed from Apps.
+`color_scheme` cookie. It defines the same column as Enterprise's
+`web_enterprise`, `res_users_settings.color_scheme`, with the same values: a
+database that installs it before `web_enterprise` is uninstalled keeps every
+user's theme. Its web client service has its own key, `oteny_color_scheme`:
+`web_enterprise` registers `color_scheme`, both are installed during such a
+move, and one key for both stopped the web client ("Cannot add key
+"color_scheme" in the "services" registry: it already exists"). A test run on
+Community alone cannot show such a clash; a module that is installed beside
+Enterprise is tested with the Enterprise addons path too.
 
 ## How a business extends a generic module
 

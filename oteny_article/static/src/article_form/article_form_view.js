@@ -1,5 +1,6 @@
-import { useState, useSubEnv } from "@odoo/owl";
+import { onPatched, useState, useSubEnv } from "@odoo/owl";
 import { registry } from "@web/core/registry";
+import { closestScrollableY } from "@web/core/utils/scrolling";
 import { usePager } from "@web/search/pager_hook";
 import { FormController } from "@web/views/form/form_controller";
 import { formView } from "@web/views/form/form_view";
@@ -8,10 +9,11 @@ import { ArticleSidebar } from "./article_sidebar";
 /**
  * The article form with the tree of contents on the left. An article that the
  * tree opens loads in place, as the pager of a form does: the form saves its
- * changes first, and the URL follows the open article. In a dialog (an article
- * opened from a many2one) the form has no left column. On a phone the left
- * column is a drawer: a button in the control panel opens it, and it closes
- * when an article opens or on a tap beside it.
+ * changes first, the URL follows the open article, and the page shows the top
+ * of the article. In a dialog (an article opened from a many2one) the form has
+ * no left column. On a phone the left column is a drawer: a button in the
+ * control panel opens it, and it closes when an article opens or on a tap
+ * beside it.
  */
 export class ArticleFormController extends FormController {
     static template = "oteny_article.ArticleFormView";
@@ -28,6 +30,20 @@ export class ArticleFormController extends FormController {
         // narrow toggle that a module may put on every form sheet (for
         // example oteny_shortcut, which keys it on env.formWide) has no use.
         useSubEnv({ formWide: undefined });
+        // The form keeps the scroll position when it loads another record, as
+        // its pager does, so the page scrolls up once it shows the article
+        // that the tree opened. Only then: on a breadcrumb back, Odoo restores
+        // the scroll position that it saved.
+        this.articleToTop = null;
+        onPatched(() => {
+            if (this.articleToTop === this.model.root.resId) {
+                this.articleToTop = null;
+                const page = closestScrollableY(this.rootRef.el.querySelector(".o_form_sheet"));
+                if (page) {
+                    page.scrollTop = 0;
+                }
+            }
+        });
     }
 
     get className() {
@@ -56,6 +72,7 @@ export class ArticleFormController extends FormController {
         if ((await root.isDirty()) && !(await root.save())) {
             return;
         }
+        this.articleToTop = resId;
         await this.model.load({ resId, resIds: [resId] });
     }
 }

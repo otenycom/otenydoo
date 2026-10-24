@@ -1,5 +1,5 @@
 import { describe, expect, test } from "@odoo/hoot";
-import { press, queryAllTexts, queryRect } from "@odoo/hoot-dom";
+import { press, queryAllTexts, queryOne, queryRect } from "@odoo/hoot-dom";
 import { animationFrame, runAllTimers } from "@odoo/hoot-mock";
 import {
     contains,
@@ -18,7 +18,8 @@ import { SIZES, utils as uiUtils } from "@web/core/ui/ui_service";
 // contents with the branch of the open article opened, a click loads another
 // article in place (after a save of the open one), and the search box shows
 // the title matches, then the body matches, each with its place in the tree.
-// The column stands beside the page at every desktop width.
+// The column stands beside the page at every desktop width, and an article
+// opened from the tree starts at its top.
 
 describe.current.tags("desktop");
 
@@ -39,7 +40,7 @@ class OtenyArticle extends models.Model {
         { id: 4, name: "Skills", sequence: 2, body: "<p>Skills for agents</p>" },
         { id: 5, name: "Billing", sequence: 1, parent_id: 4, body: "<p>Invoices and planning costs</p>" },
     ];
-    _views = { form: arch };
+    _views = { form: arch, "form,2": tallArch };
 }
 
 defineModels([OtenyArticle]);
@@ -48,6 +49,15 @@ const arch = `
     <form js_class="oteny_article_form">
         <sheet>
             <field name="name" />
+        </sheet>
+    </form>`;
+
+// An article longer than the screen, so that its page scrolls.
+const tallArch = `
+    <form js_class="oteny_article_form">
+        <sheet>
+            <field name="name" />
+            <div style="height: 3000px" />
         </sheet>
     </form>`;
 
@@ -111,4 +121,25 @@ test("the left column stands beside the page below the XXL size", async () => {
     const page = queryRect(".o_form_view_container");
     expect(page.top).toBe(column.top);
     expect(page.left).toBe(column.right);
+});
+
+test("an article opened from the tree starts at its top", async () => {
+    // Below the XXL size the page scrolls in `.o_content`.
+    patchWithCleanup(uiUtils, { getSize: () => SIZES.XL });
+    await mountWebClient();
+    await getService("action").doAction({
+        type: "ir.actions.act_window",
+        res_model: "oteny.article",
+        res_id: 2,
+        views: [[2, "form"]],
+    });
+    await animationFrame();
+    queryOne(".o_content").scrollTop = 1000;
+    expect(queryOne(".o_content").scrollTop).toBe(1000);
+
+    await contains(".o_oteny_article_row[data-article-id='4']").click();
+    await animationFrame();
+
+    expect(".o_field_widget[name=name] input").toHaveValue("Skills");
+    expect(queryOne(".o_content").scrollTop).toBe(0);
 });

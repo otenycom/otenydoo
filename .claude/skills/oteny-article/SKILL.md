@@ -26,11 +26,11 @@ The screen has two parts:
 
 - **The left column**: a search box and the tree of contents. The tree opens
   the branch of the open article; a chevron opens or closes any other branch.
-  A click opens the article in the same screen. When the open article has
-  unsaved changes, the screen saves them first; when the save fails, the
-  article stays open. The search box shows the articles whose title holds the
-  text at once, and then the articles whose body holds it, each with its
-  place in the tree. Enter opens the first match; Escape clears the search.
+  A click opens the article in the same screen, at its top. When the open
+  article has unsaved changes, the screen saves them first; when the save
+  fails, the article stays open. The search box shows the articles whose title
+  holds the text at once, and then the articles whose body holds it, each with
+  its place in the tree. Enter opens the first match; Escape clears the search.
   "All articles" at the foot of the column opens the list.
 - **The page**: the parent article, the emoji and the title, one line of
   facts (read-only or the date of the last change), the body, and the list of
@@ -83,7 +83,10 @@ user moved into the workspace is a workspace article and is copied.
   [oteny-shortcut](../oteny-shortcut/references/form-wide-toggle.md). A save
   bumps `sidebar.version`, and the column reloads the tree. `sidebar.open`
   shows the drawer on a phone; `toggleSidebar()` opens or closes it, and
-  `openArticle()` closes it first.
+  `openArticle()` closes it first. When the form has drawn an article that
+  `openArticle()` loaded, `onPatched` scrolls its page to the top
+  (`closestScrollableY` from the sheet). It does not run when the form mounts,
+  because Odoo restores a saved scroll position on a breadcrumb back.
 - `static/src/article_form/article_sidebar.js`: `ArticleSidebar` and
   `buildArticleTree()`. The tree is one `search_read` of all articles; the body
   search is a debounced `search` with `body ilike` (limit 50).
@@ -101,8 +104,9 @@ user moved into the workspace is a workspace article and is copied.
   menu, the Knowledge redirect).
 - Hoot: the suite `@oteny_article`: `article_form.test.js` (desktop: the tree,
   a click with a save, the search, the pager, the column beside the page below
-  the XXL size) and `article_form_mobile.test.js` (mobile: the drawer opens and
-  closes, New stays visible). The mobile file runs only at a phone viewport:
+  the XXL size, an article opened from the tree starts at its top) and
+  `article_form_mobile.test.js` (mobile: the drawer opens and closes, New stays
+  visible, an article opened from the tree starts at its top). The mobile file runs only at a phone viewport:
   radar's `TestHootSuitesMobile`, or `--test-tags
   "/web:MobileWebSuite.test_unit_mobile[@oteny_article/article_form_mobile]"`.
   A business repository that runs hoot suites from the command line must list

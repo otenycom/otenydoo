@@ -214,6 +214,8 @@ Odoo sets `flex-flow: column nowrap` on every action with `html .o_web_client > 
 
 On a phone the control panel shows only the first of its main buttons (the slots `control-panel-create-button`, `layout-buttons`, `control-panel-always-buttons`) and folds the others into a "⋮" menu (`control_panel_mobile.css`). A button that must stay visible on a phone goes into `control-panel-additional-actions`, beside the cog menu.
 
+The element that scrolls a form page depends on the width: `.o_form_sheet_bg` at 1534 px and wider, `.o_content` from 768 px, and `.o_form_view_container` on a phone. Find it with `closestScrollableY` (`@web/core/utils/scrolling`) from the sheet, never with a fixed selector. A form keeps its scroll position when it loads another record, also through its pager.
+
 ## Dark Mode in Odoo
 
 Odoo loads dark mode SCSS files conditionally. **Don't use** `@media (prefers-color-scheme: dark)`.

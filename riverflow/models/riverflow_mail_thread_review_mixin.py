@@ -4,6 +4,7 @@ from odoo import api, fields, models, tools, _
 from odoo.tools import html2plaintext, html_escape, is_html_empty
 from markupsafe import Markup
 from odoo.tools.mail import email_split_and_format
+from odoo.addons.mail.tools.discuss import Store
 from odoo.addons.riverflow.util import is_neutralized_or_development  # type: ignore
 import logging
 import re
@@ -381,6 +382,26 @@ class MailThreadReviewMixin(models.AbstractModel):
 
     def action_mark_external_messages_reviewed(self):
         self.write({"last_external_message_review_time": fields.Datetime.now()})
+        self._bus_send_unreviewed_message_count()
+
+    def _thread_to_store(self, store, fields, *, request_list=None):
+        """The chatter of every model with this mixin shows the review count and the
+        Mark as Reviewed button in its top bar; the count comes with the thread data,
+        because a form loads only the fields of its view (plan
+        riverflow/plans/mark-as-reviewed-in-chatter.md, D1 and D2)."""
+        super()._thread_to_store(store, fields, request_list=request_list)
+        if request_list and "unreviewedMessageCount" in request_list:
+            for thread in self:
+                store.add(thread, {"unreviewedMessageCount": thread.unreviewed_message_count}, as_thread=True)
+
+    def _bus_send_unreviewed_message_count(self):
+        """Send the review count to the internal followers, the users whose open
+        chatter also gets the new message live (plan mark-as-reviewed-in-chatter, D5)."""
+        for thread in self:
+            values = {"unreviewedMessageCount": thread.unreviewed_message_count}
+            users = thread.sudo().message_partner_ids.user_ids.filtered(lambda u: u._is_internal())
+            for user in users:
+                Store(bus_channel=user).add(thread, values, as_thread=True).bus_send()
 
     def action_view_external_messages(self):
         action = {
@@ -405,6 +426,12 @@ class MailThreadReviewMixin(models.AbstractModel):
         # Early return if no messages
         if not messages:
             return messages
+
+        # A message from an outside sender raises the review count: the open chatters
+        # of the internal followers show the new count at once.
+        external = messages.filtered(lambda m: m.create_uid.id == self._get_system_user_id())
+        if external:
+            self.browse(set(external.mapped("res_id"))).exists()._bus_send_unreviewed_message_count()
 
         # Group messages by record to avoid multiple notifications
         messages_by_record = {}

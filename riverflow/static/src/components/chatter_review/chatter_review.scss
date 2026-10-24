@@ -1,0 +1,37 @@
+// Mark as Reviewed in the chatter top bar: one quiet pill, the count on the left and
+// the action on the right, in Odoo's action colour like the chatter icons beside it.
+// Odoo compiles this file for light and dark mode with each mode's variables.
+.o-riverflow-ChatterReview {
+    border: $border-width solid $border-color;
+    border-radius: $border-radius-pill;
+    background-color: rgba($o-action, 0.06);
+    color: $o-main-text-color;
+    overflow: hidden;
+
+    .o-riverflow-ChatterReview-count {
+        padding-left: 0.85rem !important;
+    }
+
+    .o-riverflow-ChatterReview-dot {
+        width: 0.5rem;
+        height: 0.5rem;
+        border-radius: 50%;
+        background-color: $o-action;
+        box-shadow: 0 0 0 3px rgba($o-action, 0.18);
+    }
+
+    .o-riverflow-ChatterReview-button {
+        border: 0;
+        border-left: $border-width solid $border-color;
+        border-radius: 0;
+        padding-right: 0.85rem !important;
+        color: $o-action;
+        font-weight: $font-weight-bold;
+
+        &:hover,
+        &:focus-visible {
+            background-color: rgba($o-action, 0.12);
+            color: $o-action;
+        }
+    }
+}

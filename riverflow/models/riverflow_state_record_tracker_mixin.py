@@ -47,7 +47,10 @@ class RiverflowWorkflowStateRecordTrackerMixin(models.AbstractModel):
         if any(isinstance(record.id, api.NewId) for record in self):
             return
 
-        StateRecord = self.env["riverflow.state.record"]
+        # Read archived rows too: a row is archived with its subject, and a lookup that
+        # misses it creates a second row and leaves the link empty (radar plan
+        # crewradar-development/plans/one-radar-row-per-subject.md, cause C3).
+        StateRecord = self.env["riverflow.state.record"].with_context(active_test=False)
 
         # Batch query: find all state records for all records in self
         all_state_records = StateRecord.search(

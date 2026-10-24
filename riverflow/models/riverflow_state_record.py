@@ -15,6 +15,15 @@ class RiverflowStateRecord(models.Model):
     ]
     _oteny_audit_ignore = True
 
+    # One Radar row per record and row type. This unique index is the database
+    # constraint behind the rule: on 1-Apr-2026 two migrations each made a row for
+    # the same 515 employees, who then showed twice on the Radar (radar plan
+    # crewradar-development/plans/one-radar-row-per-subject.md, F2).
+    _master_record_type_uniq = models.UniqueIndex(
+        "(master_model, master_res_id, record_type)",
+        "This record already has a Radar row of this type.",
+    )
+
     active = fields.Boolean(
         default=True,
         help="Set active to false to archive the service",

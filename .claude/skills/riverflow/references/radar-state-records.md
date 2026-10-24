@@ -57,6 +57,8 @@ State records are created lazily on first access via `_compute_state_record_id`.
 | `_create_state_records(records)` | Creates one `record_type='single'` per record | Override to create multiple records (e.g., log entries create `start` + `end` pairs) |
 | `unlink()` | Deletes state records when master is deleted | Ensures cleanup |
 
+**One row per record and row type.** The unique index `riverflow_state_record_master_record_type_uniq` on `(master_model, master_res_id, record_type)` refuses a second row (riverflow 19.0.1.1357). Rows come only from `_compute_state_record_id`: it finds the row, archived rows included, or creates it, and writes the link. Never call `_create_state_records` by hand: it creates without a look and writes no link. On 1-Apr-2026 two migrations did, and 515 employees showed twice on the Radar. When `_add_state_record` reads a field, add that field to the depends of `_compute_state_record_id` (crewradar does so for `workflow_id` on the employee and the ship). Plan: radar `crewradar-development/plans/one-radar-row-per-subject.md`.
+
 ## The Computed Field Chain
 
 `riverflow.state.record` has many stored computed fields (name, workflow_id, state_id, active, responsible_team_id, etc.). The base model computes these from `service_id` -- the default case for service task records.

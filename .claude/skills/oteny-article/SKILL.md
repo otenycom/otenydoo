@@ -42,7 +42,10 @@ Every link `/odoo/action-oteny_article.action_oteny_article/<id>` opens the
 same screen with the tree. A link of the former Knowledge app,
 `/knowledge/article/<id>`, redirects to it (same id). In a dialog, for
 example an article opened from a many2one, the form shows no left column.
-On a phone the left column is hidden.
+From 768 px wide the left column stands beside the page. On a phone it is a
+drawer: the button with the panel icon, beside the cog menu, slides it in over
+the page; a tap on an article or beside the drawer closes it. The drawer keeps
+its open branches and its search text.
 
 **Locked articles.** Code or module data owns them, for example the synced
 skills. The page shows them read-only with the line "Read-only: code or
@@ -78,21 +81,32 @@ user moved into the workspace is a workspace article and is copied.
   pager with `usePager(() => null)` and sets `env.formWide` to `undefined`
   for its children, which hides the wide or narrow toggle of
   [oteny-shortcut](../oteny-shortcut/references/form-wide-toggle.md). A save
-  bumps `sidebar.version`, and the column reloads the tree.
+  bumps `sidebar.version`, and the column reloads the tree. `sidebar.open`
+  shows the drawer on a phone; `toggleSidebar()` opens or closes it, and
+  `openArticle()` closes it first.
 - `static/src/article_form/article_sidebar.js`: `ArticleSidebar` and
   `buildArticleTree()`. The tree is one `search_read` of all articles; the body
   search is a debounced `search` with `body ilike` (limit 50).
 - `static/src/article_form/article_form.scss`: colours from Odoo and Bootstrap
-  variables only, so the dark bundle needs no `.dark.scss`.
+  variables only, so the dark bundle needs no `.dark.scss`. The row needs four
+  classes, `.o_web_client > .o_action_manager > .o_form_view.o_oteny_article_form`,
+  because Odoo's column rule for every action outranks three. Below 768 px the
+  column is absolute and moved out with `translateX(-100%)`, above
+  `.o_oteny_article_backdrop`.
 - `hooks.py`: the take-over from Knowledge.
 
 ### Testing
 
 - Python: `--test-tags=oteny_article` (the tree, the rights, no chatter, the
   menu, the Knowledge redirect).
-- Hoot: the suite `@oteny_article` (`static/tests/article_form.test.js`): the
-  tree, a click with a save, the search and the pager. A business repository
-  that runs hoot suites from the command line must list `@oteny_article`.
+- Hoot: the suite `@oteny_article`: `article_form.test.js` (desktop: the tree,
+  a click with a save, the search, the pager, the column beside the page below
+  the XXL size) and `article_form_mobile.test.js` (mobile: the drawer opens and
+  closes, New stays visible). The mobile file runs only at a phone viewport:
+  radar's `TestHootSuitesMobile`, or `--test-tags
+  "/web:MobileWebSuite.test_unit_mobile[@oteny_article/article_form_mobile]"`.
+  A business repository that runs hoot suites from the command line must list
+  `@oteny_article`.
 - The install hook has no unit test: it runs once per database, so it is
   proven on a copy of a production backup that still has Knowledge.
 
@@ -102,6 +116,7 @@ user moved into the workspace is a workspace article and is copied.
 
 ### Future Ideas
 
-- [ ] The left column on a phone (it is hidden below the small breakpoint).
+- [x] The left column on a phone: a drawer, as in Odoo Knowledge (built
+  24-Oct-2026).
 - [ ] Create a child article from the tree (today: the child list on the page,
   or New and the parent field).

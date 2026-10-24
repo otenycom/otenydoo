@@ -9,7 +9,9 @@ import { ArticleSidebar } from "./article_sidebar";
  * The article form with the tree of contents on the left. An article that the
  * tree opens loads in place, as the pager of a form does: the form saves its
  * changes first, and the URL follows the open article. In a dialog (an article
- * opened from a many2one) the form has no left column.
+ * opened from a many2one) the form has no left column. On a phone the left
+ * column is a drawer: a button in the control panel opens it, and it closes
+ * when an article opens or on a tap beside it.
  */
 export class ArticleFormController extends FormController {
     static template = "oteny_article.ArticleFormView";
@@ -18,7 +20,8 @@ export class ArticleFormController extends FormController {
     setup() {
         super.setup();
         // A save can change a title or the parent: the tree then reloads.
-        this.sidebar = useState({ version: 0 });
+        // `open` shows the drawer on a phone.
+        this.sidebar = useState({ version: 0, open: false });
         // The tree replaces the record pager ("1 / 1" with arrows).
         usePager(() => null);
         // The page has its own reading width and no chatter, so the wide or
@@ -28,7 +31,11 @@ export class ArticleFormController extends FormController {
     }
 
     get className() {
-        return { ...super.className, o_oteny_article_form: !this.env.inDialog };
+        return {
+            ...super.className,
+            o_oteny_article_form: !this.env.inDialog,
+            o_oteny_article_drawer_open: this.sidebar.open,
+        };
     }
 
     async onRecordSaved(record, changes) {
@@ -36,7 +43,12 @@ export class ArticleFormController extends FormController {
         this.sidebar.version++;
     }
 
+    toggleSidebar(open = !this.sidebar.open) {
+        this.sidebar.open = open;
+    }
+
     async openArticle(resId) {
+        this.toggleSidebar(false);
         const root = this.model.root;
         if (resId === root.resId) {
             return;

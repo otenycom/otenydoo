@@ -3,7 +3,10 @@
 // Every colour comes from an Odoo or Bootstrap variable, so the dark bundle
 // (oteny_color_scheme) compiles its own colours from this file.
 
-.o_action_manager > .o_form_view.o_oteny_article_form {
+// Four classes: Odoo sets `flex-flow: column nowrap` on every action with
+// `html .o_web_client > .o_action_manager > .o_action`, which outranks three.
+// Only `.o_xxl_form_view` (1534px and wider) forces a row on its own.
+.o_web_client > .o_action_manager > .o_form_view.o_oteny_article_form {
     $-sidebar-width: 18.5rem;
 
     flex-direction: row;
@@ -42,6 +45,31 @@
         width: $-sidebar-width;
         border-right: $border-width solid $border-color;
         background-color: $o-gray-100;
+    }
+
+    // On a phone the left column is a drawer over the page, as in the
+    // Knowledge app: the toggle in the control panel slides it in, and a tap
+    // on the backdrop or on an article closes it.
+    @include media-breakpoint-down(md) {
+        position: relative;
+
+        .o_oteny_article_sidebar {
+            @include o-position-absolute(0, auto, 0, 0);
+            z-index: $zindex-modal-backdrop - 1;
+            max-width: calc(100% - 3rem);
+            transform: translateX(-100%);
+            transition: transform 0.2s ease;
+        }
+
+        &.o_oteny_article_drawer_open .o_oteny_article_sidebar {
+            transform: none;
+        }
+
+        .o_oteny_article_backdrop {
+            @include o-position-absolute(0, 0, 0, 0);
+            z-index: $zindex-modal-backdrop - 2;
+            background-color: rgba($offcanvas-backdrop-bg, $offcanvas-backdrop-opacity);
+        }
     }
 }
 

@@ -3,8 +3,20 @@
 
     <t t-name="oteny_article.ArticleFormView" t-inherit="web.FormView" t-inherit-mode="primary">
         <xpath expr="//div[hasclass('o_form_view_container')]" position="before">
-            <ArticleSidebar t-if="!env.inDialog and !env.isSmall" activeId="model.root.resId or false"
-                version="sidebar.version" openArticle.bind="openArticle" />
+            <t t-if="!env.inDialog">
+                <ArticleSidebar activeId="model.root.resId or false" version="sidebar.version"
+                    openArticle.bind="openArticle" />
+                <div t-if="env.isSmall and sidebar.open" class="o_oteny_article_backdrop"
+                    t-on-click="() => this.toggleSidebar(false)" />
+            </t>
+        </xpath>
+        <!-- Beside the cog menu: on a phone the control panel shows only the
+             first of its main buttons (New) and folds the others into a menu. -->
+        <xpath expr="//CogMenu" position="before">
+            <button t-if="env.isSmall" type="button" class="btn btn-secondary o_oteny_article_toggle"
+                title="Tree of contents" aria-label="Tree of contents" t-on-click="() => this.toggleSidebar()">
+                <i class="oi oi-fw oi-panel-right fa-flip-horizontal" />
+            </button>
         </xpath>
     </t>
 

@@ -208,6 +208,12 @@ icon tiles of the home screen had no shadow at all.
 
 Don't define CSS variables on `:root` - Odoo handles global design via SCSS. Exceptions: templates shared across bundles needing contextual awareness.
 
+## Form View Layout on Every Screen Size
+
+Odoo sets `flex-flow: column nowrap` on every action with `html .o_web_client > .o_action_manager > .o_action` (`webclient_layout.scss`). A view that puts a column beside its form must outrank it with four classes: `.o_web_client > .o_action_manager > .o_form_view.<own class> { flex-direction: row; }`. A selector with three classes loses at every width, but the fault shows only below 1534 px: from that width the form gets `.o_xxl_form_view`, and Odoo forces `row` for it with `!important`. Test such a layout below 1534 px.
+
+On a phone the control panel shows only the first of its main buttons (the slots `control-panel-create-button`, `layout-buttons`, `control-panel-always-buttons`) and folds the others into a "⋮" menu (`control_panel_mobile.css`). A button that must stay visible on a phone goes into `control-panel-additional-actions`, beside the cog menu.
+
 ## Dark Mode in Odoo
 
 Odoo loads dark mode SCSS files conditionally. **Don't use** `@media (prefers-color-scheme: dark)`.

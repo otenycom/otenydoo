@@ -1,19 +1,24 @@
 import { describe, expect, test } from "@odoo/hoot";
-import { press, queryAllTexts } from "@odoo/hoot-dom";
+import { press, queryAllTexts, queryRect } from "@odoo/hoot-dom";
 import { animationFrame, runAllTimers } from "@odoo/hoot-mock";
 import {
     contains,
     defineModels,
     fields,
+    getService,
     models,
     mountView,
+    mountWebClient,
     onRpc,
+    patchWithCleanup,
 } from "@web/../tests/web_test_helpers";
+import { SIZES, utils as uiUtils } from "@web/core/ui/ui_service";
 
 // The article form (oteny_article): the left column shows the tree of
 // contents with the branch of the open article opened, a click loads another
 // article in place (after a save of the open one), and the search box shows
 // the title matches, then the body matches, each with its place in the tree.
+// The column stands beside the page at every desktop width.
 
 describe.current.tags("desktop");
 
@@ -34,6 +39,7 @@ class OtenyArticle extends models.Model {
         { id: 4, name: "Skills", sequence: 2, body: "<p>Skills for agents</p>" },
         { id: 5, name: "Billing", sequence: 1, parent_id: 4, body: "<p>Invoices and planning costs</p>" },
     ];
+    _views = { form: arch };
 }
 
 defineModels([OtenyArticle]);
@@ -85,4 +91,24 @@ test("the search shows title matches first, then body matches, with their place"
     expect(".o_field_widget[name=name] input").toHaveValue("Planning");
     expect(".o_oteny_article_result").toHaveCount(0);
     expect(".o_oteny_article_row.active").toHaveText("Planning");
+});
+
+test("the left column stands beside the page below the XXL size", async () => {
+    // Below 1534px the form has no `.o_xxl_form_view`, whose own row rule hid
+    // that Odoo's action rule stacked the column above the page.
+    patchWithCleanup(uiUtils, { getSize: () => SIZES.XL });
+    await mountWebClient();
+    await getService("action").doAction({
+        type: "ir.actions.act_window",
+        res_model: "oteny.article",
+        res_id: 2,
+        views: [[false, "form"]],
+    });
+    await animationFrame();
+
+    expect(".o_form_view").not.toHaveClass("o_xxl_form_view");
+    const column = queryRect(".o_oteny_article_sidebar");
+    const page = queryRect(".o_form_view_container");
+    expect(page.top).toBe(column.top);
+    expect(page.left).toBe(column.right);
 });

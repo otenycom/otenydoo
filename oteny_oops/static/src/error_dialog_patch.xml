@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <t t-inherit="web.ErrorDialog" t-inherit-mode="extension">
+        <xpath expr="//t[@t-set-slot='footer']//button" position="after">
+            <div t-if="state.oopsLog" class="o_oteny_oops_log d-flex align-items-center gap-1 ms-md-2">
+                <a t-att-href="state.oopsLog.url" target="_blank">Oops Log <t t-esc="state.oopsLog.id"/></a>
+                <CopyButton className="'btn-link btn-sm'" content="state.oopsLog.url"
+                    successText.translate="The link to the Oops Log is copied."/>
+            </div>
+        </xpath>
+    </t>
+
+</templates>

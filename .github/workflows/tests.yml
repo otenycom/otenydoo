@@ -35,6 +35,6 @@ jobs:
           odoo --db_host=db --db_user=odoo --db_password=odoo \
             --addons-path=/usr/lib/python3/dist-packages/odoo/addons,$GITHUB_WORKSPACE \
             -d otenydoo_ci --without-demo=True --stop-after-init --test-enable \
-            -i oteny_shortcut,oteny_audit,oteny_backup_trigger,oteny_bot,odoo_parallel_tests \
-            --test-tags=oteny_shortcut,oteny_audit,oteny_backup_trigger,oteny_bot,odoo_parallel_tests \
+            -i oteny_shortcut,oteny_audit,oteny_backup_trigger,oteny_bot,odoo_parallel_tests,oteny_base,oteny_oops \
+            --test-tags=oteny_shortcut,oteny_audit,oteny_backup_trigger,oteny_bot,odoo_parallel_tests,oteny_base,oteny_oops \
             --log-level=test

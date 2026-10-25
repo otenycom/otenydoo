@@ -7,6 +7,7 @@ from . import test_end_to_end_live
 from . import test_gc
 from . import test_jobs
 from . import test_local_only
+from . import test_menu
 from . import test_mode
 from . import test_read
 from . import test_server_wide

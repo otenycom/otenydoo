@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     <!--
-        Inspection views for developers and admins, only in debug mode (Settings > Technical).
+        Inspection views for developers and admins, only in debug mode (Settings > Technical > Oteny).
         The cache rows are written by the read path, the upload job and the eviction cron;
         a hand edit could mark a file that is not in the bucket, so the views are read-only.
     -->
@@ -68,10 +68,10 @@
     <menuitem
         id="menu_cloud_filestore_cache"
         name="Cloud Filestore Cache"
-        parent="base.menu_custom"
+        parent="oteny_base.menu_oteny"
         action="action_cloud_filestore_cache"
         groups="base.group_no_one"
-        sequence="100"
+        sequence="10"
     />
 
     <!-- Where an attachment's content lives, for inspection in debug mode. -->

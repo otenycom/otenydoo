@@ -1,6 +1,6 @@
 {
     "name": "Cloud Filestore",
-    "version": "19.0.1.26",
+    "version": "19.0.1.27",
     "category": "Tools",
     "summary": "Keep the contents of user files in an S3 bucket",
     "description": """
@@ -8,7 +8,7 @@
     that a database copy and the files it points to stay together.
     """,
     "author": "Oteny",
-    "depends": ["base", "mail", "web"],
+    "depends": ["base", "mail", "web", "oteny_base"],
     "external_dependencies": {"python": ["boto3"]},
     "data": [
         "security/ir.model.access.csv",

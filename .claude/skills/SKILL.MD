@@ -13,13 +13,15 @@
 | [oteny-shortcut](oteny-shortcut/SKILL.md) | Shortcuts and filters on any model's views. |
 | [oteny-audit](oteny-audit/SKILL.md) | The audit trail model and mixin. |
 | [oteny-cloud-filestore](oteny-cloud-filestore/SKILL.md) | File contents in an S3 bucket: production writes, a clone reads, the outage fallback, the setup. |
+| [oteny-oops](oteny-oops/SKILL.md) | The Oops Log on Odoo Community: the error dialog writes every fault a user meets, for the administrator. |
 | [oteny-bot](oteny-bot/SKILL.md) | The bridge to an Oteny business bot: channel, activity log, form session, the work contract. |
 | [riverflow](riverflow/SKILL.md) | The workflow engine: services, states, transitions, bot dispatch. |
 | [oteny-article](oteny-article/SKILL.md) | Articles on Odoo Community: the screen with the search box and the tree of contents, locked articles, the move from Knowledge. |
 | [oteny-knowledge-sync](oteny-knowledge-sync/SKILL.md) | Publishes this tree (and a consuming business's own) into Odoo Knowledge: sync process, link resolution across roots, image embedding, troubleshooting. |
 
-`oteny_backup_trigger` and `odoo_parallel_tests` are small enough that their
-`README.md` and the `odoo-development` references cover them.
+`oteny_backup_trigger`, `odoo_parallel_tests` and `oteny_base` are small
+enough that their `README.md` and the `odoo-development` references cover
+them.
 
 ## Where knowledge goes
 

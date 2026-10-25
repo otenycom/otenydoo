@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- The section of the Oteny modules under Settings › Technical. It has no action:
+         each module puts its own menus in it, and Odoo hides it while it is empty. -->
+    <menuitem id="menu_oteny" name="Oteny" parent="base.menu_custom" sequence="100" />
+</odoo>

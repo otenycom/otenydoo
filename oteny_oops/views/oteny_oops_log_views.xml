@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!--
+        The Oops Log, for Settings administrators, in debug mode (Settings > Technical > Oteny).
+        The error dialog writes the records; nobody creates or edits one by hand. The
+        administrator archives a record when its fault is handled.
+    -->
+    <record id="oteny_oops_log_view_list" model="ir.ui.view">
+        <field name="name">oteny.oops.log.list</field>
+        <field name="model">oteny.oops.log</field>
+        <field name="arch" type="xml">
+            <list create="false">
+                <field name="create_date" string="Date" />
+                <field name="user_id" />
+                <field name="name" />
+                <field name="model" optional="show" />
+                <field name="error_type" optional="hide" />
+                <field name="company_id" groups="base.group_multi_company" optional="hide" />
+                <field name="occurrence_count" />
+                <field name="last_date" />
+            </list>
+        </field>
+    </record>
+
+    <record id="oteny_oops_log_view_form" model="ir.ui.view">
+        <field name="name">oteny.oops.log.form</field>
+        <field name="model">oteny.oops.log</field>
+        <field name="arch" type="xml">
+            <form create="false">
+                <sheet>
+                    <widget name="web_ribbon" title="Archived" bg_color="text-bg-danger" invisible="active" />
+                    <field name="active" invisible="1" />
+                    <div class="oe_title">
+                        <h1><field name="name" /></h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="user_id" />
+                            <field name="company_id" groups="base.group_multi_company" />
+                            <field name="create_date" string="Date" />
+                            <field name="last_date" />
+                            <field name="occurrence_count" />
+                        </group>
+                        <group>
+                            <field name="error_type" />
+                            <field name="exception_name" />
+                            <field name="model" />
+                            <field name="url" widget="url" />
+                            <field name="user_agent" />
+                            <field name="fingerprint" />
+                        </group>
+                    </group>
+                    <separator string="Message" />
+                    <field name="message" class="font-monospace" />
+                    <separator string="Traceback" />
+                    <field name="traceback" class="font-monospace" />
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="oteny_oops_log_view_search" model="ir.ui.view">
+        <field name="name">oteny.oops.log.search</field>
+        <field name="model">oteny.oops.log</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="name" />
+                <field name="user_id" />
+                <field name="model" />
+                <field name="url" />
+                <field name="fingerprint" />
+                <filter
+                    name="last_7_days"
+                    string="Last 7 Days"
+                    domain="[('last_date', '>=', (context_today() - relativedelta(days=7)).strftime('%Y-%m-%d'))]"
+                />
+                <separator />
+                <filter name="archived" string="Archived" domain="[('active', '=', False)]" />
+                <group>
+                    <filter name="group_fingerprint" string="Fault" context="{'group_by': 'fingerprint'}" />
+                    <filter name="group_user" string="User" context="{'group_by': 'user_id'}" />
+                    <filter name="group_error_type" string="Type" context="{'group_by': 'error_type'}" />
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_oteny_oops_log" model="ir.actions.act_window">
+        <field name="name">Oops Log</field>
+        <field name="res_model">oteny.oops.log</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">No fault in the Oops Log</p>
+            <p>When a user meets a fault in the web client, the error dialog writes it here.</p>
+        </field>
+    </record>
+
+    <menuitem
+        id="menu_oteny_oops_log"
+        name="Oops Log"
+        parent="oteny_base.menu_oteny"
+        action="action_oteny_oops_log"
+        groups="base.group_system"
+        sequence="20"
+    />
+</odoo>

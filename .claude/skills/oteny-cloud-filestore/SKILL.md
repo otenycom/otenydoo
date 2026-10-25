@@ -164,7 +164,7 @@ attachment (for example `ab/ab12...`).
   files pass the limit, down to 90 %, after a `head` confirms each object;
   nothing is removed while the bucket cannot be reached, and a file read in
   the last 5 minutes stays.
-- **Inspection in debug mode**: Settings › Technical › Cloud Filestore Cache
+- **Inspection in debug mode**: Settings › Technical › Oteny › Cloud Filestore Cache
   lists the cache rows, read-only (a hand edit could mark a file that is
   not in the bucket). The attachment form shows a group "Cloud Filestore"
   (file name, size, checksum, Stays Local), and the attachment list has

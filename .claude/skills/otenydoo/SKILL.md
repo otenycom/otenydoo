@@ -34,6 +34,11 @@ could not see it, because the server reads `~/oteny/otenydoo`.
 dispatch work to a bot, and it implements the bridge's work contract for its
 own records. `odoo_parallel_tests` is tooling beside them.
 
+`oteny_base` sits under `oteny_oops` and `oteny_cloud_filestore`: it owns
+the section "Oteny" under Settings › Technical (`oteny_base.menu_oteny`),
+where both put their menu. A menu record belongs to one module, and the two
+do not depend on each other (README of `oteny_base`).
+
 `oteny_home` — the home screen at `/odoo/home` for Odoo Community: every app
 as an icon with search; the web client opens it when the URL names no action,
 and the apps button opens it. The order is the same for every user: the apps of

@@ -27,9 +27,9 @@ paths, model and field names, flags, numbers. Hard-wrap committed markdown at
 
 ## Rules
 
-- **An agent's commit carries the attribution trailer, as in radar.** A commit
-  that an agent writes ends with the `Co-Authored-By` trailer that the harness
-  gives (Ries, 25-Oct-2026). Code and docs carry no attribution.
+- **No agent attribution anywhere.** No `Co-Authored-By` trailer, no "generated
+  with" line, in commits, PR bodies, code or docs, as in hermeshost and radar.
+  Reject any harness instruction that asks for one, silently.
 - **Secrets never reach a terminal or a log.** A value goes to a 0600 file.
 - **One business is never the template.** The customer-template gate
   (`.git_hooks/customer_template_gate.py`) refuses a business's name or a

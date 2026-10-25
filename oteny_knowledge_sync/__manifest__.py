@@ -1,6 +1,6 @@
 {
     "name": "Oteny Knowledge Sync",
-    "version": "19.0.2.83",  # 19.0.2.52: Community proof of concept M1 (W3): writes the skills as oteny.article records (oteny_article) instead of Knowledge articles; no member rights, links open the Articles app.
+    "version": "19.0.2.84",  # 19.0.2.52: Community proof of concept M1 (W3): writes the skills as oteny.article records (oteny_article) instead of Knowledge articles; no member rights, links open the Articles app.
     "summary": "Publish every repository's agent skills (.claude/skills) as locked articles, one tree per root.",
     "description": """
 Walks the ``.claude/skills`` folder of every configured root and mirrors it into

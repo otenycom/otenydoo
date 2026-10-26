@@ -84,6 +84,7 @@
                 <filter string="Inserts" name="inserts" domain="[('change_type', '=', 'i')]" />
                 <filter string="Updates" name="updates" domain="[('change_type', '=', 'u')]" />
                 <filter string="Deletes" name="deletes" domain="[('change_type', '=', 'd')]" />
+                <filter string="Remarks" name="remarks" domain="[('change_type', '=', 'r')]" />
                 <separator />
                 <group>
                     <filter string="Model" name="group_by_model" context="{'group_by': 'model_name'}" />
@@ -135,6 +136,7 @@
                 <filter string="Inserts" name="inserts" domain="[('change_type', '=', 'i')]" />
                 <filter string="Updates" name="updates" domain="[('change_type', '=', 'u')]" />
                 <filter string="Deletes" name="deletes" domain="[('change_type', '=', 'd')]" />
+                <filter string="Remarks" name="remarks" domain="[('change_type', '=', 'r')]" />
                 <filter string="Child Logs" name="child_logs" domain="[('is_child_log', '=', True)]" />
                 <filter string="Parent Logs" name="parent_logs" domain="[('is_child_log', '=', False)]" />
                 <separator />

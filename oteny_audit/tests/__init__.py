@@ -12,3 +12,4 @@ from . import test_audit_log_orphan_repair_migration
 from . import test_perf_audit_index
 from . import test_audit_aggregated_partition
 from . import test_audit_log_transaction_id_bigint
+from . import test_audit_log_remark

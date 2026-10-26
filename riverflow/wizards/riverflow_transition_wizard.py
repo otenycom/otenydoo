@@ -223,6 +223,8 @@ class TransitionWizard(models.AbstractModel):
                     # Flush stored computes that depend on state_id (e.g. auto_add_trigger)
                     # so side-effects like auto-add services run before create_related_records.
                     record.flush_recordset()
+                    # After the flush, so the remark has the transaction of the state change.
+                    record._audit_log_remark("transition", _("Transition"), transition.name)
                     # cancel_children: a back step whose work underneath is
                     # moot (e.g. the application goes back to be corrected).
                     # Runs before the deferred children, so a cancelled child
@@ -264,6 +266,7 @@ class TransitionWizard(models.AbstractModel):
                     action["res_id"] = new_record.id
                     # Flush stored computes that depend on state_id (e.g. auto_add_trigger)
                     new_record.flush_recordset()
+                    new_record._audit_log_remark("transition", _("Transition"), transition.name)
                     self.create_related_records(new_record)
 
         return action

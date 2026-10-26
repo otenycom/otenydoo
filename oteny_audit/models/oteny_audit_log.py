@@ -48,7 +48,11 @@ class OtenyAuditLog(models.Model):
     new_value = fields.Text(string="New Value Raw")
     old_value_display_name = fields.Char(string="Old Value")
     new_value_display_name = fields.Char(string="New Value")
-    change_type = fields.Selection([("i", "Insert"), ("u", "Update"), ("d", "Delete")], required=True)
+    # A remark ("r") is a line of text that says what a person or a process did, written by
+    # _log_remark. It is not a field change and holds no field value.
+    change_type = fields.Selection(
+        [("i", "Insert"), ("u", "Update"), ("d", "Delete"), ("r", "Remark")], required=True
+    )
     # Measure 3: tombstone-style snapshot for inserts and deletes.
     # Holds the full set of non-default field values for the record event in
     # the shape {field_name: {"raw": str, "display": str}}. Together with the
@@ -231,6 +235,53 @@ class OtenyAuditLog(models.Model):
             return True
 
         return False
+
+    @api.model
+    def _log_remark(self, records, key, label, text):
+        """Add a remark to the audit log of each record: a line of text that says what a
+        person or a process did, for example the transition a user ran.
+
+        ``key`` is the caller's fixed technical name for the kind of remark. It goes in
+        ``field_name``, so it is the same in every language and a filter on it keeps
+        working. ``label`` goes in ``field_display_name`` and ``text`` in the new value.
+
+        A remark is written like every other audit row (user, time, transaction, parent
+        references) and follows the same skip rules. A skip writes nothing and raises
+        nothing."""
+        # Imported here: base_patch patches the ORM on import, after this module (see __init__).
+        from .base_patch import _create_audit_logs, _record_audit_ignored, _should_skip_audit_logging
+
+        if (
+            not records
+            or not self.env.registry.loaded
+            or _should_skip_audit_logging(self.env)
+            or self._is_audit_ignored(records._name)
+        ):
+            return
+
+        logs = []
+        for record in records:
+            if _record_audit_ignored(records, record):
+                continue
+            try:
+                record_display_name = record.display_name
+            except Exception:
+                record_display_name = f"ID: {record.id}"
+            logs.append(
+                {
+                    "model_name": records._name,
+                    "record_id": record.id,
+                    "record_display_name": record_display_name,
+                    "field_name": key,
+                    "field_display_name": label,
+                    "old_value": "",
+                    "new_value": text,
+                    "old_value_display_name": "",
+                    "new_value_display_name": text,
+                    "change_type": "r",
+                }
+            )
+        _create_audit_logs(self.env, records, logs)
 
     @api.model
     def _audit_log_action_xml_id(self, technical_model_name):

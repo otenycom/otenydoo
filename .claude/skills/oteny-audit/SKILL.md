@@ -81,10 +81,26 @@ The delete snapshot is intentionally more inclusive than the create snapshot —
 | Update | `'u'` | the field name | NULL |
 | Delete tombstone | `'d'` | `'__snapshot__'` | `{field: {raw, display, label}, ...}` |
 | Legacy per-field insert/delete (pre-deploy) | `'i'` or `'d'` | the field name | NULL |
+| Remark (19.0.1.687) | `'r'` | the caller's key (for example `transition`) | NULL |
 
 The aggregated view caption renderer detects `field_name == '__snapshot__'` and expands the snapshot dict into one indented detail line per captured field, matching the visual feel of the legacy per-field rows.
 
 **Two shapes coexist on databases that span the deploy.** Inserts/deletes recorded *before* the tombstone deploy are still per-field rows (one row per captured field, like an update — `field_name` is the actual field, `snapshot` is NULL). Inserts/deletes *after* the deploy are tombstone snapshot rows. A drill-down query that returns audit history for a long-lived record will return a mix of both shapes. **Use `field_name == '__snapshot__'` (not `change_type`) as the discriminator** when reading rows — branching on `change_type` will misclassify legacy `'i'`/`'d'` rows as updates.
+
+### Remarks (change type `r`)
+
+The audit log records changed values. It cannot say which action made a change: two buttons that write the same values look the same, and an action that changes nothing leaves no row. A **remark** is a line of text that says what a person or a process did (19.0.1.687; plan `riverflow/plans/transition-in-audit-log.md`, from live service 33239, where only an elimination showed that Kirsten pressed Received already and not Upload Ship A1):
+
+```python
+self.env["oteny.audit.log"]._log_remark(records, "transition", _("Transition"), transition.name)
+```
+
+- **One row per record:** `change_type = 'r'`, `field_name` = the caller's fixed key (the same in every language, so a filter on it keeps working), `field_display_name` = the label, `new_value` and `new_value_display_name` = the text. `old_value` and `snapshot` are empty.
+- **Written like a field change.** It goes through `_create_audit_logs`, so it has the user, the time, the transaction and the parent references of a field change, and the same skip rules (`oteny_audit_ignore`, an ignored model or record, registry not loaded, restore detected). A skip writes nothing.
+- **On screen.** The caption gives a remark its own header ("Remark … by … on …") and the line "label: **text**", always escaped as plain text, also when the key is the name of an HTML field. The search views have the filter Remarks.
+- **Not over RPC.** The leading underscore keeps the function out of the web API, so a user cannot write a false remark.
+- **No field value.** The rebuild of a deleted record (insert snapshot, then updates, then delete snapshot) skips `r` rows.
+- **Callers:** riverflow writes key `transition` for every transition of the transition wizard, and key `process` for the Done cascade, the cancel cascade and the parent auto-progress (riverflow 19.0.1.1373). Tests: `test_audit_log_remark`.
 
 ### Default-Ignored Infrastructure Models
 

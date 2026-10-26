@@ -405,6 +405,15 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
             "params": {"message": message, "type": "warning", "sticky": False},
         }
 
+    def _audit_log_remark(self, key, label, text):
+        """Add a remark to the audit log of these records when oteny_audit is installed:
+        which transition ran, or which process changed the state. The audit log records
+        only changed values, so without the remark two transitions into the same state
+        look the same, and a transition back to the same state leaves no row at all.
+        Riverflow does not depend on oteny_audit; without it, this does nothing."""
+        if "oteny.audit.log" in self.env:
+            self.env["oteny.audit.log"]._log_remark(self, key, label, text)
+
     def write(self, vals):
         self._sync_workflow_with_state(vals)
         return super().write(vals)

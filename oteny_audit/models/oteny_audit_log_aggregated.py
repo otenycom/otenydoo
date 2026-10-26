@@ -58,7 +58,7 @@ class OtenyAuditLogAggregated(models.Model):
     old_value_display_name = fields.Char(string="Old Value", readonly=True)
     new_value_display_name = fields.Char(string="New Value", readonly=True)
     change_type = fields.Selection(
-        [("i", "Insert"), ("u", "Update"), ("d", "Delete")],
+        [("i", "Insert"), ("u", "Update"), ("d", "Delete"), ("r", "Remark")],
         readonly=True,
         string="Change",
     )
@@ -106,7 +106,7 @@ class OtenyAuditLogAggregated(models.Model):
         share a header and emit only their own field-change line, mirroring
         the legacy per-field UX."""
         log_list = list(self)
-        change_type_verbs = {"i": "Insert", "u": "Update", "d": "Delete"}
+        change_type_verbs = {"i": "Insert", "u": "Update", "d": "Delete", "r": "Remark"}
         date_format = self._audit_datetime_format()
         for i, log in enumerate(log_list):
             caption_parts = []
@@ -155,6 +155,11 @@ class OtenyAuditLogAggregated(models.Model):
             elif change_type == "d":
                 old_val = self._format_field_value(log.old_value_display_name or "", is_html_field)
                 field_change_str = f"<b>{field_name}</b> was <b>{old_val}</b>"
+            elif change_type == "r":
+                # A remark holds text, not a field value: always plain, even when its key
+                # is the name of an HTML field.
+                remark_text = markupsafe.escape(log.new_value_display_name or "")
+                field_change_str = f"{field_name}: <b>{remark_text}</b>"
             else:
                 field_change_str = ""
 

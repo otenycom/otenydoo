@@ -10,4 +10,12 @@
         </xpath>
     </t>
 
+    <!-- The name of the app next to the apps button also opens the home screen. -->
+    <t t-inherit="web.NavBar" t-inherit-mode="extension">
+        <xpath expr="//DropdownItem[contains(@class, 'o_menu_brand')]" position="attributes">
+            <attribute name="onSelected">() => this.openHomeScreen()</attribute>
+            <attribute name="attrs">{ href: '/odoo/home', 'data-menu-xmlid': currentApp.xmlid, 'data-section': currentApp.id }</attribute>
+        </xpath>
+    </t>
+
 </templates>

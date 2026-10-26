@@ -111,3 +111,17 @@ test("a click on an app opens it and the apps button brings the home screen back
     await animationFrame();
     expect(".o_menu_brand").toHaveCount(0);
 });
+
+test("a click on the name of the open app brings the home screen back", async () => {
+    await mountWebClient();
+    await animationFrame();
+
+    await contains(".o_oteny_home_app:contains(Contacts)").click();
+    await animationFrame();
+    await animationFrame();
+    expect(".o_menu_brand").toHaveAttribute("href", "/odoo/home");
+
+    await contains(".o_menu_brand").click();
+    await animationFrame();
+    expect(".o_oteny_home").toHaveCount(1);
+});

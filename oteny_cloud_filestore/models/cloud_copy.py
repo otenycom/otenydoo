@@ -85,6 +85,11 @@ class IrAttachment(models.Model):
         database. Files that nobody wants any more leave the copy only after
         they stayed unwanted for REMOVAL_WAIT_DAYS nights.
 
+        A name that only a checklist marker wants and that is not in the bucket
+        is a deleted file that never reached the bucket (a local-only file such
+        as a module image or an asset bundle). It counts as `deleted`, without a
+        warning; only a name that a database row uses counts as `missing`.
+
         `seed_folder` is a folder that may hold the same files already (the
         standby's mirror of the Odoo.sh backup filestore). A wanted name whose
         seed file has the right SHA-1 is hard-linked from it instead of
@@ -103,9 +108,10 @@ class IrAttachment(models.Model):
             "SELECT DISTINCT store_fname FROM ir_attachment"
             " WHERE store_fname IS NOT NULL AND cloud_local_only IS NOT TRUE"
         )
-        wanted = {row[0] for row in self.env.cr.fetchall()} | _names_under(checklist_folder)
+        used = {row[0] for row in self.env.cr.fetchall()}
+        wanted = used | _names_under(checklist_folder)
         os.makedirs(folder, exist_ok=True)
-        written = present = missing = seeded = 0
+        written = present = missing = deleted = seeded = 0
         stopped = exdev_logged = False
         for name in sorted(wanted):
             path = os.path.join(folder, name)
@@ -149,6 +155,9 @@ class IrAttachment(models.Model):
                 stopped = True
                 break
             if data is None:
+                if name not in used:
+                    deleted += 1
+                    continue
                 missing += 1
                 _logger.warning("Cloud filestore: %s is not in the bucket, skipped", name)
                 continue
@@ -179,11 +188,12 @@ class IrAttachment(models.Model):
             _logger.warning("Cloud filestore: the database wants no files, the copy removes nothing")
         _logger.info(
             "Cloud filestore copy job: %d written, %d linked from the seed folder, %d present, "
-            "%d missing in the bucket, %d removed%s",
+            "%d missing in the bucket, %d deleted and never in the bucket, %d removed%s",
             written,
             seeded,
             present,
             missing,
+            deleted,
             removed,
             ", stopped by an error" if stopped else "",
         )
@@ -192,6 +202,7 @@ class IrAttachment(models.Model):
             "seeded": seeded,
             "present": present,
             "missing": missing,
+            "deleted": deleted,
             "removed": removed,
             "stopped": stopped,
         }

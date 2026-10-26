@@ -97,7 +97,16 @@ class TestCloudFilestoreCopy(TransactionCase):
         result = self._copy()
 
         self.assertEqual(
-            result, {"written": 2, "seeded": 0, "present": 1, "missing": 0, "removed": 0, "stopped": False}
+            result,
+            {
+                "written": 2,
+                "seeded": 0,
+                "present": 1,
+                "missing": 0,
+                "deleted": 0,
+                "removed": 0,
+                "stopped": False,
+            },
         )
         with open(os.path.join(self.folder, wanted), "rb") as file:
             self.assertEqual(file.read(), b"bucket only")
@@ -117,6 +126,19 @@ class TestCloudFilestoreCopy(TransactionCase):
         self.assertFalse(result["stopped"])
         self.assertTrue(os.path.exists(os.path.join(self.folder, good)))
         self.assertFalse(os.path.exists(os.path.join(self.folder, damaged)))
+
+    def test_marker_only_name_not_in_bucket_is_deleted_not_missing(self):
+        """A deleted local-only file has a marker but was never uploaded: no warning."""
+        gone = _name_of(b"module image of an uninstalled module")
+        os.makedirs(os.path.join(self.checklist, gone[:2]))
+        open(os.path.join(self.checklist, gone), "w").close()
+        self._row(b"row file not in bucket", in_bucket=False)
+        with self.assertLogs("odoo.addons.oteny_cloud_filestore.models.cloud_copy", "WARNING") as logs:
+            result = self._copy()
+        self.assertEqual(result["deleted"], 1)
+        self.assertEqual(result["missing"], 1)
+        self.assertFalse(any(gone in line for line in logs.output))
+        self.assertFalse(os.path.exists(os.path.join(self.folder, gone)))
 
     def test_store_outage_stops_the_download_but_not_the_removal(self):
         self._row(b"wanted")

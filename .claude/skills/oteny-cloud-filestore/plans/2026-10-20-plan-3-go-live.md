@@ -184,3 +184,23 @@ Filled in while the plan runs.
   copies (242 MB, average 29 KB; none above 1 MB, because the keep value of
   GDSF favours small files). Thijs lowered `cache_limit_mb` to `128`; the
   eviction of 07:10 UTC brought the cache to 7,138 copies, 122,228,856 bytes.
+- **The local filestore after the push (22-Oct-2026, about 09:15 UTC, SSH
+  and psql on production):** 227 MB in 7,827 files. 7,260 files (117 MB)
+  are cache copies with the mark "in bucket". 507 files (91 MB) are used
+  only by local-only rows: 78 asset bundles (89 MB, one row per url, Odoo
+  rebuilds them) and module images (menu icons, `payment.method` images,
+  the partners and employees of `base` and `hr`, the spreadsheet
+  dashboards). 5 names (144 KB) are used by a user file and a local-only
+  file with the same content, for example the default avatar that is also
+  the `ai_app` menu icon, and the Wilma partner image that is also the
+  `crewradar_wilma` menu icon; each sweep asks the bucket for them ("5
+  already in the bucket"). 1 file (549 KB) has no attachment row and a
+  `checklist/` marker of 08:39 UTC, so Odoo's garbage collection removes
+  it. 56 files are `checklist/` markers. No user file is pending: the
+  upload job of 09:12 UTC checked 7,770 names, 0 uploaded, 0 left. No
+  user file of a module record went to the bucket (the D25 gap did not
+  happen on production). The bucket alone holds 17,925 files of user rows.
+  Two partner images of records with the xmlid module `import` (a data
+  import that named its own module, not `__import__`) stay local, because
+  the install treats `import` as a real module: harmless, the files are
+  local and in the backups.

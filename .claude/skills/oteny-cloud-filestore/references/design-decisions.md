@@ -403,6 +403,11 @@ of 365 days (D8) covers the 3 to 4 months of Odoo.sh backups with a wide
 margin. After that the object is deleted from the bucket, and the CUNEUS40
 copy (D16) follows: it removes its copy of an object that is no longer in the
 bucket. This revises the "add-only" detail of D16.
+*Amended 26-Oct-2026 (Thijs): the off-site restic repo `filestore` on
+`cuneus-gcp-backup` keeps up to 3 monthly snapshots of the CUNEUS40 copy, so a
+deleted file leaves every copy at most about 365 + 30 + 90 days after the
+delete in Odoo (radar `cuneus-infrastructure`,
+`plans/2026-10-26-offsite-filestore-backup.md`).*
 
 **D23 — The CUNEUS40 copy waits 30 days before it follows a delete (answers
 Q26).** (Thijs, 12-Oct-2026.) The bucket normally deletes an object only 365

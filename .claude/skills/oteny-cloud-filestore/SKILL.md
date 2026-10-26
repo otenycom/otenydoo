@@ -176,7 +176,11 @@ attachment (for example `ab/ab12...`).
   the database uses, plus the names of the `checklist/` markers, into a
   folder, with the read key and without listing the bucket (D27). A file in
   `--seed` with the right SHA-1 is hard-linked instead of downloaded. A
-  name that leaves both lists is removed 30 days later (D23). Exit codes: 0
+  name that leaves both lists is removed 30 days later (D23). A name that
+  only a checklist marker wants and that is not in the bucket counts as
+  `deleted` (a local-only file that was deleted, for example by a module
+  uninstall), without a warning; only a name that a database row uses
+  counts as `missing`. Exit codes: 0
   ok, 1 stopped at a bucket or disk error (partial copy), 2 module not
   installed or mode off, 3 crash, 4 mode on but no usable store (read key
   or bucket settings). The standby on CUNEUS40 runs it

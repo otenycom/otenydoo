@@ -1287,19 +1287,36 @@ class Service(models.Model):
             recipients = recipients.union(self.supplier_partner_id)
         return recipients
 
-    @api.depends("supply_leg_id.service_id.company_id")
+    @api.depends("supply_leg_id.service_id.company_id", "parent_id.company_id", "res_model", "res_id")
     def _compute_company_id(self):
-        """Default company is the current user's company, unless overridden"""
+        """The company follows the supply order of an info service, else the parent, else the subject.
+
+        Without any of these, a new service takes the company the user has selected and an existing
+        service keeps its company. Modules that know the subject's model add its company to the
+        dependencies, because a compute cannot depend on the res_model/res_id pair.
+        """
         for record in self:
-            if record.supply_order_service_id:
-                record.company_id = record.supply_order_service_id.company_id
+            company = (
+                record.supply_order_service_id.company_id
+                or record.parent_id.company_id
+                or record._get_subject_company()
+            )
+            if company:
+                record.company_id = company
             elif not record.company_id:
-                # we do this because the company who is ordering the service
-                # is driven by the user's company; not by the subject record (log entry)
-                # e.g. Log Entry is for Company Germany with German Employee, but the user is from Company Netherlands
-                # the supplier of a third party service will be billing to the user's company, and the user's company
-                # will do an intra-company invoice to the German company
                 record.company_id = self.env.company
+
+    def _get_subject_company(self):
+        """Return the company of the subject record, or an empty recordset when it has none."""
+        self.ensure_one()
+        no_company = self.env["res.company"]
+        if not self.res_model or not self.res_id or self.res_model not in self.env:
+            return no_company
+        Subject = self.env[self.res_model]
+        if "company_id" not in Subject._fields:
+            return no_company
+        # sudo: the company of the subject decides, also when the user has not selected it
+        return Subject.sudo().browse(self.res_id).exists().company_id
 
     def _inverse_company_id(self):
         """Allow manual override of computed company"""
@@ -1468,7 +1485,6 @@ class Service(models.Model):
             "workflow_id": template_service.workflow_id.id,
             "state_id": template_service.state_id.id,
             "responsible_team_id": template_service.responsible_team_id.id,
-            "company_id": template_service.company_id.id,
             "is_this_a_template": self.env.context.get("default_is_this_a_template", False),
             "mail_template_id": template_service.mail_template_id.id,
             "add_operator_as_recipient": template_service.add_operator_as_recipient,

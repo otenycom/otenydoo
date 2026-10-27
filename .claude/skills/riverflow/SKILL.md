@@ -1386,6 +1386,7 @@ riverflow/
 ## References
 
 - [Workflow XML Guide](references/workflow-xml-guide.md) - Detailed XML writing patterns
+- [The company of a service](references/service-company.md) - a service follows the company of its parent, else of its subject; the order, the live dependencies and why no create passes a company
 - [Coding Patterns](../odoo-development/references/coding-patterns.md) - Odoo 19 development patterns including wizard attachment handling
 - [View Shortcuts (oteny_shortcut)](../oteny-shortcut/SKILL.md) - Shortcut banner module used by the radar screen
 - [Oteny Bots operator UI](../oteny-bot/SKILL.md) - derived Slot badge on `/odoo/oteny-bots` (not in this engine)

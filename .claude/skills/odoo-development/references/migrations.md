@@ -350,6 +350,22 @@ Use ORM `unlink()` when deleting records that have:
 
 Raw SQL `DELETE` bypasses all of these. PostgreSQL's `ON DELETE SET NULL` or `ON DELETE CASCADE` runs at the database level, which does NOT trigger Odoo's ORM dependency tracking or `@api.depends` recomputation.
 
+### Recomputing a stored field: `add_to_compute()` does not pass the change on
+
+`env.add_to_compute(field, records)` followed by `env.flush_all()` recomputes the field, but it does
+not call `modified()`, so the fields that depend on it keep their old value. Call `modified()` on the
+records that changed, then flush again:
+
+```python
+env.add_to_compute(Service._fields["company_id"], services)
+env.flush_all()
+moved.modified(["company_id"])  # the records whose value changed
+env.flush_all()
+```
+
+Found in crewradar `19.0.11.82/post-migrate.py`: without `modified()`, all 3,841 services that moved
+to another company kept a `riverflow.state.record` on the old one.
+
 ### Anti-pattern: Raw SQL DELETE with Computed Dependencies
 
 **Never do this when computed fields depend on the deleted record:**

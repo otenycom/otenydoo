@@ -41,8 +41,11 @@ do not depend on each other (README of `oteny_base`).
 
 `oteny_home` — the home screen at `/odoo/home` for Odoo Community: every app
 as an icon with search; the web client opens it when the URL names no action,
-and the apps button opens it. The order is the same for every user: the apps of
-the system parameter `oteny_home.first_apps` first, in that order, then the
+and the apps button opens it. The apps button and the name of the open app are
+one link, as in Odoo Enterprise: a click on either opens the home screen, a
+hover on either turns the grid into a back arrow (web's own `o_menu_toggle`
+styles), and the home screen hides the link. The order is the same for every
+user: the apps of the system parameter `oteny_home.first_apps` first, in that order, then the
 other apps by name; the apps of `oteny_home.hidden_apps` are left out, also from
 the search (both hold menu xmlids, comma-separated; `models/ir_http.py` sends
 them in the session info). A business module that depends on it sets both in

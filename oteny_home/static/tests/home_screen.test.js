@@ -104,7 +104,7 @@ test("a click on an app opens it and the apps button brings the home screen back
     await animationFrame();
     expect(".o_menu_brand").toHaveText("Contacts");
 
-    await contains(".o_navbar_apps_menu .o_oteny_home_toggle").click();
+    await contains(".o_navbar_apps_menu .o_menu_toggle").click();
     await animationFrame();
     expect(".o_oteny_home").toHaveCount(1);
     // The top bar no longer shows the app that was open before.
@@ -119,9 +119,31 @@ test("a click on the name of the open app brings the home screen back", async ()
     await contains(".o_oteny_home_app:contains(Contacts)").click();
     await animationFrame();
     await animationFrame();
-    expect(".o_menu_brand").toHaveAttribute("href", "/odoo/home");
+    // The name is in the link of the apps button, so a hover on the name turns
+    // the grid into a back arrow, as in Odoo Enterprise.
+    expect(".o_menu_toggle").toHaveAttribute("href", "/odoo/home");
+    expect(".o_menu_toggle .o_menu_toggle_icon").toHaveCount(1);
+    expect(".o_menu_toggle .o_menu_brand").toHaveText("Contacts");
 
     await contains(".o_menu_brand").click();
     await animationFrame();
     expect(".o_oteny_home").toHaveCount(1);
+});
+
+test("the home screen hides the apps button, an open app shows it", async () => {
+    await mountWebClient();
+    await animationFrame();
+    expect(".o_oteny_home").toHaveCount(1);
+    expect(".o_menu_toggle").toHaveCount(0);
+
+    await contains(".o_oteny_home_app:contains(Contacts)").click();
+    await animationFrame();
+    await animationFrame();
+    expect(".o_menu_toggle").toHaveCount(1);
+
+    await contains(".o_menu_toggle").click();
+    await animationFrame();
+    await animationFrame();
+    expect(".o_oteny_home").toHaveCount(1);
+    expect(".o_menu_toggle").toHaveCount(0);
 });

@@ -92,16 +92,3 @@
         }
     }
 }
-
-.o_navbar_apps_menu .o_oteny_home_toggle {
-    display: flex;
-    align-items: center;
-    height: 100%;
-    padding: 0 $o-horizontal-padding;
-    color: var(--NavBar-entry-color, #{$o-navbar-entry-color});
-    font-size: $o-navbar-brand-font-size;
-
-    &:hover {
-        background-color: rgba($black, 0.08);
-    }
-}

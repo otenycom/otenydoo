@@ -12,8 +12,12 @@ patch(NavBar.prototype, {
         useBus(this.env.bus, "ACTION_MANAGER:UI-UPDATED", () => this.render());
     },
 
+    get isHomeScreenOpen() {
+        return this.actionService.currentController?.action.tag === HOME_SCREEN_TAG;
+    },
+
     get currentApp() {
-        if (this.actionService.currentController?.action.tag === HOME_SCREEN_TAG) {
+        if (this.isHomeScreenOpen) {
             return undefined;
         }
         return super.currentApp;

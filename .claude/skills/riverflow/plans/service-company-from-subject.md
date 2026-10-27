@@ -1,8 +1,10 @@
 # Plan: the company of a service comes from its subject
 
-Status: design agreed with Thijs on 26-Oct-2026 and 27-Oct-2026; built on 27-Oct-2026 on the
-branches `feat/service-company-from-subject` (otenydoo, radar), not committed. riverflow
-19.0.1.1374, crewradar 19.0.11.82. See the outcome at the end.
+Status: built. Design agreed with Thijs on 26-Oct-2026 and 27-Oct-2026; built on the branches
+`feat/service-company-from-subject` and merged on 27-Oct-2026 (otenydoo PR #5 into `main`, radar
+PR #8 into `dev`), not deployed yet. riverflow 19.0.1.1374, crewradar 19.0.11.82. See the
+outcome at the end; the rule as it works now is in
+[service-company.md](../references/service-company.md).
 
 ## Why
 

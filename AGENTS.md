@@ -48,7 +48,9 @@ paths, model and field names, flags, numbers. Hard-wrap committed markdown at
   the final reply, update the skill of every module you touched: what was
   built, what was learned, and which roadmap items moved. The index in
   [`.claude/skills/SKILL.MD`](.claude/skills/SKILL.MD) names the skill of each
-  module. A short session is not an exception.
+  module. A short session is not an exception. A PR merge also ends with this
+  step: set the plans that the PR builds to built, and write what was built
+  into the skills in the present tense.
 
 ## Branches and release order
 

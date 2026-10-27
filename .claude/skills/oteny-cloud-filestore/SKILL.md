@@ -154,7 +154,13 @@ attachment (for example `ab/ab12...`).
   deletes the objects past the hold time in batches of up to 1,000
   (`DeleteObjects`), each batch under Odoo's own SHARE lock on
   `ir_attachment` with Odoo's 10 s `lock_timeout`, and it checks every name
-  again inside the lock. A clone never deletes in the bucket.
+  again inside the lock. A clone never deletes in the bucket. On a clone, the
+  garbage collection drops the local file and the checklist marker in one
+  pass and stays silent when the local file was never there: a clone restore
+  brings the `ir.attachment` rows and the checklist markers but not the file
+  bytes of files that live only in the bucket, so Odoo's base loop would log
+  every such name at INFO with a full traceback. The clone branch logs only
+  a short summary ("Cloud filestore gc (clone): N checked, M local removed").
 - **The read cache** (D21): a cache copy is a normal file in the local
   filestore whose row in `oteny.cloud.filestore.cache` carries the mark
   "in bucket". A row is marked only after a confirmed upload or a verified

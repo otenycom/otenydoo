@@ -887,8 +887,16 @@ class IrAttachment(models.Model):
         so no delete may happen here. A restore sets every marker to the
         restore date, and a lost checklist means no bucket delete at all, so
         both failures are safe.
+
+        In clone mode the loop is the same as Odoo's, but a missing local
+        file is silent: a clone restore brings the ir.attachment rows and
+        the checklist markers, not the file bytes of files that live only
+        in the bucket. Odoo's base method logs each such name at INFO with
+        a full traceback; here it is just a marker to drop. The clone has
+        no write key, so no bucket delete can ever happen from here.
         """
-        if self._cloud_filestore_mode() != "production":
+        mode = self._cloud_filestore_mode()
+        if mode == "off":
             return super()._gc_file_store_unsafe()
 
         checklist = {}
@@ -911,18 +919,27 @@ class IrAttachment(models.Model):
                         pass
                     except OSError as error:
                         _logger.warning("Cloud filestore: local file not removed: %s", error)
-                    kept += 1
-                    continue
+                    if mode == "production":
+                        # The marker is the pending-delete list for the bucket job.
+                        kept += 1
+                        continue
                 try:
                     os.unlink(checklist[fname])
                 except OSError:
                     pass
-        _logger.info(
-            "Cloud filestore gc: %d checked, %d local removed, %d markers kept for the delete job",
-            len(checklist),
-            local_removed,
-            kept,
-        )
+        if mode == "production":
+            _logger.info(
+                "Cloud filestore gc: %d checked, %d local removed, %d markers kept for the delete job",
+                len(checklist),
+                local_removed,
+                kept,
+            )
+        else:
+            _logger.info(
+                "Cloud filestore gc (clone): %d checked, %d local removed",
+                len(checklist),
+                local_removed,
+            )
 
     @api.model
     def _cloud_filestore_delete_expired(self):

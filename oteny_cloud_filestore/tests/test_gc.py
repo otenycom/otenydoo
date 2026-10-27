@@ -273,6 +273,28 @@ class TestCloudFilestoreGc(TransactionCase):
         self._gc()
         self.assertEqual(self.fake.deletes, [])
 
+    def test_clone_gc_silences_missing_local_file_and_drops_marker(self):
+        """A clone-restored row with no local bytes must not log a traceback.
+
+        A clone restore brings the ir.attachment row and the checklist marker
+        of a deleted name, but not the file bytes: those live only in the
+        bucket. Odoo's base loop would log every such name at INFO with a
+        full traceback; the clone branch stays silent and drops the marker.
+        """
+        attachment = self._save(b"only in bucket")
+        fname = self._unlink_aged(attachment, 400)
+        # The clone's local filestore never had this file.
+        local_path = self.attachment._full_path(fname)
+        if os.path.exists(local_path):
+            os.unlink(local_path)
+        self.mode = "clone"
+        with self.assertNoLogs("odoo.addons.oteny_cloud_filestore.models.ir_attachment", "WARNING"):
+            with self.assertNoLogs("odoo.addons.base.models.ir_attachment", "INFO"):
+                self._gc()
+        self.assertFalse(os.path.exists(self._marker(fname)))
+        self.assertEqual(self.fake.deletes, [])
+        self.assertIn(fname, self.fake.objects)
+
     def test_delete_job_invalid_hold_days_falls_back_to_365(self):
         young = self._save(b"young file")
         old = self._save(b"old file")

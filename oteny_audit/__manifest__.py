@@ -5,7 +5,7 @@
     # 19.0.1.473: perf: partial snapshot GIN + (field_name, create_date) base index
     # 19.0.1.598: transaction_id becomes a 64-bit column (BigInteger, int8) on the log, the ref and the aggregated view; txid_current() passed 2^31 on production on 2026-09-12 and every write failed with "integer out of range" (white screen). migrations/19.0.1.598/pre-migrate.py converts the columns; the field type keeps fresh installs correct.
     # 19.0.1.687: change type "r" (Remark) and oteny.audit.log._log_remark(records, key, label, text): a line of text that says what a person or a process did (radar plan riverflow/plans/transition-in-audit-log.md). The caption shows "Remark ..." with "label: text"; the search views get a filter Remarks. No migration: change_type is a varchar column.
-    "version": "19.0.1.687",
+    "version": "19.0.1.688",
     "depends": ["base", "mail"],
     "author": "Oteny.com",
     "category": "Extra Tools",

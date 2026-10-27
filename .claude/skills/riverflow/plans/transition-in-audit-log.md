@@ -1,6 +1,6 @@
 # Plan: the transition in the audit log
 
-Status: design agreed with Thijs on 26-Oct-2026; built on 26-Oct-2026 on the branches `feat/audit-remarks` (otenydoo, radar), not committed. oteny_audit 19.0.1.687, riverflow 19.0.1.1373, crewradar_wilma 19.0.2.347. Tests: oteny_audit 0 failed of 110; riverflow `test_transition_audit_remark` 0 failed of 8; full radar suite 1 failed and 7 errors of 5,483, all from the state of `cr-test` (see the outcome below).
+Status: design agreed with Thijs on 26-Oct-2026; built on 26-Oct-2026 on the branches `feat/audit-remarks` (otenydoo, radar), not committed. oteny_audit 19.0.1.687, riverflow 19.0.1.1373, crewradar_wilma 19.0.2.347. Tests: oteny_audit 0 failed of 110; riverflow `test_transition_audit_remark` 0 failed of 8; full radar suite 1 failed and 7 errors of 5,483, all from the state of `cr-test` (see the outcome below). Basecamp: [BC 10447209690](https://3.basecamp.com/5527227/buckets/38887735/todos/10447209690).
 
 ## Why
 

@@ -180,9 +180,9 @@ class TestTransitionAuditRemark(TransactionCase):
         self.assertEqual(child.state_id, self.child_done)
         self.assertEqual(
             self._remarks(child, "process").mapped("new_value_display_name"),
-            [f"Done with parent service {parent.display_name}"],
+            ["Done. Executed by parent."],
         )
-        self.assertEqual(self._remarks(child, "process").field_display_name, "Process")
+        self.assertEqual(self._remarks(child, "process").field_display_name, "Transition")
 
     def test_cancel_cascade_gives_a_remark_on_the_child_service(self):
         parent = self._service("Cancelled parent", self.parent_workflow, self.parent_open)
@@ -193,7 +193,7 @@ class TestTransitionAuditRemark(TransactionCase):
         self.assertEqual(child.state_id, self.child_cancelled)
         self.assertEqual(
             self._remarks(child, "process").mapped("new_value_display_name"),
-            [f"Cancelled with parent service {parent.display_name}"],
+            ["Cancelled. Executed by parent."],
         )
 
     def test_auto_progress_gives_a_remark_on_the_parent_service(self):
@@ -204,5 +204,6 @@ class TestTransitionAuditRemark(TransactionCase):
 
         self.assertEqual(parent.state_id, self.parent_next)
         self.assertEqual(
-            self._remarks(parent, "process").mapped("new_value_display_name"), ["All child services done"]
+            self._remarks(parent, "process").mapped("new_value_display_name"),
+            ["Next. Executed by child services."],
         )

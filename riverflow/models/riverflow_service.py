@@ -2040,8 +2040,8 @@ class Service(models.Model):
                     child.state_id = done_state
                     child._audit_log_remark(
                         "process",
-                        _("Process"),
-                        _("Done with parent service %(parent)s", parent=service.display_name),
+                        _("Transition"),
+                        _("Done. Executed by parent."),
                     )
 
     def _cascade_cancel_to_subtree(self):
@@ -2073,8 +2073,8 @@ class Service(models.Model):
                     child.state_id = cancel_state
                     child._audit_log_remark(
                         "process",
-                        _("Process"),
-                        _("Cancelled with parent service %(parent)s", parent=self.display_name),
+                        _("Transition"),
+                        _("Cancelled. Executed by parent."),
                     )
             child._cascade_cancel_to_subtree()
 
@@ -2220,7 +2220,11 @@ class Service(models.Model):
         )
         if next_state:
             self.state_id = next_state
-            self._audit_log_remark("process", _("Process"), _("All child services done"))
+            self._audit_log_remark(
+                "process",
+                _("Transition"),
+                _("%(state)s. Executed by child services.", state=next_state.name),
+            )
             self._create_deferred_children(next_state)
 
     @api.model

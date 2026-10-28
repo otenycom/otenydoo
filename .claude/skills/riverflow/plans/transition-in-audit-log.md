@@ -49,8 +49,8 @@ Riverflow uses this function at two places:
   name of the transition, for example "Transition: Received already". This also works when the
   transition does not change the state, for example Resend Application.
 - When a service changes state because of its parent or its child services, and not because of a
-  transition, riverflow adds a remark that names the cause, for example "Process: Done with parent
-  service Arrange A1 Application".
+  transition, riverflow adds a remark that names the cause, for example "Transition: Done.
+  Executed by parent.".
 
 Riverflow adds a remark only when the audit module is installed. Without the audit module, riverflow
 works as it does today.
@@ -139,13 +139,14 @@ A user can find all remarks with the new filter "Remarks" in the audit log.
      record") rolls back the transaction, the remark included.
 7. **The three state changes without a transition also write a remark that names the process**
    (Thijs, 26-Oct-2026), in `riverflow/models/riverflow_service.py`, each after its own state
-   write, on the service whose state changes, key `process`, label "Process":
-   - the Done cascade (`_cascade_done_to_children`, `child.state_id = done_state`): text "Done
-     with parent service *name of the parent*";
-   - the cancel cascade (`_cancel_end_state`, `child.state_id = cancel_state`): text "Cancelled
-     with parent service *name of the parent*";
+   write, on the service whose state changes, key `process`, label "Transition" (Thijs,
+   28-Oct-2026: the same label as a real transition; the key `process` still tells the two apart):
+   - the Done cascade (`_cascade_done_to_children`, `child.state_id = done_state`): text "Done.
+     Executed by parent.";
+   - the cancel cascade (`_cancel_end_state`, `child.state_id = cancel_state`): text "Cancelled.
+     Executed by parent.";
    - the parent auto-progress (`_auto_progress_to_next_state`, `self.state_id = next_state`):
-     text "All child services done".
+     text "*name of the new state*. Executed by child services.".
    The texts are translatable (`_()`). The user on the line is the person whose transition on the
    other service started the process.
 8. **Wilma learns the new change type.** Two texts tell Wilma that the change types are only `i`,
@@ -246,3 +247,16 @@ same name for the Wilma texts (decision 8). Commit otenydoo first, then radar, w
   `cr-test` still names it. `TestSiteLifecycle` (1 failure, 2 errors, crewradar): `cr-test` still
   holds the state `crewradar.state_site_archived` (id 93, created 8-Oct-2026), which the test says
   must not exist. Both are stale data in the test database.
+
+## Outcome (28-Oct-2026)
+
+- The three remarks of decision 7 have the label "Transition" (riverflow 19.0.1.1380).
+  `test_transition_audit_remark`: 0 failed of 8 on `cr-test`.
+- Proof on `crmain`, in an Odoo shell transaction that was rolled back. The transition Cancel on
+  A1 application 20564 wrote "Transition: Cancelled. Executed by parent." on its child service
+  22221. AUV service 38560 was set to Done, followed by `_cascade_done_to_children()`, because the
+  save check of Signed AUV Received holds without the signed AUV. That wrote "Transition: Done.
+  Executed by parent." on child service 38561.
+- The parent auto-progress cannot run on `crmain`. Its only state, Send Issued A1 of Arrange A1
+  Application, has no transition into it, and the next state, Done, is hidden in the statusbar,
+  which `_auto_progress_to_next_state` skips.

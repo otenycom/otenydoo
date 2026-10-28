@@ -23,6 +23,8 @@ Automatic audit logging module for Odoo 19. Patches the ORM to log all create, u
 
 Navigate to **Audit > Log**. The default view shows aggregated changes from yesterday onwards.
 
+The Transaction ID column (hidden by default, turn it on in the column menu) is a link: a click adds the filter Transaction ID = <value>, so the list shows every change made in the same database transaction.
+
 ### View audit for a specific record
 
 From any list or form view, select one or more records, then use the **Action menu (gear icon) > Audit Log**. This opens the aggregated view filtered to that record, including changes to child records.

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <t t-name="oteny_audit.TransactionLinkField">
+        <a t-if="value" href="#" t-on-click.prevent.stop="onClick" t-esc="formattedValue" />
+    </t>
+
+</templates>

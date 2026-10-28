@@ -49,7 +49,11 @@ user: the apps of the system parameter `oteny_home.first_apps` first, in that or
 other apps by name; the apps of `oteny_home.hidden_apps` are left out, also from
 the search (both hold menu xmlids, comma-separated; `models/ir_http.py` sends
 them in the session info). A business module that depends on it sets both in
-its own data. A hidden app stays reachable by its address.
+its own data. A hidden app stays reachable by its address. The top bar hides
+web's own app-name item (`t-if="false"`) and does not remove it: `web_enterprise`,
+which odoo.sh installs by `auto_install`, removes that item from its own top bar
+by xpath, and the web client does not start when the item is gone (odoo.sh dev
+build 40714568, 27-Oct-2026); `static/tests/navbar_enterprise.test.js` covers it.
 
 `oteny_color_scheme` — light and dark mode for Odoo Community: a Theme
 preference per user (System, Light, Dark) and our own dark colours in

@@ -19,8 +19,13 @@
         </xpath>
     </t>
 
+    <!-- Hide the name of web's own, not remove it: Odoo Enterprise builds its
+         top bar from web.NavBar and removes that element itself, so the web
+         client does not start when it is gone. -->
     <t t-inherit="web.NavBar" t-inherit-mode="extension">
-        <xpath expr="//DropdownItem[contains(@class, 'o_menu_brand')]" position="replace"/>
+        <xpath expr="//DropdownItem[contains(@class, 'o_menu_brand')]" position="attributes">
+            <attribute name="t-if">false</attribute>
+        </xpath>
     </t>
 
 </templates>

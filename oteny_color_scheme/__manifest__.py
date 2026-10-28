@@ -1,6 +1,6 @@
 {
     "name": "Oteny Light and Dark Mode",
-    "version": "19.0.1.19",
+    "version": "19.0.1.20",
     "summary": "Light and dark mode for Odoo Community: a Theme preference per user.",
     "description": """
 Odoo Community can load a dark style bundle (web.assets_web_dark), but has no

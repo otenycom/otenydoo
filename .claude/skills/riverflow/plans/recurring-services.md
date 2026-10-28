@@ -112,65 +112,40 @@ transition's `action_context` (A2).
 moves twice a week: Monday (send the request) → Friday (the pickup) → next Monday (Thijs,
 28-Oct-2026).
 
-*How a transition changes the deadline today, in plain terms.* Four things can set the deadline
-when a service goes through a transition, and the first one that applies wins
-(`riverflow.transition.wizard.action_save()`):
+*How a transition sets the deadline, in plain terms.* Each transition of the service carries a
+deadline key in its `action_context`, in the style of `followup_in_days`. When HR clicks the
+transition, its screen shows the deadline field. HR can change the date before Save (a public
+holiday, a closed AB). On Save the service gets the date on the screen. HR can also change the
+deadline of the service at any time after the transition. There are two keys:
 
-1. **A key on the transition.** The transition's `action_context` can hold one of the step
-   deadline keys (`STEP_DEADLINE_KEYS` in `riverflow/models/riverflow_state.py`):
-   `clear_deadline` (no deadline), `set_deadline_to_today`, `followup_in_days` (today + N days;
-   the screen shows the date so the user can change it) and `set_deadline_relative` (a rule:
-   a source date such as the log entry start, plus N days).
-2. **A date the user chooses on the transition screen.**
-3. **The setting of the state the service enters** (Deadline on Entry, release R5c): keep the
-   date, follow a rule, today + N days, today, or no deadline. It is the default for every
-   transition into that state.
-4. **Nothing:** the service keeps its date.
+- `next_deadline_weekday`, with a weekday name: the screen proposes the first such weekday
+  strictly after the service's current deadline, never counted from today;
+- `ask_deadline`: the screen shows the deadline field empty and required, with no proposal, and
+  HR enters the date (Thijs, 28-Oct-2026).
 
-Some screens also write their own date. The e-mail sender hides the deadline field and sets the
-deadline to tomorrow, for the reply (`update_write_values()` in
-`riverflow/wizards/riverflow_service_email_sender.py`), or to today + N with the key
-`snooze_deadline_days`.
-
-For the weekly service today, all five states have Deadline on Entry = Keep, and no transition
-has a deadline key. So only two things move its deadline. The first is the e-mail sender: when
-HR sends the Monday e-mail, the deadline goes to tomorrow, which is what the audit log shows
-(31484: 3-Aug → 4-Aug, 35060: 21-Sep → 22-Sep, 38370: 19-Oct → 20-Oct, each in the same second
-as the state change). The second is the spawn code, which gives the *next* service the next
-Monday counted from today. No transition sets the Friday of the pickup or the next Monday.
-
-*What changes.* `riverflow.service.wizard`, the screen of every default action, already reads the
-`action_context` key `followup_in_days` and proposes today + N days in its deadline field.
-Beside it comes a new step deadline key in the same style, `next_deadline_weekday`, with a
-weekday name as its value, for example `{'next_deadline_weekday': 'monday'}` (Thijs,
-28-Oct-2026): the screen proposes the first such weekday after the service's current deadline.
-It never counts from today, so the day of the click does not matter:
-
-| Step | Key | Current deadline | Proposed |
+| Transition | Key | Current deadline | Proposed |
 |---|---|---|---|
 | Send Pickup Request | `{'next_deadline_weekday': 'friday'}` | Mon 26-Oct | Fri 30-Oct |
 | Upload Permits, Nothing to Upload (from Awaiting Pickup) | `{'next_deadline_weekday': 'monday'}` | Fri 30-Oct | Mon 2-Nov |
 | Upload Permits, Nothing to Upload (from Awaiting Pickup Request) | `{'next_deadline_weekday': 'monday'}` | Mon 26-Oct | Mon 2-Nov |
-| Back | `{'previous_deadline_weekday': 'monday'}` | Fri 30-Oct | Mon 26-Oct |
+| Back | `{'ask_deadline': True}` | Fri 30-Oct | None: HR enters the date |
 
-"After" means strictly after: a Monday deadline with `'monday'` gives the Monday a week later,
-so a week without an e-mail still moves on. The rule also holds when HR has moved the deadline
-by hand (Tue 27-Oct gives Fri 30-Oct and then Mon 2-Nov), and when HR finishes a week early
-(Mon 26-Oct, clicked Fri 23-Oct, gives Mon 2-Nov; the fault of 23-Oct cannot happen). Back needs
-the Monday *before* the Friday deadline; with `next_deadline_weekday` it would get the Monday
-after, and a second Send Pickup Request would then propose the Friday of the wrong week. So Back
-gets the mirror key `previous_deadline_weekday`, the last such weekday before the current
-deadline (Thijs, 28-Oct-2026). HR sees the date and can change it before Save (a public
-holiday, a closed AB). Both keys join `STEP_DEADLINE_KEYS` (`riverflow/models/riverflow_state.py`),
-so the target state's deadline setting does not overwrite them, and `action_save()` writes them
-as a fixed date, like `followup_in_days`. The e-mail sender (`riverflow.service.email.sender.wizard`,
-field Follow-up deadline) and the bulk upload wizard (`cuneus.weekly.bulk.upload.wizard`) both
-inherit `riverflow.service.wizard`, so all three screens get the proposal without their own code.
-The e-mail sender needs one change: with `next_deadline_weekday` on the transition it shows its
-Follow-up deadline field with the proposed Friday and writes that date, instead of tomorrow. Today
-it does so only for `followup_in_days`. No roll
-forward: a week finished weeks late proposes a deadline in the past, and HR changes it by hand.
-HR keeps the service up to date, as it has done in the last weeks (Thijs, 28-Oct-2026).
+Because "after" is strictly after, a Monday deadline with `'monday'` gives the Monday a week
+later, so a week without an e-mail moves on. A deadline that HR has moved by hand within the week
+still leads to the right days (Tue 27-Oct gives Fri 30-Oct, and then Mon 2-Nov). A week that HR
+finishes early goes to the next Monday all the same (Mon 26-Oct, clicked on Fri 23-Oct, gives
+Mon 2-Nov). Back follows a mis-click, so no rule knows the right date: HR enters it. A week that HR finishes weeks late gets a proposal in the past, and HR changes
+it by hand; HR keeps the service up to date (Thijs, 28-Oct-2026).
+
+*Where it lives.* Both keys are in `STEP_DEADLINE_KEYS` (`riverflow/models/riverflow_state.py`),
+so the target state's Deadline on Entry setting does not overwrite them, and `action_save()` of
+`riverflow.transition.wizard` writes the date as a fixed date, as for `followup_in_days`.
+`riverflow.service.wizard` computes the proposal in its deadline field, or leaves the field
+empty and required for `ask_deadline`. The three screens of the
+service inherit it: the default action screen, the e-mail sender
+(`riverflow.service.email.sender.wizard`, field Follow-up deadline) and the bulk upload wizard
+(`cuneus.weekly.bulk.upload.wizard`). With one of the keys on the transition, the e-mail sender
+shows its Follow-up deadline field and writes the date on the screen.
 
 **A3. People can delete a recurring service.** No delete rule. When the service is gone, a user
 starts a new one with New Recurring Service (A4); that is the repair that needed the dev team on
@@ -244,7 +219,7 @@ Done goes. "Went Friday" was one step too many (Ries, 27-Oct-2026).
 | Awaiting Pickup Request | Nothing to Upload | Awaiting Pickup Request | Default action, for a week without an e-mail. | Monday of next week |
 | Awaiting Pickup | Upload Permits | Awaiting Pickup Request | The bulk upload wizard. | Monday of next week |
 | Awaiting Pickup | Nothing to Upload | Awaiting Pickup Request | Default action. | Monday of next week |
-| Awaiting Pickup | Back | Awaiting Pickup Request | Default action, for a mis-click on Send Pickup Request. | Monday of this week |
+| Awaiting Pickup | Back | Awaiting Pickup Request | Default action, for a mis-click on Send Pickup Request. | None: HR enters the date (`ask_deadline`) |
 
 (Thijs, 28-Oct-2026.)
 
@@ -308,9 +283,10 @@ No interim fix of the old spawn code: the Radar dev team builds the whole redesi
 before it goes to production (Thijs, 28-Oct-2026).
 
 1. Part A in riverflow. Tests: `next_deadline_weekday` proposes the first such weekday strictly
-   after the current deadline, and `previous_deadline_weekday` the last one strictly before, for
-   a deadline on every day of the week and for a click days before or after the deadline; two finished weeks in a row move the deadline two weeks, never
-   twice to the same week; a date that HR types on the screen wins; the target state's deadline
+   after the current deadline, for a deadline on every day of the week and for a click days
+   before or after the deadline; two finished weeks in a row move the deadline two weeks, never
+   twice to the same week; `ask_deadline` shows an empty, required deadline field and writes the
+   date that HR enters; a date that HR types on the screen wins; the target state's deadline
    setting (release R5c) does not overwrite the key; `followup_in_days` still counts from today;
    the e-mail sender writes the proposed Friday, not tomorrow, and still writes tomorrow for a
    transition without the key. New
@@ -321,8 +297,8 @@ before it goes to production (Thijs, 28-Oct-2026).
    child rules, the reports), because this is the first workflow without one.
 2. Part B in crewradar_cuneus_sign, with the migration. Tests: the two states and the
    transitions; Send Pickup Request moves Monday to Friday; Upload Permits and Nothing to Upload
-   from both states move to the next Monday; Back moves Friday to the Monday before; the company form has no Services tab, and the service form has no
-   Company button.
+   from both states move to the next Monday; Back asks for the deadline; the company form has no Services tab, and the service form has
+   no Company button.
    On a copy of crmain: after the migration exactly one open service exists, it carries the
    seven messages of 29491, 31484, 35060 and 38370, the 10 old services are gone, and the replay of
    23-Oct (two weeks finished early) moves it to 2-Nov and then 9-Nov.

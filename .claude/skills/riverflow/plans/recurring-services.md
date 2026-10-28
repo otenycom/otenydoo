@@ -108,14 +108,31 @@ workflow has no end state, so the service stays open and goes around once per pe
 for the next deadline is code in the transition screen, and its settings are keys in the
 transition's `action_context` (A2).
 
-**A2. The next deadline counts from the current deadline.** `riverflow.service.wizard`, the
-screen of every default action, already reads the `action_context` key `followup_in_days` and
-proposes the deadline today + N days in its Project deadline field. Beside it comes a second
-key, `next_deadline_in_days`: the screen proposes the service's current deadline + N days. A
-weekly transition has `{'next_deadline_in_days': 7}`, so a service with deadline Monday 26-Oct
-gets Monday 2-Nov, whatever the day of the click. HR sees the date and can change it before
-Save (a public holiday, a closed AB). The bulk upload wizard (`cuneus.weekly.bulk.upload.wizard`)
-inherits `riverflow.service.wizard`, so it gets the same proposal without its own code. No roll
+**A2. The deadline is a weekday in the week of the current deadline.** The deadline moves twice
+a week: Monday (send the request) → Friday (the pickup) → next Monday (Thijs, 28-Oct-2026).
+`riverflow.service.wizard`, the screen of every default action, already reads the
+`action_context` key `followup_in_days` and proposes today + N days in its deadline field.
+Beside it comes a new step deadline key, `set_deadline_weekday`, a dict with `weekday` and
+`weeks`: the screen proposes that weekday in the week (Monday to Sunday) of the service's
+current deadline, `weeks` weeks later. It never counts from today, so the day of the click does
+not matter:
+
+| Step | Key | Current deadline | Proposed |
+|---|---|---|---|
+| Send Pickup Request | `{'weekday': 'friday', 'weeks': 0}` | Mon 26-Oct | Fri 30-Oct |
+| Upload Permits, Nothing to Upload | `{'weekday': 'monday', 'weeks': 1}` | Fri 30-Oct (or Mon 26-Oct, a week without e-mail) | Mon 2-Nov |
+| Back | `{'weekday': 'monday', 'weeks': 0}` | Fri 30-Oct | Mon 26-Oct |
+
+The same rule holds when HR has moved the deadline by hand within the week (Tue 27-Oct gives
+Fri 30-Oct and then Mon 2-Nov), and when HR finishes a week early (Mon 26-Oct, clicked Fri
+23-Oct, gives Mon 2-Nov; the fault of 23-Oct cannot happen). Back puts the Monday back, so a
+second Send Pickup Request proposes the same Friday again. HR sees the date and can change it
+before Save (a public holiday, a closed AB). `set_deadline_weekday` joins `STEP_DEADLINE_KEYS`
+(`riverflow/models/riverflow_state.py`), so the target state's deadline setting does not
+overwrite it, and `action_save()` writes it as a fixed date, like `followup_in_days`. The e-mail
+sender (`riverflow.service.email.sender.wizard`, field Follow-up deadline) and the bulk upload
+wizard (`cuneus.weekly.bulk.upload.wizard`) both inherit `riverflow.service.wizard`, so all
+three screens get the proposal without their own code. No roll
 forward: a week finished weeks late proposes a deadline in the past, and HR changes it by hand.
 HR keeps the service up to date, as it has done in the last weeks (Thijs, 28-Oct-2026).
 
@@ -173,29 +190,30 @@ workflow, its states or its transitions has "Weekly" in it. The technical ids ke
 `weekly_pickup_list_html`), because a rename of an xmlid costs a migration and the user does not
 see it.
 
-**B2. Two states, no end state.**
+**B2. Two states, no end state (names: Thijs, 28-Oct-2026).**
 
 | State | Was | Meaning |
 |---|---|---|
-| Await Pickup Request | Not Started | The week's Monday e-mail to the AB is not sent yet. |
-| Awaiting Permits | Send list, List Submitted, Permits Picked up | The e-mail went to the AB; HR waits for the pickup. |
+| Awaiting Pickup Request | Not Started | The week's Monday e-mail to the AB is not sent yet. |
+| Awaiting Pickup | Send list, List Submitted, Permits Picked up | The e-mail went to the AB; HR waits for the pickup. |
 
 Done goes. "Went Friday" was one step too many (Ries, 27-Oct-2026).
 
 **B3. The transitions.**
 
-| Transition | From → to | Screen | `next_deadline_in_days` |
-|---|---|---|---|
-| Send Pickup Request | Await Pickup Request → Awaiting Permits | The e-mail sender with the pickup list, as today. | — |
-| Upload Permits | Awaiting Permits → Await Pickup Request | The bulk upload wizard, with the proposed next deadline. | 7 |
-| Nothing to Upload | Awaiting Permits → Await Pickup Request | Default action, with the proposed next deadline. | 7 |
-| Upload Permits, Nothing to Upload | Await Pickup Request → Await Pickup Request | The same two screens, for a week without an e-mail. | 7 |
-| Back | Awaiting Permits → Await Pickup Request | Default action, for a mis-click on Send Pickup Request. The deadline stays. | — |
+| From | Transition | To | Screen | Proposed deadline (`set_deadline_weekday`) |
+|---|---|---|---|---|
+| Awaiting Pickup Request | Send Pickup Request | Awaiting Pickup | The e-mail sender with the pickup list, as today. | Friday of this week |
+| Awaiting Pickup Request | Upload Permits | Awaiting Pickup Request | The bulk upload wizard, for a week without an e-mail. | Monday of next week |
+| Awaiting Pickup Request | Nothing to Upload | Awaiting Pickup Request | Default action, for a week without an e-mail. | Monday of next week |
+| Awaiting Pickup | Upload Permits | Awaiting Pickup Request | The bulk upload wizard. | Monday of next week |
+| Awaiting Pickup | Nothing to Upload | Awaiting Pickup Request | Default action. | Monday of next week |
+| Awaiting Pickup | Back | Awaiting Pickup Request | Default action, for a mis-click on Send Pickup Request. | Monday of this week |
 
 (Thijs, 28-Oct-2026.)
 
-**B4. The weekly period.** Upload Permits and Nothing to Upload carry
-`{'next_deadline_in_days': 7}`; the workflow gets `is_recurring`. Removed: `weekly_spawn_trigger`, `_spawn_next_weekly_request()`,
+**B4. The weekly period.** The transitions carry the keys of B3; the workflow gets
+`is_recurring`. The pickup day Friday is the same day as `_WP_FRIDAY`. Removed: `weekly_spawn_trigger`, `_spawn_next_weekly_request()`,
 `_weekly_service_vals()`, `_next_monday()`, `skip_weekly_spawn` and the seed hook (the start
 transition and New Recurring Service make the first service). The pickup list
 (`weekly_pickup_list_html`), the bulk upload wizard and the cadence constants
@@ -211,7 +229,7 @@ that those uploads made are not linked to the services and stay. Before the dele
 migration moves these seven messages to the chatter of the new service (Thijs, 28-Oct-2026): the
 e-mail is HR's legal request for the prolongation (Kirsten, 22-Oct-2026), and the history of each
 week belongs in the chatter of the one service. The migration ends with exactly one open
-service, with no subject and the company Cuneus Duisburg GmbH (`res.company` 1), in Await
+service, with no subject and the company Cuneus Duisburg GmbH (`res.company` 1), in Awaiting
 Pickup Request, deadline the next Monday.
 
 **B6. The Services tab of the company and the Company button of the service go (Thijs,
@@ -234,19 +252,19 @@ and with the tests above the whole file `crewradar/tests/test_service_company_bu
 No interim fix of the old spawn code: the Radar dev team builds the whole redesign and tests it
 before it goes to production (Thijs, 28-Oct-2026).
 
-1. Part A in riverflow. Tests: `next_deadline_in_days` proposes the current deadline + N days,
-   also when the click is days before or after that deadline; two finished weeks in a row move
-   the deadline two weeks, never twice to the same week; `followup_in_days` still counts from
-   today. The screen also proposes the target state's deadline setting (release R5c) unless the
-   transition has its own deadline key; `next_deadline_in_days` must count as such a key. New
+1. Part A in riverflow. Tests: `set_deadline_weekday` proposes the weekday in the week of the
+   current deadline plus `weeks`, for a deadline on every day of the week and for a click days
+   before or after the deadline; two finished weeks in a row move the deadline two weeks, never
+   twice to the same week; a date that HR types on the screen wins; the target state's deadline
+   setting (release R5c) does not overwrite the key; `followup_in_days` still counts from today. New
    Recurring Service shows only the start transitions and templates of recurring workflows; New
    Service and New Template show what they show today. In the browser: the menus Recurring and
    Templates, and Configuration without the template items. Check what in riverflow and
    crewradar expects a service to reach an end state at some time (the Radar, the parent and
    child rules, the reports), because this is the first workflow without one.
 2. Part B in crewradar_cuneus_sign, with the migration. Tests: the two states and the
-   transitions; Upload Permits and Nothing to Upload from both states move the deadline one week;
-   Back keeps the deadline; the company form has no Services tab, and the service form has no
+   transitions; Send Pickup Request moves Monday to Friday; Upload Permits and Nothing to Upload
+   from both states move to the next Monday; Back moves Friday to the Monday before; the company form has no Services tab, and the service form has no
    Company button.
    On a copy of crmain: after the migration exactly one open service exists, it carries the
    seven messages of 29491, 31484, 35060 and 38370, the 10 old services are gone, and the replay of

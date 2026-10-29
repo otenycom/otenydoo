@@ -169,7 +169,7 @@ class TestStepDeadlineWeekday(TransactionCase):
         self.assertEqual(service.project_deadline, date(2026, 11, 2))
 
     def test_a_cleared_date_gets_the_proposal(self):
-        """A custom action has no deadline field on its screen: the key still sets the date."""
+        """The user clears the date on the screen: the key still sets the date."""
         friday = self._transition("{'next_deadline_weekday': 'friday'}")
         service = self._service(MONDAY)
         action, wizard = self._screen(service, friday, {"project_deadline": False})

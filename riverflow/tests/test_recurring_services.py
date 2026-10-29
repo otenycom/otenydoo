@@ -80,7 +80,8 @@ class TestRecurringServices(TransactionCase):
 
     def test_start_screen_recurring_only_lists_recurring_workflows(self):
         wizard = self._start_screen(recurring_only=True)
-        self.assertEqual(wizard.start_transition_ids.workflow_id, self.recurring_workflow)
+        self.assertIn(self.recurring_transition, wizard.start_transition_ids)
+        self.assertNotIn(self.other_transition, wizard.start_transition_ids)
         self.assertIn(self.recurring_transition.id, self._transition_ids(wizard))
         self.assertNotIn(self.other_transition.id, self._transition_ids(wizard))
         self.assertIn(self.recurring_template.id, self._template_ids(wizard))

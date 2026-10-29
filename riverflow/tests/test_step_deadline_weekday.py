@@ -168,13 +168,43 @@ class TestStepDeadlineWeekday(TransactionCase):
         self.assertEqual(service.state_id, self.state_today)
         self.assertEqual(service.project_deadline, date(2026, 11, 2))
 
-    def test_a_wizard_without_a_deadline_field_gets_the_proposal(self):
+    def test_a_cleared_date_gets_the_proposal(self):
         """A custom action has no deadline field on its screen: the key still sets the date."""
         friday = self._transition("{'next_deadline_weekday': 'friday'}")
         service = self._service(MONDAY)
         action, wizard = self._screen(service, friday, {"project_deadline": False})
         wizard.with_context(**action["context"]).action_save()
         self.assertEqual(service.project_deadline, date(2026, 10, 30))
+
+    def test_a_start_transition_with_a_cleared_date_counts_from_today(self):
+        """A start transition has no record yet (an in-memory one is built), and the
+        user may clear the proposed date: the date is computed from today."""
+        start = self._transition("{'next_deadline_weekday': 'monday'}")
+        start.from_state_id = False
+        Service = self.env["riverflow.service"]
+        action = Service.with_context(transition_id=start.id).prepare_transition_action()
+        wizard = self.env[action["res_model"]].with_context(**action["context"]).create(
+            {"name": "New weekly", "project_deadline": False}
+        )
+        with freeze_time("2026-10-28"):  # a Wednesday
+            result = wizard.with_context(**action["context"]).action_save()
+        service = Service.browse(result["res_id"])
+        self.assertEqual(service.state_id, self.state_b)
+        self.assertEqual(service.project_deadline, date(2026, 11, 2))
+
+    def test_each_record_of_a_bulk_transition_gets_its_own_proposal(self):
+        """On a screen with a cleared date, every record counts from its own deadline."""
+        friday = self._transition("{'next_deadline_weekday': 'friday'}")
+        first = self._service(MONDAY)
+        second = self._service(date(2026, 10, 28))
+        services = first | second
+        action = services.with_context(transition_id=friday.id).prepare_transition_action()
+        wizard = self.env[action["res_model"]].with_context(**action["context"]).create(
+            {"records_to_transition_ids": [(6, 0, services.ids)], "project_deadline": False}
+        )
+        wizard.with_context(**action["context"]).action_save()
+        self.assertEqual(first.project_deadline, date(2026, 10, 30))
+        self.assertEqual(second.project_deadline, date(2026, 10, 30))
 
     def test_an_unknown_weekday_names_the_key(self):
         bad = self._transition("{'next_deadline_weekday': 'someday'}")

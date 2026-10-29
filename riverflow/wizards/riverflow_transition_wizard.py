@@ -214,7 +214,7 @@ class TransitionWizard(models.AbstractModel):
                     # proposal exists, so an empty date is refused.
                     screen_deadline = getattr(self, "project_deadline", None)
                     if not screen_deadline and self.env.context.get("next_deadline_weekday"):
-                        screen_deadline = self._next_weekday_deadline(recordsToTransition[:1])
+                        screen_deadline = self._next_weekday_deadline(record)
                     if not screen_deadline:
                         raise UserError(_("Enter the deadline for this transition."))
                     write_vals["use_project_deadline_from"] = "self"

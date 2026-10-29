@@ -1,6 +1,6 @@
 {
     "name": "Oteny Backup Trigger",
-    "version": "19.0.1.89",
+    "version": "19.0.1.90",
     "summary": "Minimal module to trigger Odoo.sh backups",
     "description": """
         This module exists solely to trigger backups on Odoo.sh.

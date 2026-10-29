@@ -6,6 +6,9 @@ from odoo.exceptions import UserError, ValidationError
 from ..models.riverflow_state import DEADLINE_FIELDS
 
 
+WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+
 def _normalized(key, value):
     """One form per deadline value, so a screen value and a record value compare
     equal: a date string and a date are the same date; an empty value is False."""
@@ -203,6 +206,20 @@ class TransitionWizard(models.AbstractModel):
                     write_vals["use_project_deadline_from"] = "self"
                     write_vals["project_deadline"] = followup_deadline
                     write_vals["days_relative_to_project"] = 0
+                elif self.env.context.get("next_deadline_weekday") or self.env.context.get("ask_deadline"):
+                    # The date on the screen is the deadline, as a fixed date,
+                    # so the target state's setting does not overwrite it.
+                    # next_deadline_weekday: a wizard without a deadline field
+                    # (a custom action) gets the proposal. ask_deadline: no
+                    # proposal exists, so an empty date is refused.
+                    screen_deadline = getattr(self, "project_deadline", None)
+                    if not screen_deadline and self.env.context.get("next_deadline_weekday"):
+                        screen_deadline = self._next_weekday_deadline(recordsToTransition[:1])
+                    if not screen_deadline:
+                        raise UserError(_("Enter the deadline for this transition."))
+                    write_vals["use_project_deadline_from"] = "self"
+                    write_vals["project_deadline"] = screen_deadline
+                    write_vals["days_relative_to_project"] = 0
                 elif self.env.context.get("set_deadline_relative"):
                     spec = self.env.context.get("set_deadline_relative")
                     if not isinstance(spec, dict) or "from" not in spec or "days" not in spec:
@@ -315,6 +332,23 @@ class TransitionWizard(models.AbstractModel):
     def update_write_values(self, record, vals):
         if not self.responsible_team_id_invisible:
             vals["responsible_team_id"] = self.responsible_team_id.id
+
+    def _next_weekday_deadline(self, record):
+        """The first weekday named by the context key next_deadline_weekday that
+        falls strictly after the deadline of `record`. A record without a
+        deadline, or no record (a start transition), counts from today."""
+        name = self.env.context.get("next_deadline_weekday")
+        if name not in WEEKDAYS:
+            raise UserError(
+                _(
+                    "next_deadline_weekday must be a weekday name in English, such as 'monday'. Got: %s.",
+                    name,
+                )
+            )
+        current = (record.project_deadline if record and "project_deadline" in record._fields else False) or (
+            fields.Date.today()
+        )
+        return current + timedelta(days=(WEEKDAYS.index(name) - current.weekday() - 1) % 7 + 1)
 
     def _is_to_end_state(self):
         return self.transition_id.to_state_id.is_end_state

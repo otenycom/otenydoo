@@ -15,8 +15,9 @@
                     required="1"
                     invisible="use_project_deadline_from_invisible or use_project_deadline_from == 'self'" />
                 <field name="use_project_deadline_from_invisible" invisible="1" />
-                <field name="project_deadline" invisible="use_project_deadline_from != 'self' or use_project_deadline_from_invisible" />
+                <field name="project_deadline" invisible="use_project_deadline_from != 'self' or use_project_deadline_from_invisible" required="project_deadline_required" />
                 <field name="project_deadline_invisible" invisible="1" />
+                <field name="project_deadline_required" invisible="1" />
                 <field name="days_relative_to_project" invisible="days_relative_to_project_invisible or use_project_deadline_from == 'self'" />
                 <field name="days_relative_to_project_invisible" invisible="1" />
                 <field name="res_id" invisible="1" />

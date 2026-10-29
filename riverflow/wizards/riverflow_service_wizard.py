@@ -40,6 +40,8 @@ class ServiceWizard(models.TransientModel):
         help="The services are timed relative to this deadline",
     )
     project_deadline_invisible = fields.Boolean()
+    # ask_deadline: the deadline field is empty and required.
+    project_deadline_required = fields.Boolean()
 
     days_relative_to_project = fields.Integer("Relative Deadline (days)")
     days_relative_to_project_invisible = fields.Boolean()
@@ -103,6 +105,20 @@ class ServiceWizard(models.TransientModel):
             )
             defaultValues["use_project_deadline_from"] = "self"
             defaultValues["project_deadline_invisible"] = False
+
+        # next_deadline_weekday: propose the first such weekday strictly after
+        # the service's current deadline (from today when it has none).
+        if self.env.context.get("next_deadline_weekday"):
+            defaultValues["project_deadline"] = self._next_weekday_deadline(records_to_transition[:1])
+            defaultValues["use_project_deadline_from"] = "self"
+            defaultValues["project_deadline_invisible"] = False
+
+        # ask_deadline: no proposal, HR enters the date.
+        if self.env.context.get("ask_deadline"):
+            defaultValues["project_deadline"] = False
+            defaultValues["use_project_deadline_from"] = "self"
+            defaultValues["project_deadline_invisible"] = False
+            defaultValues["project_deadline_required"] = True
 
         super().default_get_using_records(defaultValues, records_to_transition)
 

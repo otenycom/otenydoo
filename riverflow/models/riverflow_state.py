@@ -5,8 +5,17 @@ from odoo import _, api, fields, models
 
 # The context keys a step uses to set the deadline itself
 # (riverflow.transition.wizard.action_save). A step with one of them overrides
-# the deadline setting of its target state.
-STEP_DEADLINE_KEYS = ("clear_deadline", "set_deadline_to_today", "followup_in_days", "set_deadline_relative")
+# the deadline setting of its target state. next_deadline_weekday proposes the
+# first such weekday after the service's current deadline; ask_deadline shows
+# the deadline field empty and required (plan riverflow/plans/recurring-services.md, A2).
+STEP_DEADLINE_KEYS = (
+    "clear_deadline",
+    "set_deadline_to_today",
+    "followup_in_days",
+    "set_deadline_relative",
+    "next_deadline_weekday",
+    "ask_deadline",
+)
 # The task fields a deadline setting writes.
 DEADLINE_FIELDS = ("use_project_deadline_from", "project_deadline", "days_relative_to_project")
 # The named values that link a parent service's state to the transitions of its

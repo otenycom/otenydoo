@@ -37,3 +37,4 @@ from . import test_review_chatter
 from . import test_transition_audit_remark
 from . import test_service_company
 from . import test_recurring_services
+from . import test_step_deadline_weekday

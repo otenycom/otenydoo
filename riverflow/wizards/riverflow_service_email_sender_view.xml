@@ -16,8 +16,9 @@
                             <field name="mail_template_id" options="{'no_create': True, 'no_open': False}" />
                             <field name="responsible_team_id" string="Responsible Team" required="1" invisible="responsible_team_id_invisible" />
                             <field name="responsible_team_id_invisible" invisible="1" />
-                            <field name="project_deadline" string="Follow-up deadline" invisible="project_deadline_invisible" />
+                            <field name="project_deadline" string="Follow-up deadline" invisible="project_deadline_invisible" required="project_deadline_required" />
                             <field name="project_deadline_invisible" invisible="1" />
+                            <field name="project_deadline_required" invisible="1" />
                             <field name="res_id" invisible="1"></field>
                             <field name="res_model" invisible="1"></field>
                             <field name="is_supply_order" invisible="1" />

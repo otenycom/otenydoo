@@ -243,13 +243,15 @@ The `action_context` Text field on `riverflow.transition` stores a Python dict l
 
 **Established pattern**: The log entry workflow (`crewradar/data/log_entry_workflow_available.xml`) uses `default_actual_start_date_invisible`, `default_actual_end_date_invisible`, and `default_planned_start_date_required` to control wizard field visibility per transition. The German Work Permit workflow (`crewradar_cuneus_sign/data/work_permit_workflow.xml`) uses `default_name_invisible: True` on all 28 transitions to hide the service name field — the name is template-set and never needs editing mid-workflow.
 
-**Deadline overrides**: The base transition wizard's `action_save` checks four bare context keys (after `update_write_values`, so they override any wizard-set values):
+**Deadline overrides**: The base transition wizard's `action_save` checks these bare context keys, in this order (after `update_write_values`, so they override any wizard-set values):
 
 | Context key | Effect | Use case |
 |---|---|---|
 | `clear_deadline` | Sets `use_project_deadline_from="self"`, `project_deadline=False`, `days_relative_to_project=0` — permanently removes the deadline | A waiting state with no due date. Caution: a row with no deadline stays in a team's Radar list with no signal. A1 Await Reply used this until 2026-10; it now uses `followup_in_days: 365` |
 | `set_deadline_to_today` | Sets `use_project_deadline_from="self"`, `project_deadline=today`, `days_relative_to_project=0` — freezes deadline as today | A1 Done: records the completion date |
 | `followup_in_days` | Pre-fills `project_deadline = today + N days` in `default_get` and makes it visible on the wizard form (labeled "Follow-up deadline" in the email sender). The user can adjust the date before confirming. In `action_save`, reads the wizard's `project_deadline` (possibly adjusted by user) and writes it to the service. Works for any transition type (email sender, default, custom wizard). For email sender transitions, overrides the hardcoded tomorrow default. A wizard with no `project_deadline` value (a custom action whose wizard has no deadline field, e.g. `crewradar_sign.fill.wizard`) gets `today + N` in `action_save`; before 2026-10 the key silently did nothing there. | Work Permit: 7-day follow-up for AB/pickup requests (weekly visit rhythm), 14-day for AT Applied skip. A1 Await Reply: 365 days, also on the fill-wizard "Regenerate and Resend" |
+| `next_deadline_weekday` | A lower-case English weekday name. The screen proposes the first such weekday strictly after the service's current `project_deadline` (from today when it has none) and shows the field ("Follow-up deadline" in the email sender); `action_save` writes the screen date as a fixed date (`self`, 0 relative days). A cleared date gets the proposal. Checked after `followup_in_days`, before `set_deadline_relative` (19.0.1.1382) | A recurring service: Collect Work Permits at AB, Send Pickup Request `'friday'`, Upload Permits and Nothing to Upload `'monday'`. See [Recurring services](references/recurring-services.md) |
+| `ask_deadline` | The screen shows the deadline field empty and required (`project_deadline_required`); `action_save` writes the date the user enters and refuses an empty one (19.0.1.1382) | A Back after a mis-click, where no rule knows the right date: Collect Work Permits at AB, Back |
 | `set_deadline_relative` | Dict `{'from': <use_project_deadline_from value>, 'days': <int>}`. Writes those two fields only. Drops the email sender `project_deadline` write, so `today + 1` does not survive. Does not touch `weekend_deadline_rule`. | A send that must restore a parent-relative deadline. A1 child Back and Restart: `{'from': 'root', 'days': 0}`, so a waiting child follows the application again |
 | `cancel_children` | Not a deadline key, but it runs in the same place: after the state write and before the deferred children, it calls `_cascade_cancel_to_subtree()`, so every open descendant goes to its workflow's cancelled state. Done children stay Done. A state flag (`auto_done_children_on_enter`) does not fit a back step, because its target is not a cancelled state. Because the cancel runs first, a cancelled child never blocks a fresh deferred child in the same save (19.0.1.1284). | A1 Needs Correction and Back: the withdrawn application's open A1 children are cancelled; the next entry into Awaiting Issued A1 creates fresh ones |
 
@@ -734,7 +736,7 @@ so modes added by rivercreds or crewradar appear too).
 `update_write_values`:
 
 1. A step key (`clear_deadline`, `set_deadline_to_today`, `followup_in_days`,
-   `set_deadline_relative`) wins.
+   `next_deadline_weekday`, `ask_deadline`, `set_deadline_relative`) wins.
 2. A screen with its own date logic wins: it hides the generic deadline fields
    (`use_project_deadline_from_invisible` and `project_deadline_invisible`) and
    writes its own date (an appointment, a ticket, an e-mail follow-up).
@@ -889,29 +891,16 @@ For completeness, the credential-subject redirect above keys its occasion on the
 
 It lives in rivercreds rather than riverflow so the base engine stays credential-agnostic. First consumer: the Cuneus "Work Permit Handover" workflow — a handover task spawned the day a renewal succeeded must not turn a healthy renewal row red.
 
-### Recreate-on-Done Without a Cron
-
-A recurring service can recreate its next instance the moment it reaches its end state — no `ir.cron`. This reuses the same stored-Boolean-compute trigger pattern as auto-add, but keyed on reaching the **end state** rather than on every state change.
-
-**Mechanism**: a stored Boolean compute on `riverflow.service` (`@api.depends("state_id", "state_id.is_end_state", "workflow_id")`) fires its side effect when the service enters an end state of the recurring workflow, creating next period's instance. Mirrors `crewradar_creds`' `credential_auto_add_trigger`.
-
-**Worked example** — the "Weekly Work Permit Issue Request" workflow (`crewradar_cuneus_sign`): `riverflow.service.weekly_spawn_trigger` calls `_spawn_next_weekly_request()` when a weekly service reaches Done, creating next Monday's instance (`deadline = _next_monday()`).
-
-**Guard rails** (all required, or upgrades/seed cascade-spawn or double-spawn):
-
-- **`registry.loaded`** — no-op during module load.
-- **`isinstance(self.id, models.NewId)`** — skip in-memory records.
-- **A `skip_*` context flag** (e.g. `skip_weekly_spawn`) — the install seed and migrations set it so seeding a first instance does not itself cascade-spawn another.
-- **Dedup** — `_spawn_next_weekly_request()` skips when another open instance already exists for the subject, OR one already targets next Monday. This makes re-open/re-close idempotent (a Back-then-Done never double-spawns).
-
-The recurrence anchor (here a singleton on the main `res.company`) and the period helper (`_next_monday(from_date)` — the next Monday *strictly after* `from_date`, so a Monday → +7) live as plain module functions, kept separate from the trigger so the seed and migration can call them directly.
-
 **Extension hooks on `auto_add_services()`**:
 
 | Hook | Called when | Purpose |
 |------|-----------|---------|
 | `_filter_auto_add_candidates(new_services, model)` | After candidate building, before dedup | Drop candidates **and/or re-anchor them onto a different subject** — the hook may rewrite a candidate's `res_model`/`res_id` and set its `auto_add_context_ref`. `rivercreds/models/riverflow_auto_add_service.py` dispatches by subject model: `crewradar.log.entry` and `hr.employee` candidates are *filtered* on credential coverage, while `rivercreds.credential` candidates are *redirected* onto the credential's holder by `_redirect_credential_candidates_to_holder` (`_credential_candidate_holder` resolves scope `holder` → `hr.employee`; `crewradar_creds/models/riverflow_auto_add_service.py` overrides it for scope `site` → `crewradar.site`). Placement scope has no holder redirect — deliberately deferred, no consumer. |
 | `_get_service_creation_context(service_vals)` | Per service, just before template cloning | Build the context dict for `_create_services_from_template()`. Base returns standard defaults (`res_id`, `res_model`, `created_by_auto_add_service_id`, `auto_add_context_ref`). Rivercreds overrides to inject `default_credential_plan_item_id`, `default_credential_plan_slot_id` and `default_source_credential_id` from whatever the filter/redirect hook set on the candidate. |
+
+### Recurring Services
+
+A workflow marked Recurring has one service that goes around once per period, with no end state; the transition keys `next_deadline_weekday` and `ask_deadline` move its deadline. See [Recurring services](references/recurring-services.md).
 
 ### Built-in Service Workflows
 
@@ -1359,7 +1348,7 @@ riverflow/
 │   ├── riverflow_state_record_views.xml  # Radar list, calendar, search (the shortcut banner needs no js_class)
 │   └── riverflow_check_result_views.xml  # Base form/list/search views for check results (inherited by crewradar)
 └── wizards/
-    ├── riverflow_transition_wizard.py         # Base wizard (AbstractModel). Deadline elif includes `set_deadline_relative`.
+    ├── riverflow_transition_wizard.py         # Base wizard (AbstractModel). Deadline elif includes `next_deadline_weekday` / `ask_deadline` (`_next_weekday_deadline`) and `set_deadline_relative`.
     ├── riverflow_service_wizard.py            # Service wizard base (TransientModel)
     ├── riverflow_service_email_sender.py      # Email composer wizard (template rendering, recipients, send)
     ├── riverflow_service_email_sender_view.xml # Email sender form (supply order fields, attachment warning footer)
@@ -1394,4 +1383,5 @@ riverflow/
 - [riverflow-execute-talent](../../../riverflow/talents/riverflow-execute-talent/SKILL.md) - the recipe the bot reads
 - [Talent author workflow](references/talent-author-workflow.md) - operator pointer to that Talent
 - [Team Channels](references/team-channels.md) - which chatter messages riverflow copies into a team's Discuss channel, and why: the external message copy (Responsible team) and the colleague message copy (recipient's home team, `res.users.home_team_id`, team form **Members** list; 19.0.1.1275)
+- [Recurring services](references/recurring-services.md) - one service that goes around once per period with no end state: the flag Recurring, the menus Recurring and Templates, New Recurring Service, the deadline keys `next_deadline_weekday` and `ask_deadline`
 - [Roadmap](references/roadmap.md) - Development roadmap

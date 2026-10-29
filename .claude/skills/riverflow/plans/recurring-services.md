@@ -1,6 +1,9 @@
 # Plan: recurring services
 
-Status: design agreed with Thijs on 28-Oct-2026, not built: one service that loops.
+Status: design agreed with Thijs on 28-Oct-2026: one service that loops. Built on 29-Oct-2026 on
+`feat/recurring-services` in otenydoo and radar (riverflow 19.0.1.1382, crewradar 19.0.11.89,
+crewradar_cuneus_sign 19.0.6.292); not merged, not deployed. See [Outcome](#outcome-29-oct-2026).
+The manual section is [recurring-services.md](../references/recurring-services.md).
 Sources: Ries's brief of 28-Oct-2026 (`Call-with-Ries-2026-10-28 — summary.md`), the talk of Ries and Thijs on
 27-Oct-2026, part 3 (`Call-with-Ries-2026-10-27 (3) — summary.md`), a read-only check of
 production and a replay on crmain, both on 28-Oct-2026. This plan replaces the old draft "Phase
@@ -305,3 +308,121 @@ before it goes to production (Thijs, 28-Oct-2026).
 3. Skills: the HR manual (B7), the technical reference rewritten for the built design, the
    riverflow manual section (A5), the glossary, a release note and Basecamp. Check: HR can do a
    full week with the manual alone, on crmain.
+
+## Outcome (29-Oct-2026)
+
+Built on `feat/recurring-services` in both repositories, not merged and not deployed. otenydoo:
+riverflow 19.0.1.1381 (`495bd49`, A1 and A4) and 19.0.1.1382 (`28d0b06`, `cdebc7e`, A2), tests
+`65f284d`. radar: crewradar_cuneus_sign 19.0.6.292 (`16ef786f8`, `ae53ad428`, part B), crewradar
+19.0.11.89 (`e72d9312c`, B6), tests `50ca858ff`. The radar pin of otenydoo still points at
+`1abd937`; it moves with the merge (`commit-with-otenydoo`).
+
+### What was built, per part
+
+- **A1.** `riverflow.workflow.is_recurring` (label Recurring), on the workflow form under
+  Enforce Single Open Service. Nothing checks that a recurring workflow has no end state.
+- **A2.** Both keys are in `STEP_DEADLINE_KEYS`. `riverflow.transition.wizard` has the helper
+  `_next_weekday_deadline(record)` (constant `WEEKDAYS`, lower-case English names) and a branch in
+  the deadline chain of `action_save`, after `followup_in_days`, that writes the screen date as a
+  fixed date (`self`, 0 relative days). `riverflow.service.wizard.default_get_using_records`
+  proposes the date, or for `ask_deadline` shows the field empty with the new wizard Boolean
+  `project_deadline_required`, which drives `required` in the views of the service wizard and the
+  e-mail sender. Decided in the build: a service without a deadline (a start transition) counts
+  from today; an unknown weekday name raises a UserError that names the key; a cleared date with
+  `next_deadline_weekday` gets the proposal; an empty date with `ask_deadline` is refused with
+  "Enter the deadline for this transition."; the proposal reads the stored `project_deadline`,
+  not the effective `deadline`.
+- **A3.** No code: no delete rule and no `enforce_single_open` on the workflow.
+- **A4.** Actions `riverflow.action_recurring_services` (path `recurring-services`, list, form
+  and calendar) and `riverflow.action_riverflow_start_recurring_service` (path
+  `start-recurring-service`, context `{'recurring_only': True}`). Menus under Services: Services
+  (10), ➕ New Service (30), Recurring (40: Recurring Services, ➕ New Recurring Service), Templates
+  (50: Service Templates, ➕ New Template), Configuration (moved from 20 to 90, so the order is the
+  order of the A4 table). The New Recurring Service menu item has `group_service_writer`; its
+  action has no group, as New Template.
+- **A5.** [recurring-services.md](../references/recurring-services.md); the SKILL.md section
+  "Recreate-on-Done Without a Cron" is a pointer to it.
+- **B1–B4.** As designed. Decided in the build: the start transition is named after its target
+  state, Awaiting Pickup Request, as the other workflows name theirs, so the New Recurring Service
+  button reads "Collect Work Permits at AB - Awaiting Pickup Request". It carries
+  `next_deadline_weekday: 'monday'` (counted from today), `default_name` and the Permits tag as
+  `default_tag_ids`; riverflow resolves an xmlid in `action_context` only for a Many2one
+  (`_id_ref`), so the XML writes the tag's database id with `ref()` when the file loads. The new
+  state is `state_weekly_awaiting_pickup`; Awaiting Pickup Request keeps `state_weekly_not_started`;
+  Upload Permits from Awaiting Pickup Request is the new `trans_weekly_bulk_upload_from_not_started`.
+  The bulk upload wizard shows the deadline when the transition has `next_deadline_weekday`, and
+  its texts say Upload Permits. The label of `weekly_pickup_list_html` is Pickup List. A fresh
+  install has no service: the seed is gone, and New Recurring Service makes it.
+- **B5.** `crewradar_cuneus_sign/migrations/19.0.6.292/post-migrate.py`: `reset_workflow_to_xml()`,
+  then always a new service (no subject, Awaiting Pickup Request, Human Resources, Permits,
+  `base.main_company`, the first Monday after the day of the upgrade); the messages of every
+  existing service of the workflow, with their attachments, move to it; the existing services are
+  deleted. The old migration 19.0.5.19 no longer calls the removed seed, so it still imports.
+- **B6.** As designed, plus `crewradar/migrations/19.0.11.89/pre-migrate.py` (finding 4 below).
+- **End states.** This is the first workflow without an end state. Every use of `is_end_state` and
+  `is_open` in riverflow, crewradar and crewradar_cuneus_sign was read: nothing breaks a service
+  without a subject, a parent or child services. `is_open` stays True, the Radar row stays and turns
+  red when the deadline is past, and every transition screen shows the Responsible field (it is
+  hidden only on a transition into an end state).
+
+### What the reviews found, and the fixes
+
+1. **The start transition crashed on a cleared date.** The fallback of `next_deadline_weekday` in
+   `action_save` read the first record of the batch (`recordsToTransition[:1]`). On a start
+   transition that is a Python list with an in-memory record, so the save raised an
+   AttributeError; on a bulk transition records 2 to n got the proposal of record 1. Fix
+   `cdebc7e`: the record of the loop. Tests
+   `test_a_start_transition_with_a_cleared_date_counts_from_today`,
+   `test_each_record_of_a_bulk_transition_gets_its_own_proposal`.
+2. **The migration kept an open weekly service as it was.** A service that HR makes by hand before
+   the deploy, with the old start transition, has the old name and can have a subject and any
+   deadline, so keeping it broke B1 and B5. Fix `ae53ad428`: the migration always makes the new
+   service and treats every existing service as old.
+3. **A test assumed one recurring workflow.**
+   `test_start_screen_recurring_only_lists_recurring_workflows` asserted that New Recurring Service
+   lists one workflow; it failed on a database with crewradar_cuneus_sign, where Collect Work
+   Permits at AB is recurring too. Fix `65f284d`: `assertIn` and `assertNotIn`.
+4. **A stale inherit view stopped the upgrade of crewradar** with "action_view_subject_company is
+   not a valid action on riverflow.service". The stored view `crewradar.view_service_form_log`
+   still held the removed button, and Odoo checks the combined form when the first view of the file
+   loads, before it rewrites that view. Fix: the pre-migrate deletes the view
+   (`_force_unlink=True`) and the upgrade creates it again from the XML. On production nothing
+   inherits from that view or points to it.
+
+### Proof
+
+- **Tests on cr-test.** riverflow with `test_weekly_email_list`: 0 failed of 292.
+  crewradar_cuneus_sign: 0 failed of 1718. crewradar: 3 failures of 4233, all in
+  `test_employee_site_lifecycle`, caused by a stale state row `crewradar.state_site_archived` on
+  cr-test; the class (tag `test_site_lifecycle`) passes, 21 tests, on a production restore with
+  this branch.
+- **Upgrade of a production restore.** A copy of `crmain_company_test` (production of 26-Oct-2026,
+  below the branch), `-u riverflow,crewradar,crewradar_cuneus_sign`: no error or warning; exactly
+  one service of the workflow (no subject, Awaiting Pickup Request, Monday 2-Nov-2026, company 1,
+  `is_recurring` set), the 7 messages moved to it, the 10 old services gone, the log view created
+  again.
+- **Replay on a copy of crmain.** The migration made the service and deleted 12 old services: the
+  10 of production plus 39083 and 39084, the replay by hand of 28-Oct on crmain. With 39084 set
+  open first, as a stand-in for a service made by hand before the deploy, it was deleted too. Two
+  Nothing to Upload in a row moved the deadline from 2-Nov to 9-Nov and 16-Nov. The test
+  `test_two_weeks_finished_early_move_two_weeks` replays 23-Oct (2-Nov, then 9-Nov).
+- **Browser check on crmain.** Services menu order Services, New Service, Recurring, Templates,
+  Configuration; Recurring holds Recurring Services and New Recurring Service; New Recurring
+  Service lists only "Collect Work Permits at AB - Awaiting Pickup Request"; the list shows the one
+  service (Awaiting Pickup Request, 02-Nov-26, Permits, Human Resources); the Upload Permits screen
+  proposes Project deadline 09-Nov-26 and the Send Pickup Request screen Follow-up deadline
+  06-Nov-26. Both screens were closed without Save.
+
+### Follow-ups
+
+The open riverflow items are in the [roadmap](../references/roadmap.md): a key for a list of
+xmlids in `action_context`, the end-state rules for a later recurring service with a subject or a
+parent, and the date of a bulk transition. Also open:
+
+- The check of build step 3: HR does a full week with the manual alone, on crmain.
+- The merge of both branches, the radar pin, the Basecamp to-do and the release.
+- The start transition's `default_tag_ids` and `default_name` are Odoo context defaults, so they
+  apply to every record with a `tag_ids` or `name` field that the same save creates. Safe today;
+  watch it when an auto-add is added to this workflow.
+- The help text of `weekly_pickup_list_html` still says "the weekly AB request email".
+- The audit log filter on the Recurring Services list stays a later idea (Ries, 28-Oct-2026).

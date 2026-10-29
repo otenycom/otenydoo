@@ -36,3 +36,4 @@ from . import test_state_record_unique
 from . import test_review_chatter
 from . import test_transition_audit_remark
 from . import test_service_company
+from . import test_recurring_services

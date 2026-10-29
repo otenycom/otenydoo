@@ -38,6 +38,7 @@
                             <field name="has_supply_time" />
                             <field name="auto_complete_state_id" />
                             <field name="enforce_single_open" />
+                            <field name="is_recurring" />
                         </group>
                     </group>
                     <notebook>

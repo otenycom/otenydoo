@@ -10,6 +10,8 @@ class StartWizard(RiverflowTransitionMixin):
 
     def _default_start_transition_ids(self):
         domain = [("from_state_id", "=", False), ("model", "=", self._workflow_model)]
+        if self.env.context.get("recurring_only"):
+            domain.append(("workflow_id.is_recurring", "=", True))
         return self.env["riverflow.transition"].search(domain, order="workflow_name,sequence,id")
 
     start_transition_ids = fields.Many2many("riverflow.transition", default=_default_start_transition_ids)

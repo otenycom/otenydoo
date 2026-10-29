@@ -11,7 +11,10 @@ class ServiceNewWizard(models.TransientModel):
     _workflow_model = "riverflow.service"
 
     def _add_template_start_transitions(self, transition_buttons, defaults_context):
-        template_services = self.env["riverflow.service"].search([("is_root_a_template", "=", True)])
+        template_domain = [("is_root_a_template", "=", True)]
+        if self.env.context.get("recurring_only"):
+            template_domain.append(("workflow_id.is_recurring", "=", True))
+        template_services = self.env["riverflow.service"].search(template_domain)
 
         # Sort alphabetically by root template name, preserving tree structure
         # within each root (root before children, ordered by display_order)

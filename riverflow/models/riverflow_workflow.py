@@ -40,6 +40,12 @@ class RiverflowWorkflow(models.Model):
         "becomes 'issued'. Set to 'Not Needed' or similar end state.",
     )
 
+    is_recurring = fields.Boolean(
+        "Recurring",
+        help="A service of a recurring workflow is a Recurring Service: it has no end state and "
+        "goes around once per period. It shows under Services → Recurring.",
+    )
+
     enforce_single_open = fields.Boolean(
         "Enforce Single Open Service",
         default=False,

@@ -623,22 +623,51 @@
         <field name="context">{'default_is_this_a_template': True}</field>
     </record>
 
+    <record id="action_riverflow_start_recurring_service" model="ir.actions.act_window">
+        <field name="name">New Recurring Service</field>
+        <field name="path">start-recurring-service</field>
+        <field name="res_model">riverflow.start.service</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+        <field name="context">{'recurring_only': True}</field>
+    </record>
+
+    <record id="action_recurring_services" model="ir.actions.act_window">
+        <field name="name">Recurring Services</field>
+        <field name="path">recurring-services</field>
+        <field name="res_model">riverflow.service</field>
+        <field name="view_mode">list,form,calendar</field>
+        <field name="search_view_id" ref="riverflow.service_view_search" />
+        <field name="domain">[('workflow_id.is_recurring', '=', True), ('is_root_a_template', '=', False)]</field>
+        <field name="context">{'default_is_this_a_template': False}</field>
+    </record>
+
     <!-- Menu Item Definitions 
     https://www.svgrepo.com/svg/455931/service-bell?edit=true 
     -->
     <menuitem id='riverflow.service_root' name='Services'
         web_icon='riverflow,static/description/icon.png' sequence="10">
         <menuitem id="riverflow.services_menu" name="Services" action="riverflow.service_action" sequence="10" />
-        <menuitem id="riverflow.services_configuration_menu" name="Configuration" sequence="20">
-            <menuitem id="riverflow.services_menu_configuration_tags"
-                action="riverflow.service_tag_action" sequence="10" />
-            <menuitem id="riverflow.services_menu_configuration_templates"
-                action="riverflow.action_service_templates" sequence="200" />
-            <menuitem id="riverflow.service_menu_start_template" name="&#10133; New Template"
-                action="riverflow.action_riverflow_start_template" sequence="210" />
-        </menuitem>
         <menuitem id="riverflow.service_menu_new_service" name="&#10133; New Service"
             action="riverflow.action_riverflow_start_service" sequence="30" />
+        <menuitem id="riverflow.service_menu_recurring_root" name="Recurring" sequence="40">
+            <menuitem id="riverflow.service_menu_recurring_services"
+                action="riverflow.action_recurring_services" sequence="10" />
+            <menuitem id="riverflow.service_menu_start_recurring_service"
+                name="&#10133; New Recurring Service"
+                action="riverflow.action_riverflow_start_recurring_service" sequence="20"
+                groups="riverflow.group_service_writer" />
+        </menuitem>
+        <menuitem id="riverflow.service_menu_templates_root" name="Templates" sequence="50">
+            <menuitem id="riverflow.services_menu_configuration_templates"
+                action="riverflow.action_service_templates" sequence="10" />
+            <menuitem id="riverflow.service_menu_start_template" name="&#10133; New Template"
+                action="riverflow.action_riverflow_start_template" sequence="20" />
+        </menuitem>
+        <menuitem id="riverflow.services_configuration_menu" name="Configuration" sequence="90">
+            <menuitem id="riverflow.services_menu_configuration_tags"
+                action="riverflow.service_tag_action" sequence="10" />
+        </menuitem>
     </menuitem>
 
     <!-- Supply Orders Top-level Menu: dedicated view for supply order services -->

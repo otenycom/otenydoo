@@ -2,7 +2,8 @@
 
 Status: design agreed with Thijs on 28-Oct-2026: one service that loops. Built on 29-Oct-2026 on
 `feat/recurring-services` in otenydoo and radar (riverflow 19.0.1.1382, crewradar 19.0.11.89,
-crewradar_cuneus_sign 19.0.6.292); not merged, not deployed. See [Outcome](#outcome-29-oct-2026).
+crewradar_cuneus_sign 19.0.6.292); merged on 29-Oct-2026 into otenydoo `main` and radar `dev`,
+and deployed to test1 the same day. See [Outcome](#outcome-29-oct-2026).
 The manual section is [recurring-services.md](../references/recurring-services.md).
 Sources: Ries's brief of 28-Oct-2026 (`Call-with-Ries-2026-10-28 — summary.md`), the talk of Ries and Thijs on
 27-Oct-2026, part 3 (`Call-with-Ries-2026-10-27 (3) — summary.md`), a read-only check of

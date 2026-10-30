@@ -49,7 +49,10 @@ user: the apps of the system parameter `oteny_home.first_apps` first, in that or
 other apps by name; the apps of `oteny_home.hidden_apps` are left out, also from
 the search (both hold menu xmlids, comma-separated; `models/ir_http.py` sends
 them in the session info). A business module that depends on it sets both in
-its own data. A hidden app stays reachable by its address.
+its own data. A hidden app stays reachable by its address. A value with an entry
+that is not the full xmlid of a top-level menu cannot be saved
+(`models/ir_config_parameter.py`): such an entry would do nothing, and the app
+would stay without a word.
 
 `oteny_color_scheme` — light and dark mode for Odoo Community: a Theme
 preference per user (System, Light, Dark) and our own dark colours in

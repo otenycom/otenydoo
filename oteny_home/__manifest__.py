@@ -9,7 +9,8 @@ user can open, with its icon, and a search box that filters the apps by name.
 The web client opens it when the URL names no action, and the apps button in the
 top bar opens it. The order is the same for every user: the apps of the system
 parameter oteny_home.first_apps first (menu xmlids, comma-separated), then the
-other apps by name; the apps of oteny_home.hidden_apps are not shown.
+other apps by name; the apps of oteny_home.hidden_apps are not shown. A value
+with an entry that names no app cannot be saved.
 """,
     "author": "Oteny",
     "website": "https://oteny.com",

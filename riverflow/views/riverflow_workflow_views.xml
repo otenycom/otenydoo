@@ -39,6 +39,7 @@
                             <field name="auto_complete_state_id" />
                             <field name="enforce_single_open" />
                             <field name="is_recurring" />
+                            <field name="is_review" />
                         </group>
                     </group>
                     <notebook>

@@ -2175,10 +2175,12 @@ class Service(models.Model):
             )
         return super()._open_services_left_by(transition)
 
-    def _execute_transition_in_code(self, transition):
+    def _execute_transition_in_code(self, transition, values=None):
         """Execute a transition through its own transition wizard without a
         person: open the wizard with the values a click gives, and save it, as
-        the bot does (``_bot_claim_run_wizard``).
+        the bot does (``_bot_claim_run_wizard``). ``values`` are the fields a
+        person would type on the screen (for example an appointment date); they
+        replace the defaults of the click.
 
         The context is replaced, not extended. The caller is often the save of
         ANOTHER service's transition, whose context carries that transition's
@@ -2198,7 +2200,9 @@ class Service(models.Model):
         wizard_context.update(action.get("context") or {})
         wizard_context.update(active_model=self._name, active_id=self.id, active_ids=self.ids)
         Wizard = self.env[action["res_model"]].with_context(wizard_context)
-        Wizard.create(Wizard.default_get(list(Wizard._fields))).action_save()
+        wizard_values = Wizard.default_get(list(Wizard._fields))
+        wizard_values.update(values or {})
+        Wizard.create(wizard_values).action_save()
 
     def _auto_progress_to_next_state(self):
         """Progress to the next visible workflow state by sequence.

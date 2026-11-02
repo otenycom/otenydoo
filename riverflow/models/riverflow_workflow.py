@@ -46,6 +46,12 @@ class RiverflowWorkflow(models.Model):
         "goes around once per period. It shows under Services → Recurring.",
     )
 
+    is_review = fields.Boolean(
+        "Review",
+        help="The services of this workflow check work; they do not do work. A review service "
+        "does not count as started work on its parent service.",
+    )
+
     enforce_single_open = fields.Boolean(
         "Enforce Single Open Service",
         default=False,

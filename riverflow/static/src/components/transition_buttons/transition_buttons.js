@@ -91,6 +91,25 @@ export class TransitionButtons extends Component {
         return this.fieldValueState.reload_on_close == true;
     }
 
+    /**
+     * The onClose of the transition wizard's dialog: reload the record behind it.
+     *
+     * Not when the wizard opened another record in the main window (an action
+     * with target current, for example the new service of the radar Change
+     * Appointment): Odoo then closes the dialog with noReload, as its own
+     * controllers expect (form_controller.js, kanban_controller.js). The form
+     * behind the dialog is already destroyed, and a load through its services
+     * never resolves (useService in core/utils/hooks.js). The dialog service
+     * removes the dialog only after this callback resolves (overlay_service.js),
+     * so the dialog stayed on the screen over the new record, now and then:
+     * whenever the form was destroyed before its load answered.
+     */
+    async reloadAfterTransition({ noReload } = {}) {
+        if (!noReload && this.reloadOnClose()) {
+            await this.props.record.model.root.load();
+        }
+    }
+
     stateClass() {
         if (this.fieldValueState.is_end_state)
             return "riverflow_end_state";
@@ -143,10 +162,7 @@ export class TransitionButtons extends Component {
             name: button.action,
             resModel: this.props.record.resModel,
             context: button.context,
-            onClose: async () => {
-                if (this.reloadOnClose())
-                    await this.props.record.model.root.load();
-            }
+            onClose: (closeParams) => this.reloadAfterTransition(closeParams),
         }
         await this.action.doActionButton(action);
     }
@@ -267,10 +283,7 @@ export class TransitionButtons extends Component {
                 name: button.action,
                 resModel: this.props.record.resModel,
                 context: context,
-                onClose: async () => {
-                    if (this.reloadOnClose())
-                        await this.props.record.model.root.load();
-                }
+                onClose: (closeParams) => this.reloadAfterTransition(closeParams),
             };
             await this.action.doActionButton(action);
         }

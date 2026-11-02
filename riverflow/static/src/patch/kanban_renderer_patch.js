@@ -84,7 +84,14 @@ patch(KanbanRenderer.prototype, {
             this.toggleProcessing(dataRecordId, false);
         }
         await this.riverflowAction.doAction(action, {
-            onClose: async () => {
+            // noReload: the step opened another record in the main window and
+            // the board is gone; a load through its services would never
+            // resolve and keep the dialog on the screen (transition_buttons.js,
+            // reloadAfterTransition).
+            onClose: async ({ noReload } = {}) => {
+                if (noReload) {
+                    return;
+                }
                 await list.model.root.load();
                 await this.riverflowPinMovedCards(record.resId, sourceGroup.value);
             },

@@ -1,0 +1,102 @@
+<?xml version="1.0"?>
+<odoo noupdate="1">
+    <!-- Review: the workflow of a review service. A review service checks work;
+         it does not do work. is_review lets a parent
+         service tell a review service apart from a service that does work: a
+         review service never counts as started work. No In Progress: a review
+         is done or not. -->
+    <record id="workflow_service_review" model="riverflow.workflow">
+        <field name="model_id" ref="riverflow.model_riverflow_service" />
+        <field name="name">Review</field>
+        <field name="description">Not started / Done</field>
+        <field name="icon">fa-eye</field>
+        <field name="is_review" eval="True" />
+    </record>
+
+    <!-- States -->
+    <record id="state_review_not_started" model="riverflow.state">
+        <field name="workflow_id" ref="workflow_service_review" />
+        <field name="name">Not Started</field>
+        <field name="sequence">10</field>
+        <field name="color_int">9</field>
+    </record>
+
+    <record id="state_review_done" model="riverflow.state">
+        <field name="workflow_id" ref="workflow_service_review" />
+        <field name="name">Done</field>
+        <field name="sequence">20</field>
+        <field name="is_end_state">True</field>
+        <field name="color_int">9</field>
+    </record>
+
+    <!-- Cancelled: reached when a parent service ends the case, or by hand. -->
+    <record id="state_review_cancelled" model="riverflow.state">
+        <field name="workflow_id" ref="workflow_service_review" />
+        <field name="name">Cancelled</field>
+        <field name="sequence">30</field>
+        <field name="is_end_state">True</field>
+        <field name="is_cancelled_state">True</field>
+        <field name="hide_in_statusbar">True</field>
+        <field name="color_int">1</field>
+    </record>
+
+    <!-- Transitions from null state -->
+    <record id="trans_review_new_to_not_started" model="riverflow.transition">
+        <field name="name">Not Started</field>
+        <field name="from_state_id" ref="" />
+        <field name="to_state_id" ref="state_review_not_started" />
+        <field name="action_id" ref="riverflow.transition_action_default" />
+        <field name="sequence">10</field>
+    </record>
+
+    <record id="trans_review_new_to_done" model="riverflow.transition">
+        <field name="name">Done</field>
+        <field name="from_state_id" ref="" />
+        <field name="to_state_id" ref="state_review_done" />
+        <field name="action_id" ref="riverflow.transition_action_default" />
+        <field name="icon">fa-check</field>
+        <field name="sequence">20</field>
+    </record>
+
+    <!-- Transitions from Not Started -->
+    <record id="trans_review_not_started_to_done" model="riverflow.transition">
+        <field name="name">Done</field>
+        <field name="from_state_id" ref="state_review_not_started" />
+        <field name="to_state_id" ref="state_review_done" />
+        <field name="action_id" ref="riverflow.transition_action_default" />
+        <field name="icon">fa-check</field>
+        <field name="sequence">10</field>
+    </record>
+
+    <record id="trans_review_not_started_to_cancelled" model="riverflow.transition">
+        <field name="name">Cancel</field>
+        <field name="from_state_id" ref="state_review_not_started" />
+        <field name="to_state_id" ref="state_review_cancelled" />
+        <field name="action_id" ref="riverflow.transition_action_default" />
+        <!-- Executed by itself when the parent service enters a state that
+             ends the case (execute_child_transitions = cancel). -->
+        <field name="execute_on_parent_transitions">cancel</field>
+        <field name="icon">fa-times</field>
+        <field name="sequence">30</field>
+    </record>
+
+    <!-- Transitions from Done -->
+    <record id="trans_review_done_to_not_started" model="riverflow.transition">
+        <field name="name">Re-start</field>
+        <field name="from_state_id" ref="state_review_done" />
+        <field name="to_state_id" ref="state_review_not_started" />
+        <field name="action_id" ref="riverflow.transition_action_default" />
+        <field name="icon">fa-undo</field>
+        <field name="sequence">10</field>
+    </record>
+
+    <!-- Transitions from Cancelled -->
+    <record id="trans_review_cancelled_to_not_started" model="riverflow.transition">
+        <field name="name">Re-start</field>
+        <field name="from_state_id" ref="state_review_cancelled" />
+        <field name="to_state_id" ref="state_review_not_started" />
+        <field name="action_id" ref="riverflow.transition_action_default" />
+        <field name="icon">fa-undo</field>
+        <field name="sequence">10</field>
+    </record>
+</odoo>

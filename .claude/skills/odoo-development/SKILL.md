@@ -244,6 +244,7 @@ When adding files to an Odoo module:
 - **Python files**: Add to `__init__.py` in the same folder
 - **XML files**: Add path to `__manifest__.py` in `data` or `views` array
 - **SCSS files**: Add to `__manifest__.py` `assets` section
+- **The version line carries no change log.** Write `"version": "19.0.x.y",` and nothing after it: the history of a module is in git, in the commit messages (Ries, 2-Nov-2026). Change notes as comments made the crewradar manifest grow past the 100 KiB that Odoo's `ast.literal_eval` accepts (`odoo/_monkeypatches/ast.py`, `ODOO_LIMIT_LITEVAL_BUFFER`); Odoo then reports "manifest not found" and skips the module and every module that depends on it.
 
 ### SCSS and Dark Mode
 

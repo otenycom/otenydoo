@@ -351,6 +351,9 @@ module namespace, for example:
 </record>
 ```
 
+A self-transition can still leave the state: its wizard can rewrite `vals["state_id"]`
+when the outcome requires it (see [SKILL — Conditional Transition Routing](../SKILL.md#conditional-transition-routing-wizard-rewrites-the-target-state)).
+
 **Return/undo transition:**
 
 ```xml

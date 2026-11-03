@@ -302,6 +302,28 @@ This avoids duplicating the parent's field layout in the child view. Without `mo
 </form>
 ```
 
+### A field only in debug mode
+
+To hide a field under a condition but show it in debug mode, give the field a
+twin with `groups="base.group_no_one"` right after it, as Odoo's own
+`mail_template_views.xml` does:
+
+```xml
+<field name="daily_prio" invisible="is_deadline_from_appointment" />
+<field name="daily_prio" groups="base.group_no_one" invisible="not is_deadline_from_appointment" />
+```
+
+- `base.group_no_one` counts only in debug mode (`res.users.has_group`), so
+  the twin shows only there, and only one of the two is visible at a time.
+- **Odoo 19 keeps the twin in the view of a user without debug mode.**
+  `get_view` does not remove a node of a group that the user lacks; it keeps
+  it with `invisible="1"`. A test that reads the arch counts the nodes whose
+  `invisible` is not `"1"`, not all nodes of the field (riverflow
+  `test_deadline_follows_appointment`, 3-Nov-2026).
+- Put the twin **after** the first node: an inheriting view that anchors on
+  `//field[@name='...']` takes the first match, so its fields keep their
+  place.
+
 ### Group Layout and colspan
 
 `<group>` uses a 2-column grid layout (label + widget). `<field>` elements automatically span both columns (label in column 1, widget in column 2). Non-field elements like `<div>`, `<separator>`, or alert banners placed directly inside `<group>` default to occupying only one column, causing them to be squeezed into the label area. Always add `colspan="2"` to make non-field elements span the full width:

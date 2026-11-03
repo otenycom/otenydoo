@@ -60,13 +60,18 @@
                                 can_write="True" invisible="1" />
                             <field name="active" invisible="1" />
                             <field name="is_days_relative_to_project_applicable" invisible="1" />
+                            <!-- A deadline that follows an appointment moves only with the appointment
+                                 (plan riverflow/plans/deadline-follows-appointment.md): the deadline and
+                                 its settings hide, and the appointment shows. Each hidden field has a twin
+                                 with groups="base.group_no_one" that shows it in debug mode. -->
+                            <field name="is_deadline_from_appointment" invisible="1" />
                             <field name="use_project_deadline_from_options" invisible="1" />
                             <field
                                 name="project_deadline"
                                 widget="daterange"
                                 options="{'end_date_field': 'end_date'}"
                                 string="Deadline"
-                                invisible="is_days_relative_to_project_applicable"
+                                invisible="is_days_relative_to_project_applicable or is_deadline_from_appointment"
                                 on_change="1"
                                 decoration-muted="is_end_state"
                                 decoration-danger="deadline &lt; context_today().strftime('%Y-%m-%d') and not is_end_state"
@@ -75,15 +80,28 @@
                             <field name="end_date" invisible="1" />
                             <!-- readonly: changing this resets use_project_deadline_from to 'self'.
                             To change the deadline for relative mode, use the calendar or switch to self first. -->
-                            <field name="deadline" readonly="1" invisible="not is_days_relative_to_project_applicable"
+                            <field name="deadline" readonly="1"
+                                invisible="not is_days_relative_to_project_applicable or is_deadline_from_appointment"
+                                decoration-muted="is_end_state"
+                                decoration-danger="deadline &lt; context_today().strftime('%Y-%m-%d') and not is_end_state"
+                                decoration-warning="deadline == context_today().strftime('%Y-%m-%d') and not is_end_state"
+                            />
+                            <field name="deadline" readonly="1" groups="base.group_no_one"
+                                invisible="not is_days_relative_to_project_applicable or not is_deadline_from_appointment"
                                 decoration-muted="is_end_state"
                                 decoration-danger="deadline &lt; context_today().strftime('%Y-%m-%d') and not is_end_state"
                                 decoration-warning="deadline == context_today().strftime('%Y-%m-%d') and not is_end_state"
                             />
                             <field name="daily_prio" string="Priority"
-                                options="{'enable_formatting': false}" />
+                                options="{'enable_formatting': false}" invisible="is_deadline_from_appointment" />
+                            <field name="daily_prio" string="Priority" groups="base.group_no_one"
+                                options="{'enable_formatting': false}" invisible="not is_deadline_from_appointment" />
                             <field name="use_project_deadline_from" widget="filterable_selection"
-                                options="{'whitelist_fname': 'use_project_deadline_from_options'}" required="1" on_change="1" />
+                                options="{'whitelist_fname': 'use_project_deadline_from_options'}" required="1" on_change="1"
+                                invisible="is_deadline_from_appointment" />
+                            <field name="use_project_deadline_from" widget="filterable_selection" groups="base.group_no_one"
+                                options="{'whitelist_fname': 'use_project_deadline_from_options'}" required="1" on_change="1"
+                                invisible="not is_deadline_from_appointment" />
                             <field name="root_service_deadline" invisible="use_project_deadline_from != 'root'" />
                             <!-- The time shows next to the date, so that nobody retypes it in a note
                                  that can then disagree with the appointment; 0 means not set. -->
@@ -94,9 +112,16 @@
                                 <field name="root_service_appointment_time" widget="float_time" nolabel="1" class="o_field_fit_content"
                                     invisible="not root_service_appointment_time" />
                             </div>
-                            <field name="days_relative_to_project" invisible="not is_days_relative_to_project_applicable"
+                            <field name="days_relative_to_project"
+                                invisible="not is_days_relative_to_project_applicable or is_deadline_from_appointment"
                                 on_change="1" />
-                            <field name="weekend_deadline_rule" invisible="not is_days_relative_to_project_applicable" />
+                            <field name="days_relative_to_project" groups="base.group_no_one"
+                                invisible="not is_days_relative_to_project_applicable or not is_deadline_from_appointment"
+                                on_change="1" />
+                            <field name="weekend_deadline_rule"
+                                invisible="not is_days_relative_to_project_applicable or is_deadline_from_appointment" />
+                            <field name="weekend_deadline_rule" groups="base.group_no_one"
+                                invisible="not is_days_relative_to_project_applicable or not is_deadline_from_appointment" />
                         </group>
                     </group>
                     <notebook>

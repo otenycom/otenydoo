@@ -1,8 +1,8 @@
 # Plan: a deadline that follows an appointment is read-only and hidden
 
-Status: decisions agreed by Ries on 3-Nov-2026; not built. Modules: riverflow
-(the flag, the form, the two calendars, the write check, the hint),
-rivercreds (adds "Credential appointment" to the flag). Origin: radar plan
+Status: decisions agreed by Ries on 3-Nov-2026; built on 3-Nov-2026
+(riverflow 19.0.1.1391), see "Build record". Modules: riverflow (the flag and
+the form), rivercreds (adds "Credential appointment" to the flag). Origin: radar plan
 `crewradar-cuneus/plans/work-permit-change-appointment.md` (decision 11, the
 protected appointment credential) and the analysis of typed deadlines on the
 radar production copy of 3-Nov-2026.
@@ -62,19 +62,15 @@ appointment and the deadline.
    form hides Deadline, Priority, Deadline From, the days before or after the
    appointment, and Weekend. Debug mode (`base.group_no_one`) shows them. The
    due date stays in the Radar and in the lists.
-3. **Nobody changes the deadline by hand.** The two calendars do not let a
-   user drag such a service. The server refuses a change of `deadline`,
-   `project_deadline`, `use_project_deadline_from`,
-   `days_relative_to_project` or `weekend_deadline_rule` outside a
-   transition. The message ends with `_appointment_change_hint()`, the
-   sentence that names the step that changes the appointment (radar: Change
-   Appointment).
+3. **No block on write** (Q1, Ries, 3-Nov-2026). The form only hides the
+   fields. The server refuses nothing, and the two calendars stay as they
+   are: a drag of such a service still switches it to "Self". Hiding the
+   fields removes the route that users took; a block on write would need a
+   way to tell a transition from a hand edit, for little gain.
 4. **One flag.** A computed field on `riverflow.service`,
-   `is_deadline_from_appointment`: true for "Top-level appointment" in
-   riverflow, and rivercreds adds "Credential appointment". The form, the two
-   calendars and the check read it. `_appointment_change_hint()` moves from
-   rivercreds down to riverflow, because the check of a child service runs in
-   riverflow. rivercreds and the modules above override it as today.
+   `is_deadline_from_appointment`: true for a mode in
+   `_appointment_deadline_modes()`, which is "Top-level appointment" in
+   riverflow; rivercreds adds "Credential appointment". The form reads it.
 
 ## What stays as it is
 
@@ -87,39 +83,40 @@ appointment and the deadline.
 - A service leaves the scope as soon as a transition gives it another
   Deadline From, for example AT Applied, which sets a follow-up date.
 
-## Open question for the build
+## Build record (3-Nov-2026)
 
-- [ ] **Q1 — How does the check tell a transition from a hand edit?**
-
-  **Situation.** The transition wizard runs with `transition_id` in its
-  context (`wizards/riverflow_transition_wizard.py`). Other code can write the
-  deadline fields too: a transition run in code
-  (`_execute_transition_in_code`), the cancel cascade, crons and migrations.
-  Whether each of them has `transition_id` in its context is not checked yet.
-
-  **Question.** Which writes pass the check?
-
-  **Recommended.** A write passes when its context has `transition_id`, or
-  when it runs as superuser (crons, migrations). A transition run in code and
-  the cascades get `transition_id` where they lack it. Then only the form, the
-  lists and the calendars meet the refusal, and those are the routes of a
-  hand edit.
-
-## Build steps
-
-1. riverflow: the flag, the form and the hint. The fields that hide for users
-   show a second time with `groups="base.group_no_one"`. Check: in the browser
-   on a main service and a child service whose deadline follows an
-   appointment, as user and in debug mode.
-2. riverflow: no drag in the two calendars for a flagged service. Check: in
-   the browser.
-3. riverflow: the write check (Q1). Check by tests: a hand write of each of
-   the five fields is refused on a flagged service and passes on a service
-   that is not flagged; a transition passes.
-4. rivercreds: "Credential appointment" joins the flag; its own copy of the
-   hint goes. Check: the tests of step 3 on a service with an appointment
-   credential.
-5. radar: the Change Appointment tests still pass.
+- **riverflow 19.0.1.1391.** `models/riverflow_service.py`: the field
+  `is_deadline_from_appointment` and `_appointment_deadline_modes()`
+  (`root_appointment`). `views/riverflow_service_views.xml`: Deadline (both
+  nodes, `project_deadline` and `deadline`), Priority, Deadline From, the
+  days and Weekend hide while the flag is set. Each field except
+  `project_deadline` has a twin with `groups="base.group_no_one"` right
+  after it, visible only while the flag is set. `project_deadline` needs no
+  twin: a flagged service uses a relative mode, so the read-only `deadline`
+  shows its date in debug mode. The twin comes after the first node, so the
+  crewradar xpath on the first Deadline From (`deadline_log_entry_id` after
+  it) keeps its place.
+- **rivercreds.** `models/riverflow_service.py` adds `credential_appointment`
+  to `_appointment_deadline_modes()`.
+- **Found:** Odoo 19 does not remove the node of a group that the user lacks.
+  `get_view` keeps it with `invisible="1"` (odoo-development
+  `xml-guidelines.md`, "A field only in debug mode"). So the form test counts
+  the nodes that can show.
+- **Tests:** riverflow `test_deadline_follows_appointment` (5: the flag for
+  each mode, a change of mode, the deadline still follows the appointment,
+  one node per field that can show without debug mode); rivercreds
+  `test_appointment_of_open_service` (+1, "Credential appointment"). A
+  focused run with `test_project_deadline`, `test_weekend_deadline_rule` and
+  `test_state_deadline_on_entry` on `cr-test`: 0 failed of 73.
+- **Browser check** on `crmain` (production copy of 3-Nov-2026, after `-u
+  riverflow,rivercreds`). Without debug mode: main service 29191 in
+  Appointment Booked shows the Appointment (26-Nov-26 09:15) in the left
+  column and an empty right column; its child service 39924 (AB Arrange
+  Transport) shows only the Appointment in the right column. In debug mode
+  both show Deadline, Priority, Deadline From, the days and Weekend (39924:
+  24-Nov-26, "Top-level appointment", −2). A service on another rule (template
+  5428, "Credential renewal marker") still shows all fields without debug
+  mode. No console errors.
 
 ## Not in this plan
 

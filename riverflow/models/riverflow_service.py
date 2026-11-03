@@ -297,6 +297,14 @@ class Service(models.Model):
         help="Whether this service should use relative days to calculate its deadline",
         store=True,
     )
+    # A deadline that follows an appointment moves only with the appointment, so
+    # the form hides the deadline and its settings outside debug mode and shows
+    # the appointment (plan riverflow/plans/deadline-follows-appointment.md).
+    is_deadline_from_appointment = fields.Boolean(
+        "Deadline From Appointment",
+        compute="_compute_is_deadline_from_appointment",
+        help="The deadline follows an appointment. Change the appointment, not the deadline.",
+    )
 
     weekend_deadline_rule = fields.Selection(
         [
@@ -886,6 +894,18 @@ class Service(models.Model):
                 service.use_project_deadline_from in ("root", "root_appointment")
                 and service.root_id.ids == service.ids
             )
+
+    @api.model
+    def _appointment_deadline_modes(self):
+        """The Deadline From modes that follow an appointment. A module that
+        adds such a mode adds it here."""
+        return ("root_appointment",)
+
+    @api.depends("use_project_deadline_from")
+    def _compute_is_deadline_from_appointment(self):
+        modes = self._appointment_deadline_modes()
+        for service in self:
+            service.is_deadline_from_appointment = service.use_project_deadline_from in modes
 
     @api.depends(
         "project_deadline",

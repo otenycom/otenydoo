@@ -39,3 +39,4 @@ from . import test_service_company
 from . import test_recurring_services
 from . import test_review_workflow
 from . import test_step_deadline_weekday
+from . import test_deadline_follows_appointment

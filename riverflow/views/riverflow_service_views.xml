@@ -90,8 +90,8 @@
                             <label for="root_service_appointment_date" string="Appointment"
                                 invisible="use_project_deadline_from != 'root_appointment'" />
                             <div class="o_row" invisible="use_project_deadline_from != 'root_appointment'">
-                                <field name="root_service_appointment_date" nolabel="1" />
-                                <field name="root_service_appointment_time" widget="float_time" nolabel="1"
+                                <field name="root_service_appointment_date" nolabel="1" class="o_field_fit_content" />
+                                <field name="root_service_appointment_time" widget="float_time" nolabel="1" class="o_field_fit_content"
                                     invisible="not root_service_appointment_time" />
                             </div>
                             <field name="days_relative_to_project" invisible="not is_days_relative_to_project_applicable"

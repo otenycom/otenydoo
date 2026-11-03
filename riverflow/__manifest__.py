@@ -1,6 +1,6 @@
 {
     "name": "Riverflow",
-    "version": "19.0.1.1388",
+    "version": "19.0.1.1389",
     "depends": ["base", "mail", "oteny_shortcut", "oteny_bot"],
     "author": "Vriend Studio",
     "category": "Workflow",
@@ -64,6 +64,7 @@
             "riverflow/static/src/patch/**/*",
             "riverflow/static/src/riverflow_force_xl.js",
             "riverflow/static/src/scss/bg-decorations.scss",
+            "riverflow/static/src/scss/form_fields.scss",
         ],
         "web.assets_web_dark": [
             "riverflow/static/src/components/timeline/timeline_scale_selector.dark.scss",

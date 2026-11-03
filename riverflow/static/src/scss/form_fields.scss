@@ -1,0 +1,21 @@
+// A field in a form row (.o_row) that is as wide as its value, so the next
+// field follows right after it: an appointment date with its time next to it.
+// Odoo's form_controller.scss gives a field in a row of an editable form
+// "flex: 1 1 auto; width: 0 !important", so the field fills the free width
+// of the row, and without the growth it is 0 wide. This selector is more
+// specific than Odoo's, so it wins whatever the load order.
+.o_form_view .o_form_editable .o_row > .o_field_widget.o_field_fit_content,
+.o_form_view .o_row > .o_field_widget.o_field_fit_content {
+    flex: 0 0 auto;
+    width: max-content !important;
+}
+
+// A checkbox in a form group starts where the text of the fields above it
+// starts. An input field keeps its text $o-input-padding-x from its left
+// edge, while Odoo's checkbox sits on the edge itself, so a checkbox under
+// text fields looked shifted to the left (radar credential form, Thijs,
+// 3-Nov-2026). Only the plain checkbox: the toggle and list checkboxes keep
+// Odoo's place.
+.o_form_view .o_inner_group .o_field_widget.o_field_boolean > .o-checkbox {
+    margin-left: $o-input-padding-x;
+}

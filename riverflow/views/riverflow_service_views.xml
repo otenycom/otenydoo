@@ -169,7 +169,7 @@
                             <field name="descendant_ids" widget="riverflow_one2many" invisible="not descendant_ids">
                                 <!-- Because there is a handle-field, we must set the default_order to prevent Odoo from taking the handle's field as the primary sort field -->
                                 <!-- All fields from default_order must be included in the list, added with column_invisible but do not change the existing column order (eg root_name must remain where it was), see state record view conventions -->
-                                <list create="0" delete="0" edit="0" default_order="res_sortable_name,res_model,res_id,root_name,root_id,display_order">
+                                <list create="0" delete="0" edit="0" default_order="root_name,root_id,display_order">
                                     <field name="active" column_invisible="True" />
                                     <field name="is_end_state" column_invisible="1" />
                                     <field name='indented_name' optional="show" width="260px" />

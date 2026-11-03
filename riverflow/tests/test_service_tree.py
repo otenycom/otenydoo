@@ -1,6 +1,7 @@
 from odoo.tests.common import TransactionCase
 from odoo.tests import tagged
 from odoo.tools.sql import index_exists
+from lxml import etree
 from datetime import date
 
 
@@ -1070,6 +1071,71 @@ class ServiceDeadlineTestCase(TransactionCase):
             list(range(1, child_count + 1)),
             "display_order must be sequential following deadline-sorted order",
         )
+
+    def test_child_services_list_shows_a_tree_with_two_subjects_in_tree_order(self):
+        """A tree can hold services of more than one subject: a work permit on
+        the employee holds a train booking on a log entry. display_order numbers
+        the whole tree, and the Child Services list sorts on it alone, so every
+        child service sits right under its parent. Numbered per subject, the
+        services of the second subject sat apart, out of their tree (crmain,
+        main service 29191, 3-Nov-2026)."""
+        self.cleanup_test_services()
+        Service = self.env["riverflow.service"]
+        employee = self.env["res.partner"].create({"name": f"{self.TEST_PREFIX}Employee"})
+        log_entry = self.env["res.partner"].create({"name": f"{self.TEST_PREFIX}Log entry"})
+        root = Service.create(
+            {
+                "name": f"{self.TEST_PREFIX}Main",
+                "project_deadline": date(2026, 6, 1),
+                "res_model": "res.partner",
+                "res_id": employee.id,
+            }
+        )
+        early = Service.create(
+            {
+                "name": f"{self.TEST_PREFIX}Early",
+                "parent_id": root.id,
+                "use_project_deadline_from": "self",
+                "project_deadline": date(2026, 5, 1),
+            }
+        )
+        travel = Service.create(
+            {
+                "name": f"{self.TEST_PREFIX}Travel",
+                "parent_id": root.id,
+                "use_project_deadline_from": "self",
+                "project_deadline": date(2026, 5, 10),
+            }
+        )
+        # The travel service and its child service are on the second subject.
+        travel.write({"res_model": "res.partner", "res_id": log_entry.id})
+        train = Service.create(
+            {
+                "name": f"{self.TEST_PREFIX}Train",
+                "parent_id": travel.id,
+                "use_project_deadline_from": "self",
+                "project_deadline": date(2026, 5, 2),
+            }
+        )
+        late = Service.create(
+            {
+                "name": f"{self.TEST_PREFIX}Late",
+                "parent_id": root.id,
+                "use_project_deadline_from": "self",
+                "project_deadline": date(2026, 5, 20),
+            }
+        )
+        self.assertEqual(train.res_id, log_entry.id)
+        self.assertEqual(early.res_id, employee.id)
+        self.env.invalidate_all()
+
+        tree_order = [root, early, travel, train, late]
+        self.assertEqual([s.display_order for s in tree_order], [0, 1, 2, 3, 4])
+
+        arch = Service.get_views([(self.env.ref("riverflow.view_service_form").id, "form")])["views"]["form"]["arch"]
+        child_services = etree.fromstring(arch).xpath("//field[@name='descendant_ids']/list")[0]
+        listed = Service.search([("id", "in", root.descendant_ids.ids)], order=child_services.get("default_order"))
+        self.assertEqual(listed, early + travel + train + late)
 
 
 @tagged("post_install", "-at_install", "riverflow", "test_services")

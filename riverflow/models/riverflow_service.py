@@ -33,7 +33,7 @@ class Service(models.Model):
     # by display_order, but by name.
     _order = "res_sortable_name,res_model,res_id,root_name,root_id,display_order"
     # Services are looked up by their subject all the time: the auto-add dedup
-    # search, the display_order SQL and every "services of this record" read.
+    # search and every "services of this record" read.
     # Without this index each lookup scanned the whole table (3-7 ms on 35k
     # services), which a single log-entry edit repeats dozens of times.
     _res_model_res_id_idx = models.Index("(res_model, res_id)")
@@ -1057,13 +1057,13 @@ class Service(models.Model):
             return
 
         # The sibling-discovery SQL below bypasses the ORM cache, so the
-        # stored compute fields it queries (root_id, res_id, res_model) must
+        # stored compute field it queries (root_id) must
         # already be materialised in the database. Flush them first --
         # otherwise children just-created in the same transaction look
         # orphaned (their root_id column is still NULL while only the cache
         # holds the computed value), the sibling set comes back empty, and
         # display_order stays at its default.
-        self.env["riverflow.service"].flush_model(["root_id", "res_id", "res_model", "parent_path", "to_be_deleted"])
+        self.env["riverflow.service"].flush_model(["root_id", "parent_path", "to_be_deleted"])
 
         Service = self.env["riverflow.service"].with_context(active_test=False).sudo()
 
@@ -1071,28 +1071,22 @@ class Service(models.Model):
 
         for record in self:
 
-            # Retrieve all service records with the same root_id as the current record
-            # we only set the display_order field of child nodes, the root nodes are sorted
-            # by name; as it would become very slow to display_order the entire list of services
+            # Retrieve all service records with the same root_id as the current record:
+            # display_order numbers one tree, root first, so the Child Services list
+            # shows the tree as it is. A tree can hold services of more than one subject
+            # (a work permit on the employee with a travel service on a log entry);
+            # numbering per subject left the services whose parent has another subject
+            # out of the walk, so they kept a stale number and sat apart in the list.
 
             # we use direct sql to avoid recalculation of root_id, which means 'search' would decide
             # to recursively recalculate all records in the table, this overflows the stack
-            if record.res_model and record.res_id:
-                self.env.cr.execute(
-                    """
-                    SELECT id FROM riverflow_service
-                    WHERE res_model = %s AND res_id = %s AND id != %s AND NOT to_be_deleted
-                    """,
-                    (record.res_model, record.res_id, record.id),
-                )
-            else:
-                self.env.cr.execute(
-                    """
-                    SELECT id FROM riverflow_service
-                    WHERE root_id = %s AND id != %s AND NOT to_be_deleted
-                    """,
-                    (record.root_id.id, record.id),
-                )
+            self.env.cr.execute(
+                """
+                SELECT id FROM riverflow_service
+                WHERE root_id = %s AND id != %s AND NOT to_be_deleted
+                """,
+                (record.root_id.id, record.id),
+            )
             service_ids = [row[0] for row in self.env.cr.fetchall()]
             services = set(Service.browse(service_ids))
             # current record is not included in the search as it can lead to recursive stack overflow

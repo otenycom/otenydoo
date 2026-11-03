@@ -161,6 +161,14 @@ class TestProjectDeadlineRootAppointmentMode(TransactionCase):
             "Deadline should be appointment date (Jul 20) minus 2 days",
         )
 
+    def test_root_appointment_time_follows_root(self):
+        """The child shows the root's appointment time next to its date, so
+        nobody retypes it in a note that can then disagree with the root."""
+        self.root.supply_time_of_day = 10.25
+        self.assertEqual(self.child.root_service_appointment_time, 10.25)
+        self.root.supply_time_of_day = 14.5
+        self.assertEqual(self.child.root_service_appointment_time, 14.5)
+
     def test_root_appointment_recomputes_on_supply_date_change(self):
         """Changing root's supply_actual_date recomputes child's deadline."""
         self.assertEqual(self.child.deadline, date(2026, 7, 20))

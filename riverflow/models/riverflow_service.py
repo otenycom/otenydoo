@@ -337,6 +337,12 @@ class Service(models.Model):
         help="Appointment date (supply_actual_date) of the top-level parent",
         store=False,
     )
+    root_service_appointment_time = fields.Float(
+        "Top-level appointment time",
+        related="root_id.supply_time_of_day",
+        help="Appointment time (supply_time_of_day) of the top-level parent",
+        store=False,
+    )
     deadline = fields.Date(
         "Deadline",
         compute="_compute_deadline",

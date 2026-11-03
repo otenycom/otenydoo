@@ -194,8 +194,28 @@ class TestExecuteChildTransitions(TransactionCase):
             "riverflow.trans_taxi_not_started_to_cancelled",
             "riverflow.trans_train_not_started_to_cancelled",
             "riverflow.trans_se_5",
+            "riverflow.trans_sn_not_needed",
         ):
             self.assertEqual(self.env.ref(xml_id).execute_on_parent_transitions, "cancel", xml_id)
+
+    def test_a_transition_names_the_closing_value(self):
+        """A transition whose target state does not end the case, while the work below
+        it is moot (radar A1 Needs Correction), names the value in its action
+        context: the walk and its prediction read it for that save."""
+        parent, children = self._case()
+        self.to_sent.action_context = "{'execute_child_transitions': 'cancel'}"
+        self.assertEqual(
+            parent._open_services_left_by(self.to_sent),
+            children["started"],
+        )
+
+        self._execute_transition(parent, self.to_sent)
+
+        self.assertEqual(parent.state_id, self.parent_sent)
+        for key in ("not_started", "below_not_started", "below_closed"):
+            self.assertEqual(children[key].state_id, self.child_cancelled, key)
+        self.assertEqual(children["started"].state_id, self.child_in_progress)
+        self.assertEqual(children["below_started"].state_id, self.child_not_started)
 
     # --- refuse_with_open_services (radar pipeline applicants plan, decision 145) ---
 

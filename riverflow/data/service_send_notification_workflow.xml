@@ -84,6 +84,10 @@
         <field name="from_state_id" ref="state_service_sn_not_started" />
         <field name="to_state_id" ref="state_service_sn_not_needed" />
         <field name="action_id" ref="riverflow.transition_action_default" />
+        <!-- Executed by itself when the parent service enters a state that
+             ends the case (execute_child_transitions = cancel). The file is
+             noupdate: migration 19.0.1.1393. -->
+        <field name="execute_on_parent_transitions">cancel</field>
         <field name="sequence">40</field>
     </record>
 

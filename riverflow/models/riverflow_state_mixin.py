@@ -507,11 +507,16 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
             and not (service.parent_id.res_model == self._name and service.parent_id.res_id == self.id)
         )
 
-    def _execute_child_transitions(self):
+    def _execute_child_transitions(self, signal=None):
         """Let the child services below execute their own closing transition
         when this record entered a state that ends the case
         (``execute_child_transitions`` on the state; radar pipeline applicants
         plan, Q162; for any record with a workflow since decision 147).
+
+        ``signal`` is the value that a transition names in its action context
+        (``execute_child_transitions``): a transition back whose work below is moot,
+        while its target state does not end the case (radar A1 Needs
+        Correction). It replaces the value of the state for that save.
 
         Called after a transition (``riverflow.transition.wizard.action_save``)
         and by code that moves a record into such a state without a transition
@@ -530,9 +535,18 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
         decides about the services below it.
         """
         for record in self:
-            signal = record.state_id.execute_child_transitions
-            if signal:
-                record._workflow_child_services()._execute_signal_down(signal)
+            record_signal = signal or record.state_id.execute_child_transitions
+            if record_signal:
+                record._workflow_child_services()._execute_signal_down(record_signal)
+
+    def _child_transitions_signal(self, transition):
+        """The value with which ``transition`` closes the child services below:
+        the one its action context names, else the one of its target state."""
+        self.ensure_one()
+        return (
+            self._prepare_action_context(transition).get("execute_child_transitions")
+            or transition.to_state_id.execute_child_transitions
+        )
 
     def _open_services_left_by(self, transition):
         """The open child services of this record that stay open when
@@ -541,5 +555,4 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
         (``_open_services_left`` mirrors ``_execute_signal_down``), so the
         refusal and the walk never disagree."""
         self.ensure_one()
-        signal = transition.to_state_id.execute_child_transitions
-        return self._workflow_child_services()._open_services_left(signal)
+        return self._workflow_child_services()._open_services_left(self._child_transitions_signal(transition))

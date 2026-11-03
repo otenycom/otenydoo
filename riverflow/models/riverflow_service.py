@@ -2197,7 +2197,7 @@ class Service(models.Model):
             return self.browse()
         if to_state.auto_done_children_on_enter:
             return self._workflow_child_services()._open_services_left(
-                to_state.execute_child_transitions, close_all=True
+                self._child_transitions_signal(transition), close_all=True
             )
         return super()._open_services_left_by(transition)
 

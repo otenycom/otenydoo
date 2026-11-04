@@ -655,6 +655,14 @@ agent rules).
   blocking", not "Blocked by Rijnvaartverklaring"; "A1 is blocked", not "Blocks
   A1". A filter name may keep the long form ("Blocked by Dependency"): a filter
   menu has room.
+- **A check text has at most 31 characters** (Ries, 4-Nov-2026). The Issues tag
+  (`many2many_tags`) has a fixed maximum width, in the form and in the list, and
+  shows about 31 characters; the rest is only in the tooltip. Write the text so
+  that what the reader acts on, a date included, is in those 31 characters: cut
+  filler words ("is", "waiting") before the facts. Radar example: "DE Work Permit
+  due 19-Oct-27" (28), not "DE Work Permit is waiting, due 19-Oct-27" (40),
+  which hid the date. A subject name that alone is long (a credential type group)
+  counts against the limit.
 - **A release that changes a check's rule or text recomputes the stored results**
   (Ries, 11-Oct-2026). Check results are stored, and many have no trigger of
   their own, so without a recompute they keep the old text until the next daily

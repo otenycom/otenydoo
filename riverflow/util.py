@@ -37,3 +37,18 @@ def log_execution_time(func):
         return result
 
     return wrapper
+
+
+def pdf_preview_action(attachment):
+    """The client action that shows a PDF attachment in the riverflow preview
+    dialog, with Print, Download and Close (static/src/components/pdf_preview).
+
+    It closes the dialog that returned it, so a wizard button can save and then
+    show its PDF. Use it instead of an act_url with target "new": the browser
+    blocks that window as a popup (Ries, 5-Nov-2026).
+    """
+    return {
+        "type": "ir.actions.client",
+        "tag": "riverflow_pdf_preview",
+        "params": {"attachment_id": attachment.id, "title": attachment.name},
+    }

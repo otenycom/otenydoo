@@ -1404,5 +1404,6 @@ riverflow/
 - [riverflow-execute-talent](../../../riverflow/talents/riverflow-execute-talent/SKILL.md) - the recipe the bot reads
 - [Talent author workflow](references/talent-author-workflow.md) - operator pointer to that Talent
 - [Team Channels](references/team-channels.md) - which chatter messages riverflow copies into a team's Discuss channel, and why: the external message copy (Responsible team) and the colleague message copy (recipient's home team, `res.users.home_team_id`, team form **Members** list; 19.0.1.1275)
+- [PDF preview dialog](references/pdf-preview-dialog.md) - show a PDF with Print, Download and Close through `riverflow.util.pdf_preview_action`, never a new window
 - [Recurring services](references/recurring-services.md) - one service that goes around once per period with no end state: the flag Recurring, the menus Recurring and Templates, New Recurring Service, the deadline keys `next_deadline_weekday` and `ask_deadline`
 - [Roadmap](references/roadmap.md) - Development roadmap

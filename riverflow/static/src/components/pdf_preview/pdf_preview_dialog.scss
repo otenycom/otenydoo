@@ -1,0 +1,19 @@
+// One scroll layer: the dialog fills the window height and its body does not
+// scroll, so only the PDF viewer in the frame scrolls. The body rule matches
+// the specificity of the full-screen rule of web/core/dialog/dialog.scss.
+.modal:not(.o_modal_full) .o_riverflow_pdf_preview {
+    height: calc(100dvh - #{2 * $modal-dialog-margin-y-sm-up});
+}
+
+.modal.o_technical_modal .modal-dialog .modal-content.o_riverflow_pdf_preview .modal-body {
+    display: flex;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.o_riverflow_pdf_preview_frame {
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 0;
+    border: 0;
+}

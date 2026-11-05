@@ -256,6 +256,8 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
                 for transition in transition_ids:
                     if hide_bot_work and transition.bot_role in ("claim", "work"):
                         continue
+                    if not record._is_transition_offered(transition):
+                        continue
                     if not record.state_id:
                         # The start transition to the first state can be skipped, as that is a no-op
                         # its typically named "Not Started" and used in the Start-new wizard to create a new record in the first state
@@ -325,6 +327,15 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
                 )
 
             record.state_id_statusbar_json = json
+
+    def _is_transition_offered(self, transition):
+        """Whether this record shows the button of ``transition`` from its state.
+
+        A workflow module overrides it to hide a step that does not fit the
+        record now, for example a step that is right only after an appointment
+        date has passed. The button strip and a card dropped on a board read
+        the buttons, so both follow it."""
+        return True
 
     def _transition_button_extras(self, transition):
         """Keys the form widget ignores. A bot reads them from the same JSON."""

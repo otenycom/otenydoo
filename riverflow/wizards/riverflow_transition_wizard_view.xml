@@ -3,7 +3,7 @@
         <field name="name">riverflow.transition.wizard.form</field>
         <field name="model">riverflow.transition.wizard</field>
         <field name="arch" type="xml">
-            <form string="Transition Wizard">
+            <form string="Transition Wizard" class="o_riverflow_transition_wizard">
                 <sheet>
                     <group>
                         <field name="transition_description" widget="html" readonly="1" invisible="transition_description_invisible or not transition_description" />

@@ -19,3 +19,15 @@
 .o_form_view .o_inner_group .o_field_widget.o_field_boolean > .o-checkbox {
     margin-left: $o-input-padding-x;
 }
+
+// Every group of a transition wizard has the same label column, so the fields
+// that a module adds in groups of its own (the two half-width date groups of
+// the crewradar log entry wizard) start where the fields of the riverflow group
+// start. Odoo fits the label column of each inner group to its own longest
+// label (fit-content(150px)), so the values of two groups did not line up
+// (Ries, 6-Nov-2026). 150px is the width of Odoo's own o_form_fw_labels.
+@include media-breakpoint-up(sm) {
+    .o_riverflow_transition_wizard .o_inner_group {
+        grid-template-columns: 150px minmax(0, 1fr);
+    }
+}

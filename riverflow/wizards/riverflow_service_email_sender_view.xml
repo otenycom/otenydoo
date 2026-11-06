@@ -4,7 +4,7 @@
         <field name="name">riverflow.service.email.sender.wizard.form</field>
         <field name="model">riverflow.service.email.sender.wizard</field>
         <field name="arch" type="xml">
-            <form string="Send Email">
+            <form string="Send Email" class="o_riverflow_transition_wizard">
                 <sheet>
                     <group>
                         <group string="Supply Order" invisible="not is_supply_order">

@@ -4,7 +4,7 @@
         <field name="name">riverflow.supplier.confirmed.wizard.form</field>
         <field name="model">riverflow.supplier.confirmed.wizard</field>
         <field name="arch" type="xml">
-            <form string="Supplier Confirmed">
+            <form string="Supplier Confirmed" class="o_riverflow_transition_wizard">
                 <sheet>
                     <group>
                         <group>

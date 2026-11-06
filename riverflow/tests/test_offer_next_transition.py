@@ -6,6 +6,8 @@ example: Approve Unpaid Leave offers Send Approval (6-Nov-2026).
 The workflow is made here, so the tests hold for every riverflow app.
 """
 
+import re
+
 from odoo.tests import tagged
 from odoo.tests.common import TransactionCase
 
@@ -69,6 +71,31 @@ class TestOfferNextTransition(TransactionCase):
         self.assertEqual(result["type"], "ir.actions.act_window")
         self.assertEqual(result["context"]["transition_id"], self.send.id)
         self.assertEqual(result["context"]["active_id"], task.id)
+
+    def test_the_next_screen_does_not_offer_itself_again(self):
+        """The web client puts the keys of this screen's context under the
+        context of the action that OK returns (Odoo web action_service.js,
+        doActionButton); it leaves out only default_*, search_default_*, show_*,
+        *_view_ref, group_by, active_id(s) and orderedBy. Without a guard, Send
+        Confirmation inherits offer_next_transition_id, offers itself, and every
+        OK opens it again (Send Approval on test2, 6-Nov-2026)."""
+        task = self._task()
+        first = task.with_context(transition_id=self.close.id).prepare_transition_action()
+        _wizard, result = self._save(self.close, task)
+        not_forwarded = re.compile(
+            r"^(?:(?:default_|search_default_|show_).+|.+_view_ref|group_by|active_id|active_ids|orderedBy)$"
+        )
+        client_context = {
+            **{key: value for key, value in first["context"].items() if not not_forwarded.match(key)},
+            **result["context"],
+        }
+        wizard = self.env[result["res_model"]].with_context(**client_context).create({})
+        self.assertFalse(wizard.next_transition_id, "the next screen offers no transition of its own")
+        self.assertEqual(
+            wizard.with_context(**client_context).action_save(),
+            {"type": "ir.actions.act_window_close"},
+            "OK on the next screen closes it",
+        )
 
     def test_unticked_ok_only_closes(self):
         task = self._task()

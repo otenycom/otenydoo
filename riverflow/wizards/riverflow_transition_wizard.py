@@ -312,7 +312,18 @@ class TransitionWizard(models.AbstractModel):
         records = self.records_to_transition_ids
         if len(records) != 1 or records.state_id != self.next_transition_id.from_state_id:
             return False
-        return records.with_context(transition_id=self.next_transition_id.id).prepare_transition_action()
+        action = records.with_context(transition_id=self.next_transition_id.id).prepare_transition_action()
+        # The web client puts the keys of this screen's context under the context
+        # of the returned action (Odoo web action_service.js, doActionButton); it
+        # leaves out only default_*, search_default_*, show_* and a few others.
+        # So a key of this transition's action context would act on the next
+        # screen too: offer_next_transition_id made Send Approval offer itself,
+        # and every OK opened it again (test2, 6-Nov-2026). Clear each key that
+        # the next transition does not set itself.
+        for key in records._prepare_action_context(self.transition_id):
+            if not key.startswith(("default_", "search_default_", "show_")):
+                action["context"].setdefault(key, False)
+        return action
 
     # abstract methods
     def create_related_records(self, record):

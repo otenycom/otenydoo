@@ -63,6 +63,15 @@ class TransitionWizard(models.AbstractModel):
     new_note = fields.Html(string="Internal Note")
     new_note_invisible = fields.Boolean()
 
+    # A transition can offer the next one on its screen: the action context key
+    # offer_next_transition_id_ref names a transition that leaves the target
+    # state. Ticked, OK saves and then opens that transition's screen on the
+    # same record, as a click on its button would (radar: Approve Unpaid Leave
+    # offers Send Approval, 6-Nov-2026).
+    next_transition_id = fields.Many2one("riverflow.transition", string="Next Transition")
+    next_transition_name = fields.Char(related="next_transition_id.name")
+    run_next_transition = fields.Boolean(string="Then", default=True)
+
     def _save_check(self):
         """A transition with ``refuse_with_open_services`` refuses while services
         below a record are still open (radar pipeline applicants plan, decision
@@ -103,6 +112,9 @@ class TransitionWizard(models.AbstractModel):
 
         if transition_id.to_responsible_team_id:
             defaultValues["responsible_team_id"] = transition_id.to_responsible_team_id.id
+
+        if self.env.context.get("offer_next_transition_id"):
+            defaultValues["next_transition_id"] = self.env.context["offer_next_transition_id"]
 
         records_to_transition = self.env[self._workflow_model]
         records_to_transition_ids = []
@@ -287,7 +299,20 @@ class TransitionWizard(models.AbstractModel):
                     new_record._audit_log_remark("transition", _("Transition"), transition.name)
                     self.create_related_records(new_record)
 
-        return action
+        return self._next_transition_action() or action
+
+    def _next_transition_action(self):
+        """The screen of the transition that this one offers next, or False.
+
+        Only for one wizard on one existing record, and only while the record
+        is in the state the next transition starts from: the same check the
+        button makes, so a record that another step moved on opens nothing."""
+        if len(self) != 1 or not self.run_next_transition or not self.next_transition_id:
+            return False
+        records = self.records_to_transition_ids
+        if len(records) != 1 or records.state_id != self.next_transition_id.from_state_id:
+            return False
+        return records.with_context(transition_id=self.next_transition_id.id).prepare_transition_action()
 
     # abstract methods
     def create_related_records(self, record):

@@ -108,6 +108,21 @@ class TestTransitionEmailTemplate(TransactionCase):
             "Wizard should use the transition's template (Alpha), not the service's (Beta)",
         )
 
+    def test_template_recipients_only_leaves_the_followers_out(self):
+        """The followers of a service are default recipients; the action
+        context key template_recipients_only leaves them out, so a private
+        e-mail goes only to the template's own recipients (radar: the unpaid
+        leave letter e-mails, 6-Nov-2026)."""
+        follower = self.env["res.partner"].create({"name": "Planner", "email": "planner@example.com"})
+        self.service.message_subscribe(partner_ids=follower.ids)
+        Wizard = self.env["riverflow.service.email.sender.wizard"]
+        ctx = {"transition_id": self.trans_with_template.id, "active_model": "riverflow.service",
+               "active_ids": self.service.ids}
+        with_followers = Wizard.with_context(**ctx).default_get(Wizard._fields.keys())
+        self.assertIn(follower.id, with_followers["recipient_partner_ids"][0][2])
+        only_template = Wizard.with_context(**ctx, template_recipients_only=True).default_get(Wizard._fields.keys())
+        self.assertNotIn(follower.id, only_template["recipient_partner_ids"][0][2])
+
     def test_email_wizard_falls_back_to_service_template(self):
         """When the transition has no mail_template_id, the wizard falls
         back to the service's mail_template_id."""

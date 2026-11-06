@@ -137,7 +137,7 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
         # Get default recipients from the first service record
         if records_to_transition:
             service = records_to_transition[0]
-            default_recipients = service._get_default_recipients()
+            default_recipients = self._followers_as_recipients(service)
             defaultValues["recipient_partner_ids"] = [Command.set(default_recipients.ids)]
             defaultValues["subject_updatable"] = service.name
 
@@ -253,6 +253,15 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
             if not wizard.body_updatable or wizard.body != wizard._origin.body:
                 wizard.body_updatable = wizard.body_rendered
 
+    def _followers_as_recipients(self, service):
+        """The service's followers as default recipients, unless the transition's
+        action context has template_recipients_only: then only the template's own
+        recipients get the e-mail (radar: the unpaid leave letter e-mails go to the
+        employee alone, not to the planner who follows the service)."""
+        if self.env.context.get("template_recipients_only"):
+            return self.env["res.partner"]
+        return service._get_default_recipients()
+
     def _render_recipients_from_template(self, service):
         if not self.mail_template_id:
             return self.env["res.partner"]
@@ -272,7 +281,7 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
         if self.mail_template_id:
             service = self.records_to_transition_ids[0] if self.records_to_transition_ids else None
             if service:
-                default_recipients = service._get_default_recipients()
+                default_recipients = self._followers_as_recipients(service)
                 template_recipients = self._render_recipients_from_template(service)
                 self.recipient_partner_ids = default_recipients | template_recipients
 

@@ -23,6 +23,15 @@
                          findings box and the confirmation sit right above the OK button.
                          A real field node, so a bot can tick it through oteny.form.session. -->
                     <group name="save_check">
+                        <!-- The next transition that this one offers (offer_next_transition_id_ref):
+                             "Then: [x] <name>", right above OK. Inside this group because a
+                             screen that rearranges its fields moves this group as a whole. -->
+                        <field name="next_transition_id" invisible="1" />
+                        <label for="run_next_transition" invisible="not next_transition_id" />
+                        <div class="o_row" invisible="not next_transition_id">
+                            <field name="run_next_transition" nolabel="1" />
+                            <field name="next_transition_name" nolabel="1" readonly="1" />
+                        </div>
                         <field name="save_check_state" invisible="1" />
                         <field name="save_check_findings" widget="save_check" nolabel="1" colspan="2" invisible="not save_check_findings" />
                         <field name="save_check_confirmed" invisible="save_check_state != 'warning'" />

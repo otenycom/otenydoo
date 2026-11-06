@@ -307,6 +307,8 @@ def _compute_total(self):
         record.total = subtotal * (1 - record.discount_percent / 100)
 ```
 
+**A stored compute that reads a field of a related record depends on that field, not only on the Many2one.** `@api.depends("state_id")` recomputes when the record gets another state, never when its state is renamed. Real example: the stored name of a radar log entry holds the state name; when a migration renamed "Unpaid Leave Approved" to "Unpaid Leave", 288 entries on a staging database kept the old name. The fix is `"state_id.name"` in the depends (the cost: a rename rewrites the names of all records in that state, once), plus a migration that recomputes the records renamed before the fix (`env.add_to_compute(Model._fields[name], records)`, then `env.flush_all()`).
+
 ### Stored Computed Fields
 
 Use `store=True` when the computed value needs to be:

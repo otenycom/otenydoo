@@ -137,7 +137,7 @@ class TestTransitionAuditRemark(TransactionCase):
     def test_remark_has_the_transaction_of_the_state_change(self):
         service = self._service("Same transaction", self.child_workflow, self.awaiting)
         # The transition runs in a later transaction than the create: a change in the
-        # transaction of the create goes into the insert snapshot (oteny_audit 19.0.1.712).
+        # transaction of the create goes into the insert snapshot (oteny_audit 19.0.1.723).
         self.env.flush_all()
         self.env.cr.precommit.data.pop("oteny_audit", None)
 

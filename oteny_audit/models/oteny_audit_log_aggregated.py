@@ -175,7 +175,7 @@ class OtenyAuditLogAggregated(models.Model):
 
     def _caption_values(self, log):
         """(old, new) display values of a row. A selection field shows its label: rows written
-        before 19.0.1.712 hold the technical value ("email") as their display value."""
+        before 19.0.1.723 hold the technical value ("email") as their display value."""
         old_display = log.old_value_display_name or ""
         new_display = log.new_value_display_name or ""
         field = self._audited_field(log)
@@ -327,7 +327,7 @@ class OtenyAuditLogAggregated(models.Model):
         #
         # DIRECT rows come from oteny_audit_log itself: a log row is shown under its own
         # record without a reference row (cut F of plans/audit-storage-reduction.md; until
-        # 19.0.1.712 each log row had a "direct" reference that repeated its model, record,
+        # 19.0.1.723 each log row had a "direct" reference that repeated its model, record,
         # name, date and transaction). CHILD rows come from the parent references
         # (`NOT ref.is_direct`); old direct references that the purge has not removed yet
         # are ignored, so a change never shows twice.

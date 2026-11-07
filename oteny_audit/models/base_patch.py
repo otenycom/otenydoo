@@ -319,7 +319,7 @@ def _create_audit_log_references(env, model, log_records):
     so it shows under the parent's audit trail.
 
     A log row needs no reference to its own record: the aggregated view reads the direct
-    rows from `oteny_audit_log` itself. Until 19.0.1.712 every log row also got a "direct"
+    rows from `oteny_audit_log` itself. Until 19.0.1.723 every log row also got a "direct"
     reference that repeated its model, record, name, date and transaction; those were two
     thirds of the reference table (plan oteny-audit/plans/audit-storage-reduction.md, cut F).
 
@@ -714,7 +714,7 @@ def _get_display_value(field, value, record_env):
             return ", ".join(records.mapped("display_name"))
         if field.type == "selection":
             # The label, not the technical value ("Incoming Email", not "email").
-            # get_values() returns the values only, so the label never showed before 19.0.1.712.
+            # get_values() returns the values only, so the label never showed before 19.0.1.723.
             return dict(field._description_selection(record_env)).get(value, str(value))
     except Exception:
         # Fallback to string representation in case of errors (e.g., deleted records)

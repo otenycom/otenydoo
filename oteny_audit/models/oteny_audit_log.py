@@ -581,9 +581,9 @@ action = {
     # Purge of the stored rows that the current coverage would not write
     # (plan oteny-audit/plans/audit-storage-reduction.md, § 11)
     # ------------------------------------------------------------------------------------
-    # The capture rules change in 19.0.1.712 (cuts A to I, rules N1 to N4). The rows written
+    # The capture rules change in 19.0.1.723 (cuts A to I, rules N1 to N4). The rows written
     # before stay until this purge removes what the new rules would not have written. It runs
-    # as a one-shot scheduled action at night, switched on by the 19.0.1.712 migration, in
+    # as a one-shot scheduled action at night, switched on by the 19.0.1.723 migration, in
     # batches with a commit each, and ends with VACUUM FULL, which gives the space back.
     # Phases, kept in a system parameter so a later run goes on where the last stopped:
     #   deletes - rows of ignored models, update rows of fields that are not audited, rows of

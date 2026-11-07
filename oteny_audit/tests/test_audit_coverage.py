@@ -1,5 +1,5 @@
 # test_audit_coverage.py
-# The coverage rules of 19.0.1.712 (plan oteny-audit/plans/audit-storage-reduction.md):
+# The coverage rules of 19.0.1.723 (plan oteny-audit/plans/audit-storage-reduction.md):
 # which fields and records the audit log writes, and the fold of changes made in the
 # transaction of a record's create into its insert snapshot (cut E).
 from odoo.tests import TransactionCase, tagged
@@ -191,7 +191,7 @@ class TestAuditCoverage(TransactionCase):
         self.assertEqual((entry["raw"], entry["display"]), ("alpha", "Alpha kind"))
 
     def test_caption_shows_the_label_of_an_old_selection_row(self):
-        """A row written before 19.0.1.712 holds the technical value as its display value."""
+        """A row written before 19.0.1.723 holds the technical value as its display value."""
         record = self.coverage.create({"name": "Old kind"})
         end_transaction(self.env)
         record.write({"kind": "beta"})

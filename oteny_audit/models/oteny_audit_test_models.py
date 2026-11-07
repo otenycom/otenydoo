@@ -107,7 +107,7 @@ class OtenyAuditTestCoverageMixin(models.AbstractModel):
 
 
 class OtenyAuditTestCoverage(models.Model):
-    """Test model for the coverage rules of 19.0.1.712 (plan audit-storage-reduction.md):
+    """Test model for the coverage rules of 19.0.1.723 (plan audit-storage-reduction.md):
     cut I (`code_state`, read-only without a compute, is logged; `name_upper`, a read-only
     compute, is not), the read-only `active`, `parent_path`, rule N1 (`flag`, `count` without
     a default; `flag_on` with one) and `_oteny_audit_ignore_fields` (`skipped_note`, and the

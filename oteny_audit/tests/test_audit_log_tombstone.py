@@ -212,7 +212,7 @@ class TestAuditLogTombstone(TransactionCase):
         self.assertEqual(len(snapshot_log), 1)
 
         refs = self.env["oteny.audit.log.ref"].search([("audit_log_id", "=", snapshot_log.id)])
-        # One parent ref; no direct ref since 19.0.1.712 (the view reads the log itself).
+        # One parent ref; no direct ref since 19.0.1.723 (the view reads the log itself).
         self.assertEqual(len(refs), 1)
         self.assertFalse(refs.filtered(lambda r: r.is_direct))
         parent_ref = refs.filtered(lambda r: not r.is_direct)

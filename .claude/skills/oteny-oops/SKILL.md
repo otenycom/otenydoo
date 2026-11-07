@@ -86,7 +86,7 @@ button still copies the text.
   (default `30`, created `noupdate`), archived records too. Odoo's scheduled
   action "Base: Auto-vacuum internal data" runs it once a day; the module has
   no scheduled action of its own.
-- **No audit log**: the model sets `_oteny_audit_ignore = True` (oteny_audit 19.0.1.712):
+- **No audit log**: the model sets `_oteny_audit_ignore = True` (oteny_audit 19.0.1.723):
   the record is itself the log of an error, written by the system.
 
 ## Access and Screens

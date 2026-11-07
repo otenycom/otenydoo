@@ -1,5 +1,5 @@
 # test_audit_purge.py
-# The purge of the stored rows that the coverage of 19.0.1.712 would not write, and the
+# The purge of the stored rows that the coverage of 19.0.1.723 would not write, and the
 # aggregated view without direct references (plan oteny-audit/plans/audit-storage-reduction.md,
 # cut F and § 11). The old rows are made with SQL, in the shape the old code wrote them.
 import json

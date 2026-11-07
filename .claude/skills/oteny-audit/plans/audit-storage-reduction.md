@@ -7,8 +7,9 @@ on 7-Nov-2026: all cuts A to I in one change, and the purge includes the old row
 removed models (§ 9, questions 1 to 3); the purge runs as a one-shot night cron that the
 migration switches on (question 5); fields that code writes but users cannot edit are
 audited too, as cut I (question 4); the noise rules N1 to N4 are part of the build and of the
-purge (question 6). Built on 7-Nov-2026 on the branches `feat/audit-storage-reduction`
-(otenydoo, radar), oteny_audit 19.0.1.712; outcome in § 14. Not user-facing, so no Basecamp to-do.
+purge (question 6). Built on 7-Nov-2026 and merged into otenydoo `main` and radar `dev` the
+same day (oteny_audit 19.0.1.723: the migration folder was renumbered from 19.0.1.712 above the
+versions of `main`); outcome in § 14. Not user-facing, so no Basecamp to-do.
 
 ## 1. Why
 
@@ -746,11 +747,11 @@ riverflow `plans/wizard-attachments.md`, built in riverflow 19.0.1.1407 on 7-Nov
 
 ## 13. Roadmap
 
-- [ ] **Fewer audit rows, the same clarity** (this plan): cuts A to I and the noise rules N1 to N4 in one change (§ 3, § 8, § 12), and the one-shot night cron that purges the stored rows outside the coverage and runs `VACUUM FULL` (§ 11). Built on `feat/audit-storage-reduction` (oteny_audit 19.0.1.712); not deployed, not merged.
+- [x] **Fewer audit rows, the same clarity** (this plan): cuts A to I and the noise rules N1 to N4 in one change (§ 3, § 8, § 12), and the one-shot night cron that purges the stored rows outside the coverage and runs `VACUUM FULL` (§ 11). Built and merged into `main` and `dev` on 7-Nov-2026 (oteny_audit 19.0.1.723).
 
 ## 14. Outcome of the build (7-Nov-2026)
 
-Built on `feat/audit-storage-reduction` in otenydoo and radar; oteny_audit 19.0.1.712 (the only
+Built on `feat/audit-storage-reduction` in otenydoo and radar; oteny_audit 19.0.1.723 (the only
 version bump: the other modules change Python attributes only).
 
 - **What was built:** every cut of § 3 and every rule of § 12, as designed, plus two fixes found

@@ -1,6 +1,6 @@
-"""Post-migration 19.0.1.712 — switch on the purge of the stored audit rows.
+"""Post-migration 19.0.1.723 — switch on the purge of the stored audit rows.
 
-19.0.1.712 changes what the audit log writes (plan oteny-audit/plans/audit-storage-reduction.md,
+19.0.1.723 changes what the audit log writes (plan oteny-audit/plans/audit-storage-reduction.md,
 cuts A to I and rules N1 to N4). The rows written before stay until the scheduled action
 "Audit Log: Purge Rows Outside Coverage" removes what the new rules would not have written.
 The purge takes minutes and ends with VACUUM FULL, which locks the two audit tables, so it

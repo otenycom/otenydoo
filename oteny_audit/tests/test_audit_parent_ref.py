@@ -66,7 +66,7 @@ class TestAuditParentRef(TransactionCase):
         self.assertEqual(snapshot["name"]["raw"], "Test Child 1")
         self.assertIn("parent_id", snapshot)
 
-        # The snapshot row has only a parent ref (to parent): no direct ref since 19.0.1.712.
+        # The snapshot row has only a parent ref (to parent): no direct ref since 19.0.1.723.
         refs = self.ref_model.search([("audit_log_id", "=", snapshot_log.id)])
         self.assertEqual(len(refs), 1, "Snapshot should have one parent ref and no direct ref.")
         parent_ref = refs.filtered(lambda r: not r.is_direct)

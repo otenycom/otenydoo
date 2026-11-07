@@ -676,7 +676,7 @@ laptop): about 260 MB of WAL and 8 seconds more. Not measured.
 Attachments that still point to a wizard (10,499 on the backup). Most of them (8,382) are
 live chatter files that the email sender wizard never moved to its service; 2,117 are real
 orphans, and deleting them frees 122 MB, not 4.9 GB as first estimated here. Analysis and fix:
-riverflow `plans/wizard-attachments.md`.
+riverflow `plans/wizard-attachments.md`, built in riverflow 19.0.1.1407 on 7-Nov-2026.
 
 ## 13. Roadmap
 

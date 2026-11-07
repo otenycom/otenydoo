@@ -447,3 +447,17 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
             email_layout_xmlid=self.mail_template_id.email_layout_xmlid,
             attachment_ids=self.attachment_ids.ids,
         )
+        self._move_uploads_to_service(service)
+
+    def _move_uploads_to_service(self, service):
+        """Move the files uploaded in this wizard to the service.
+
+        An upload gets res_model = this wizard and res_id = 0. Odoo's
+        message_post moves such a file only from its own mail composer, so
+        without this the file in the chatter does not count as an attachment
+        of the service, and a user who is not an administrator cannot read it
+        with their own rights. The attachments of the mail template, and a file
+        that an app already moved, belong to another model and stay as they are.
+        """
+        uploads = self.attachment_ids.filtered(lambda attachment: attachment.res_model == self._name)
+        uploads.write({"res_model": service._name, "res_id": service.id})

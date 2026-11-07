@@ -1204,7 +1204,9 @@ self.attachment_ids.write(
 
 **Do not use `message_type='comment'` with `subtype_xmlid='mail.mt_note'`** for these messages. Because of the mixin's classification rules (see above), `comment` + `internal=True` messages are picked up by `internal_notes_summary`, so file-name listings would pollute the top-3 notes. The default `notification` type is deliberately excluded from both summaries. Tradeoff: individual attachment delete buttons work, but the message itself cannot be deleted (notification messages are not editable in Odoo's JS).
 
-Applied in: `riverflow_enter_train_ticket.py`, `riverflow_enter_airline_ticket.py`. See also [Coding Patterns: Wizard Attachments Posted to Chatter](../odoo-development/references/coding-patterns.md) for the general Odoo pattern.
+Applied in: `riverflow_enter_train_ticket.py`, `riverflow_enter_airline_ticket.py`, and since 19.0.1.1407 the email sender wizard (`_move_uploads_to_service`, below). See also [Coding Patterns: Wizard Attachments Posted to Chatter](../odoo-development/references/coding-patterns.md) for the general Odoo pattern.
+
+**The garbage collection of wizard uploads (19.0.1.1407).** An upload that no code moves stays on the wizard model after Odoo vacuums the wizard: a wizard closed without saving, or a wizard that copies the bytes into its own record (the credential, document import and permit wizards of the apps, which get no code of their own, Ries, 7-Nov-2026). `ir.attachment._gc_wizard_uploads` (`models/ir_attachment.py`, an `@api.autovacuum`, so it runs in the daily "Base: Auto-vacuum internal data" cron) deletes an attachment when its `res_model` is a transient model, `res_field` is empty, it has no `access_token`, `create_date` and `write_date` are more than one day old, and no row outside a wizard points to it. An image pasted into the HTML text of a wizard has an `access_token`, and a sent email or the chatter shows it through `/web/image/<id>?access_token=...`, which no database link reveals, so it stays (Ries, 7-Nov-2026). `_wizard_upload_links` reads the links from the database: every foreign key to `ir_attachment`, minus the tables of transient models and the relation tables whose other side is such a table. So a link that an app adds (a credential document, an import job) keeps the file without code in the app. On the production copy of 27-Oct-2026 that is 23 links, and the first run deletes 2,086 uploads in 30 s; the 31 pasted images stay. oteny_audit audits `ir.attachment`, so each delete writes one snapshot row to the audit log (about 2,100 on the first run). Test: `test_wizard_uploads`. Plan: [wizard-attachments.md](plans/wizard-attachments.md).
 
 ### Email Sender Wizard (`riverflow.service.email.sender.wizard`)
 
@@ -1216,7 +1218,7 @@ The email sender wizard is the transition action for `transition_action_email_se
 
 **Supply order mode**: When `is_supply_order=True`, additional fields appear (supplier, supply date, instructions) and the supplier is automatically added as a recipient. Used by taxi order workflows.
 
-**Attachments**: Template attachments (`mail_template_id.attachment_ids`) are auto-loaded. Users can add/remove files via the `many2many_binary` widget.
+**Attachments**: Template attachments (`mail_template_id.attachment_ids`) are auto-loaded. Users can add/remove files via the `many2many_binary` widget. After `message_post`, `_move_uploads_to_service` moves the files that still belong to the wizard model (`res_model` = the wizard, `res_id = 0`) to the service (19.0.1.1407). Before, a sent file was in the chatter but did not count as an attachment of the service (`message_attachment_count`), and a user who is not an administrator could not read it with their own rights (`ir.attachment._check_access` lets only the creator and administrators read an attachment with `res_id = 0`); the chatter still showed it through its `raw_access_token`. A file of the mail template, and a file that an app already moved (the form that `crewradar_sign` binds to the service), belong to another model and stay. The 19.0.1.1407 post-migrate moved the 8,382 older chatter files of the wizards to the record of their message.
 
 **Attachment warning**: A footer alert "Attachments not yet added" appears when the email body mentions attachment-related keywords but no attachments are present. The keywords are matched via a case-insensitive regex from system parameter `riverflow.email_attachment_warning_regex`. Covers English, Dutch, and German terms (e.g., attach, bijlage, Anhang). The warning reacts live to body edits and attachment changes.
 
@@ -1335,6 +1337,7 @@ riverflow/
 │   ├── riverflow_state_bot_mixin.py           # Bot queue/claim/reaper + wizard `bot_claim` + `_bot_one_live_slot_defers` + `_bot_drain_peers` + `_bot_assert_human_transition_allowed` (the human fence; the timeout exit is its one exemption)
 │   ├── riverflow_transition.py                # Transition model
 │   ├── riverflow_service.py                   # Service model
+│   ├── ir_attachment.py                       # Garbage collection of wizard uploads (`_gc_wizard_uploads`)
 │   └── riverflow_mail_thread_review_mixin.py  # Chatter mixin: message classification, notes summary
 ├── data/
 │   ├── transition_action_data.xml # Built-in actions

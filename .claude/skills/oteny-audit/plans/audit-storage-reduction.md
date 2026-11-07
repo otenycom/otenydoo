@@ -779,6 +779,12 @@ version bump: the other modules change Python attributes only).
   new code wrote without a direct ref). Screens after the purge: Audit › Log first page 20 ms,
   the audit log of log entry 8780 (3,320 rows, was 4,318) 8 ms in SQL and 1.4 to 1.9 s to draw,
   of service 24568 1.7 ms, a value search over 180 days 1.5 s (was 4.4 s).
+- **On test3** (production copy, oteny_audit 19.0.1.714): the purge, started by hand on
+  7-Nov-2026 at 22:00 UTC and run on by the cron worker, removed 1,110,584 → 272,803 log rows and
+  1,492,756 → 233,698 refs (no direct refs and no credential plan item rows left) in about
+  4 minutes; its end then rolled back on the cron write described above. After the fix, one more
+  run did the VACUUM in 5 s, set the phase to `done` and switched the action off. The audit log
+  of log entry 6809 (1,635 rows) answers in 0.07 s through the API.
 - **Tests:** oteny_audit 131 tests, 0 failed (new: `test_audit_coverage`, `test_audit_purge`;
   18 existing tests now write in a later transaction through `tests/common.py:end_transaction`,
   and the ref tests count no direct ref); crewradar `test_salary_timeline_audit`; riverflow

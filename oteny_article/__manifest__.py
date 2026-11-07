@@ -1,6 +1,6 @@
 {
     "name": "Oteny Articles",
-    "version": "19.0.1.51",
+    "version": "19.0.1.52",
     "summary": "A small tree of HTML articles: prompts, rules and synced skills, without the Enterprise Knowledge app.",
     "description": """
 A plain article model for Odoo Community: a name, an emoji, an HTML body and a

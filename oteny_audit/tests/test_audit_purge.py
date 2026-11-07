@@ -125,3 +125,13 @@ class TestAuditPurge(TransactionCase):
         self.assertEqual(len(ids), len(set(ids)))
         self.assertTrue(all(row_id % 2 == 0 for row_id in own.ids), "direct rows have even ids")
         self.assertTrue(all(row_id % 2 == 1 for row_id in under_parent.ids), "child rows have odd ids")
+
+    def test_switch_off_leaves_a_running_cron_to_its_own_deactivate(self):
+        """Odoo refuses a write on a cron that is running; inside a cron run the purge leaves
+        the switch-off to `_commit_progress(deactivate=True)`."""
+        cron = self.env.ref("oteny_audit.ir_cron_audit_log_purge")
+        cron.active = True
+        self.log_model.with_context(cron_id=cron.id)._purge_switch_off()
+        self.assertTrue(cron.active, "no write on the running cron")
+        self.log_model._purge_switch_off()
+        self.assertFalse(cron.active, "outside a cron run the purge switches the action off")

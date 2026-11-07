@@ -766,6 +766,9 @@ version bump: the other modules change Python attributes only).
     row; they are written with `oteny_audit_ignore`;
   - a manual run of the purge does not use the cron's `deactivate`; phase `done` switches the
     action off;
+  - on test3 the end of the purge rolled back twice: after the VACUUM, `_purge_switch_off()` wrote
+    `active = False` on the running cron, which Odoo refuses ("This cron task is currently being
+    executed"); inside a cron run the action is now switched off by the cron's own `deactivate`;
   - the insert snapshot is no sign of a reconciliation timeline, because the fold gives estimates
     `reconciliation_estimate_timeline_id` too; the purge finds deleted ones by `owner_timeline_id`
     in their delete snapshot.

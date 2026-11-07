@@ -634,11 +634,14 @@ action = {
         Cron._commit_progress(max(done, 1), remaining=1)
 
     def _purge_switch_off(self):
-        """Switch the purge action off. The cron's own `deactivate` covers a scheduled run;
-        this covers a run by hand (Run Manually, a shell)."""
+        """Switch the purge action off outside a cron run (a shell). Inside a cron run, also
+        Run Manually, the `deactivate` of `_commit_progress` switches it off: Odoo refuses a
+        write on a cron that is running ("This cron task is currently being executed"), and
+        the refusal rolled back the end of the purge on test3 on 7-Nov-2026."""
         cron = self.env.ref("oteny_audit.ir_cron_audit_log_purge", raise_if_not_found=False)
-        if cron and cron.active:
-            cron.sudo().with_context(oteny_audit_ignore=True).active = False
+        if not cron or not cron.active or self.env.context.get("cron_id") == cron.id:
+            return
+        cron.sudo().with_context(oteny_audit_ignore=True).active = False
 
     def _purge_all_now(self):
         """Run every phase but VACUUM in this transaction, without a commit (tests, a shell)."""

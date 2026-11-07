@@ -232,6 +232,14 @@
         <menuitem id="riverflow.radar_radar"
             name="Radar"
             action="riverflow.radar_action" sequence="10" />
+        <!-- One top menu "New" for what a user starts from the Radar. New Service
+             opens the same wizard as "New Service" in the Services app; an app
+             module adds its own items, for example a new log entry (Ries,
+             7-Nov-2026). -->
+        <menuitem id="riverflow.radar_menu_new" name="New" sequence="100">
+            <menuitem id="riverflow.radar_menu_new_service" name="New Service"
+                action="riverflow.action_riverflow_start_service" sequence="20" />
+        </menuitem>
     </menuitem>
 
     <!-- <menuitem id="menu_riverflow_maintenance"

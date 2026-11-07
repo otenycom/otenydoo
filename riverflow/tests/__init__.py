@@ -41,3 +41,4 @@ from . import test_review_workflow
 from . import test_step_deadline_weekday
 from . import test_deadline_follows_appointment
 from . import test_offer_next_transition
+from . import test_radar_new_menu

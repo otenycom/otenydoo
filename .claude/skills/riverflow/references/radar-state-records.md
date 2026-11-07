@@ -144,6 +144,14 @@ Optional overrides depending on the model:
 | `hr.employee` | `employee_id` | `single` | Only if `workflow_id` set | `crewradar/models/riverflow_state_record.py` |
 | `crewradar.site` | `site_id` | `single` | Only if `workflow_id` set | `crewradar/models/riverflow_state_record.py` |
 
+## The Radar menu
+
+The Radar app (`riverflow.tracker_root`) has two top menus: **Radar** and **New**. New
+(`riverflow.radar_menu_new`) holds **New Service** (`riverflow.radar_menu_new_service`), the
+same wizard as New Service in the Services app (`riverflow.action_riverflow_start_service`). An
+app module adds its own items under New; crewradar adds New Log Entry with sequence 10, before
+New Service (Ries, 7-Nov-2026).
+
 ## Key Files
 
 ```text

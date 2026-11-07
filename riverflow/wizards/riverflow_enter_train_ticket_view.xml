@@ -4,7 +4,7 @@
         <field name="name">riverflow.enter.train.ticket.wizard.form</field>
         <field name="model">riverflow.enter.train.ticket.wizard</field>
         <field name="arch" type="xml">
-            <form string="Enter Train Ticket">
+            <form string="Enter Train Ticket" class="o_riverflow_transition_wizard">
                 <sheet>
                     <group>
                         <field name="date" />

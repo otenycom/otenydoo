@@ -1,0 +1,10 @@
+// Odoo pulls the first list of a notebook page up into the page's top
+// padding (web/views/form/form_controller.scss, margin-top:
+// -$o-horizontal-padding), so the list header touches the tabs. When the
+// shortcut row stands on its own line above that list, the pulled-up list
+// covered the lower half of the buttons. The list keeps its place below the
+// row instead. The selector has the weight of Odoo's rule and loads after
+// it.
+.o_form_view .o_notebook > .tab-content > .tab-pane > :first-child .o_field_x2many.o_field_x2many_list > .o_x2many_shortcuts + .o_list_renderer {
+    margin-top: 0;
+}

@@ -267,6 +267,8 @@ The `action_context` Text field on `riverflow.transition` stores a Python dict l
 | `chained_attachment_ids` | List of `ir.attachment` IDs injected by the fill wizard (crewradar_sign) when chaining from a fill transition to an email sender transition. The email sender's `_compute_attachment_ids` includes these alongside mail template attachments | AUV: fill wizard generates PDF, chains to email sender with the PDF auto-attached. Fill-then-Email Chaining is documented in the consuming business's own crewradar-sign skill bundle. |
 | `snooze_deadline_days` | In `update_write_values`, overrides `project_deadline` to `today + N` after sending — overrides the email sender's default of tomorrow. Use for chase / reminder transitions that should "snooze" the overdue indicator while HR waits for the recipient | AUV Send Reminder: 3-day snooze after each chase |
 | `snooze_deadline_cap_field` | Companion to `snooze_deadline_days`. Dotted path on the service whose Date/Datetime value caps the snoozed deadline. Missing/unresolvable paths silently fall through (snooze still applies, no cap). | AUV Send Reminder caps at `log_entry_id.start_date` — the snoozed deadline never slips past the crew change date |
+| `offer_next_transition_id_ref` | Names a transition that leaves the target state. The transition screen shows "Then: [x] <name>" in the save check group, right above OK, ticked; OK saves and then opens that transition's screen on the same record, as a click on its button would (`riverflow.transition.wizard._next_transition_action`). Nothing opens when the record is no longer in the next transition's from-state. For one record only, and only on screens built on the root transition view (`view_transition_wizard_form`); a screen with a form of its own (Send Email, the ticket screens) does not show it (19.0.1.1408; test `test_offer_next_transition`). The web client copies the keys of a dialog's context into the action that its button returns (Odoo `action_service.js`, `doActionButton`; only `default_*`, `search_default_*`, `show_*`, `*_view_ref`, `group_by`, `active_id(s)` and `orderedBy` are left out), so the next screen would offer itself again and every OK reopen it. `_next_transition_action` therefore sets to False each key of this transition's action context that the next transition does not set itself (test `test_the_next_screen_does_not_offer_itself_again`; found on test2, 6-Nov-2026) | Radar Approve Unpaid Leave offers Send Approval: the approval e-mail opens after the letter is filed |
+| `template_recipients_only` | E-mail screen: the followers of the service are not default recipients; only the mail template's own recipients (`email_to`, `partner_to`, `email_cc`) are (`riverflow.service.email.sender.wizard._followers_as_recipients`; 19.0.1.1409; test `test_template_recipients_only_leaves_the_followers_out`). A template that should reach its `email_to` also needs `use_default_to` False: Odoo 19's default (True) ignores `email_to` | Radar unpaid leave letter e-mails: a private e-mail to the employee alone, not to the planner who follows the service |
 
 **Wizard field defaults via `default_*` keys**: Any key prefixed with `default_` is picked up by Odoo's base `default_get` and set as a wizard field default (see collision-safety explanation above).
 
@@ -758,7 +760,11 @@ so modes added by rivercreds or crewradar appear too).
    `next_deadline_weekday`, `ask_deadline`, `set_deadline_relative`) wins.
 2. A screen with its own date logic wins: it hides the generic deadline fields
    (`use_project_deadline_from_invisible` and `project_deadline_invisible`) and
-   writes its own date (an appointment, a ticket, an e-mail follow-up).
+   writes its own date (an appointment, a ticket). The e-mail screen is not
+   such a screen: it hides only `project_deadline`, so a target state with a
+   rule wins over its "tomorrow". An e-mail step into such a state that must
+   keep a follow-up date carries `followup_in_days` (radar Collect Unpaid Leave
+   Request, Ask for Request Letter, 6-Nov-2026).
 3. On a screen that shows the generic fields, a value the user changed wins. A value
    equal to the task's own value or to the state's proposal is no choice.
 4. Otherwise the state's setting applies (`_apply_state_deadline_setting`), also on

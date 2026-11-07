@@ -4,7 +4,7 @@
         <field name="name">riverflow.enter.airline.ticket.wizard.form</field>
         <field name="model">riverflow.enter.airline.ticket.wizard</field>
         <field name="arch" type="xml">
-            <form string="Enter Airline Flight Ticket">
+            <form string="Enter Airline Flight Ticket" class="o_riverflow_transition_wizard">
                 <sheet>
                     <group>
                         <field name="date" string="Booking Date" />

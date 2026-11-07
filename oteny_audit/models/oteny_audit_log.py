@@ -1,8 +1,12 @@
 # audit_log/models/audit_log.py
 import hashlib
+import json
 import logging
+from collections import defaultdict
 
 from odoo import Command, api, fields, models
+from odoo.sql_db import db_connect
+from odoo.tools import SQL
 
 from .oteny_audit_fields import BigInteger
 
@@ -195,6 +199,10 @@ class OtenyAuditLog(models.Model):
         "discuss.channel",
         "discuss.channel.member",
         "ir.cron.progress",
+        # A row in the scheduler queue (a cron and a time); Odoo deletes it after the run.
+        "ir.cron.trigger",
+        # The reflection of database constraints, rewritten by every upgrade.
+        "ir.model.constraint",
     }
 
     def _is_audit_ignored(self, model_name):
@@ -567,3 +575,262 @@ action = {
             "deleted_refs": orphaned_refs_count,
             "cutoff_date": cutoff_date.date(),
         }
+
+
+    # ------------------------------------------------------------------------------------
+    # Purge of the stored rows that the current coverage would not write
+    # (plan oteny-audit/plans/audit-storage-reduction.md, § 11)
+    # ------------------------------------------------------------------------------------
+    # The capture rules change in 19.0.1.712 (cuts A to I, rules N1 to N4). The rows written
+    # before stay until this purge removes what the new rules would not have written. It runs
+    # as a one-shot scheduled action at night, switched on by the 19.0.1.712 migration, in
+    # batches with a commit each, and ends with VACUUM FULL, which gives the space back.
+    # Phases, kept in a system parameter so a later run goes on where the last stopped:
+    #   deletes - rows of ignored models, update rows of fields that are not audited, rows of
+    #             records that a per-record rule skips (_oteny_audit_purge_record_sql);
+    #   fold    - update rows in the transaction of their record's insert go into the insert
+    #             snapshot; every snapshot loses the keys of fields that are not audited, and
+    #             an insert snapshot its empty values of fields without a default;
+    #   refs    - the direct references (cut F);
+    #   vacuum  - VACUUM (FULL, ANALYZE) of the two tables, then the action switches off;
+    #   done    - a later run does nothing but switch the action off again.
+    _PURGE_PHASE_PARAM = "oteny_audit.purge_phase"
+    _PURGE_NEXT_ID_PARAM = "oteny_audit.purge_next_id"
+    _PURGE_BATCH = 20000
+    _EMPTY_RAW_VALUES = ("", "False", "0", "0.0", "[]", "()")
+
+    def _purge_params(self):
+        """System parameters of the purge, written without an audit row: the position of a
+        batch is no business change, and each batch would add rows to the table it purges."""
+        return self.env["ir.config_parameter"].sudo().with_context(oteny_audit_ignore=True)
+
+    def _purge_rows_outside_coverage(self):
+        """Scheduled action: one batch of the purge per call; Odoo calls again while the
+        progress reports work left."""
+        Cron = self.env["ir.cron"]
+        params = self._purge_params()
+        phase = params.get_param(self._PURGE_PHASE_PARAM) or "deletes"
+        if phase == "done":
+            # Run again after the end (by hand, or a cron that was not switched off): nothing
+            # to do, and no second VACUUM FULL.
+            self._purge_switch_off()
+            Cron._commit_progress(1, remaining=0, deactivate=True)
+            return
+        if phase == "vacuum":
+            self.env.cr.commit()  # hold no lock on the audit tables while VACUUM waits for one
+            if self._purge_vacuum():
+                params.set_param(self._PURGE_PHASE_PARAM, "done")
+                params.set_param(self._PURGE_NEXT_ID_PARAM, False)
+                self._purge_switch_off()
+                Cron._commit_progress(1, remaining=0, deactivate=True)
+            else:
+                Cron._commit_progress(1, remaining=0)  # the next night tries again
+            return
+        done, phase_done = self._purge_step(phase)
+        if phase_done:
+            phase = {"deletes": "fold", "fold": "refs", "refs": "vacuum"}[phase]
+            params.set_param(self._PURGE_PHASE_PARAM, phase)
+            params.set_param(self._PURGE_NEXT_ID_PARAM, False)
+        Cron._commit_progress(max(done, 1), remaining=1)
+
+    def _purge_switch_off(self):
+        """Switch the purge action off. The cron's own `deactivate` covers a scheduled run;
+        this covers a run by hand (Run Manually, a shell)."""
+        cron = self.env.ref("oteny_audit.ir_cron_audit_log_purge", raise_if_not_found=False)
+        if cron and cron.active:
+            cron.sudo().with_context(oteny_audit_ignore=True).active = False
+
+    def _purge_all_now(self):
+        """Run every phase but VACUUM in this transaction, without a commit (tests, a shell)."""
+        for phase in ("deletes", "fold", "refs"):
+            self._purge_params().set_param(self._PURGE_NEXT_ID_PARAM, False)
+            while not self._purge_step(phase)[1]:
+                pass
+        self._purge_params().set_param(self._PURGE_NEXT_ID_PARAM, False)
+
+    def _purge_step(self, phase):
+        """One batch of `phase`. Returns (rows handled, True when the phase is done)."""
+        return getattr(self, f"_purge_step_{phase}")()
+
+    def _purge_delete_rows(self, log_ids):
+        """Delete log rows and their references (references first, so the cascade of the
+        foreign key does not look them up one by one)."""
+        if not log_ids:
+            return
+        ids = tuple(log_ids)
+        self.env.cr.execute(SQL("DELETE FROM oteny_audit_log_ref WHERE audit_log_id IN %s", ids))
+        self.env.cr.execute(SQL("DELETE FROM oteny_audit_log WHERE id IN %s", ids))
+
+    def _purge_outside_condition(self):
+        """SQL over `log` for the rows that the current coverage would not write."""
+        from .base_patch import _is_audited_field
+
+        cr = self.env.cr
+        cr.execute("SELECT DISTINCT model_name FROM oteny_audit_log")
+        model_names = [row[0] for row in cr.fetchall()]
+        ignored = [name for name in model_names if self._is_audit_ignored(name)]
+        conditions = []
+        if ignored:
+            conditions.append(SQL("log.model_name IN %s", tuple(ignored)))
+        cr.execute(SQL(
+            "SELECT DISTINCT model_name, field_name FROM oteny_audit_log WHERE change_type = 'u'"
+        ))
+        fields_out = [
+            (model_name, field_name)
+            for model_name, field_name in cr.fetchall()
+            if model_name in self.env and model_name not in ignored
+            and field_name in self.env[model_name]._fields
+            and not _is_audited_field(self.env[model_name], self.env[model_name]._fields[field_name])
+        ]
+        for model_name, field_name in fields_out:
+            conditions.append(SQL(
+                "(log.change_type = 'u' AND log.model_name = %s AND log.field_name = %s)",
+                model_name, field_name,
+            ))
+        for model_name in model_names:
+            if model_name in ignored or model_name not in self.env:
+                continue
+            hook = getattr(self.env[model_name], "_oteny_audit_purge_record_sql", None)
+            condition = hook() if hook else None
+            if condition:
+                conditions.append(SQL("(log.model_name = %s AND %s)", model_name, condition))
+        return SQL(" OR ").join(conditions) if conditions else None
+
+    def _purge_step_deletes(self):
+        condition = self._purge_outside_condition()
+        if condition is None:
+            return 0, True
+        self.env.cr.execute(SQL(
+            "SELECT log.id FROM oteny_audit_log log WHERE %s ORDER BY log.id LIMIT %s",
+            condition, self._PURGE_BATCH,
+        ))
+        ids = [row[0] for row in self.env.cr.fetchall()]
+        self._purge_delete_rows(ids)
+        _logger.info("Audit purge: deleted %d rows outside the coverage", len(ids))
+        return len(ids), len(ids) < self._PURGE_BATCH
+
+    def _purge_step_fold(self):
+        """Fold and clean the snapshot rows with an id in the next range."""
+        from .base_patch import _is_audited_field
+
+        cr = self.env.cr
+        params = self._purge_params()
+        cr.execute("SELECT min(id), max(id) FROM oteny_audit_log")
+        min_id, max_id = cr.fetchone()
+        start = max(int(params.get_param(self._PURGE_NEXT_ID_PARAM) or 0), min_id or 0)
+        max_id = max_id or 0
+        end = start + self._PURGE_BATCH * 5
+        cr.execute(SQL(
+            """SELECT id, model_name, record_id, transaction_id, change_type, snapshot
+                 FROM oteny_audit_log
+                WHERE id >= %s AND id < %s AND field_name = '__snapshot__'
+                  AND change_type IN ('i', 'd') AND snapshot IS NOT NULL""",
+            start, end,
+        ))
+        snapshots = cr.fetchall()
+        inserts = [row for row in snapshots if row[4] == "i"]
+        folded = defaultdict(list)  # insert log id -> [(update id, field, raw, display, label)]
+        if inserts:
+            cr.execute(SQL(
+                """SELECT ins.id, upd.id, upd.field_name, upd.new_value,
+                          upd.new_value_display_name, upd.field_display_name
+                     FROM oteny_audit_log ins
+                     JOIN oteny_audit_log upd
+                       ON upd.model_name = ins.model_name AND upd.record_id = ins.record_id
+                      AND upd.transaction_id = ins.transaction_id AND upd.change_type = 'u'
+                    WHERE ins.id IN %s
+                    ORDER BY upd.id""",
+                tuple(row[0] for row in inserts),
+            ))
+            for ins_id, upd_id, field_name, raw, display, label in cr.fetchall():
+                folded[ins_id].append((upd_id, field_name, raw, display, label))
+
+        def audited(model, name):
+            field = model._fields.get(name) if model is not None else None
+            # A field that no longer exists keeps its value: it is history, not a rule change.
+            return field is None or _is_audited_field(model, field)
+
+        handled = 0
+        for log_id, model_name, _record_id, _txid, change_type, snapshot in snapshots:
+            model = self.env[model_name] if model_name in self.env else None
+            new = {}
+            for name, entry in (snapshot or {}).items():
+                if not audited(model, name):
+                    continue
+                if change_type == "i" and self._purge_empty_without_default(model, name, entry):
+                    continue
+                new[name] = entry
+            for _upd_id, name, raw, display, label in folded.get(log_id, ()):
+                if not audited(model, name):
+                    continue
+                entry = {"raw": raw or "", "display": display or "", "label": label or name}
+                if self._purge_empty_without_default(model, name, entry):
+                    new.pop(name, None)
+                else:
+                    new[name] = entry
+            if new != snapshot:
+                cr.execute(SQL("UPDATE oteny_audit_log SET snapshot = %s::jsonb WHERE id = %s",
+                               json.dumps(new), log_id))
+                handled += 1
+        moves = [(ins_id, upd[0]) for ins_id, upds in folded.items() for upd in upds]
+        if moves:
+            # A parent reference of a folded row that its insert row lacks moves to it.
+            cr.execute(SQL(
+                """INSERT INTO oteny_audit_log_ref
+                          (audit_log_id, target_model_name, target_record_id, target_display_name,
+                           parent_display_name, is_direct, create_date, transaction_id,
+                           create_uid, write_uid, write_date)
+                   SELECT DISTINCT ON (m.ins_id, ref.target_model_name, ref.target_record_id)
+                          m.ins_id, ref.target_model_name, ref.target_record_id,
+                          ref.target_display_name, ref.parent_display_name, FALSE,
+                          ref.create_date, ref.transaction_id, ref.create_uid, ref.write_uid,
+                          ref.write_date
+                     FROM (SELECT unnest(%s::int[]) AS ins_id, unnest(%s::int[]) AS upd_id) m
+                     JOIN oteny_audit_log_ref ref ON ref.audit_log_id = m.upd_id AND NOT ref.is_direct
+                    WHERE NOT EXISTS (
+                          SELECT 1 FROM oteny_audit_log_ref own
+                           WHERE own.audit_log_id = m.ins_id AND NOT own.is_direct
+                             AND own.target_model_name = ref.target_model_name
+                             AND own.target_record_id = ref.target_record_id)
+                    ORDER BY m.ins_id, ref.target_model_name, ref.target_record_id, m.upd_id DESC""",
+                [m[0] for m in moves], [m[1] for m in moves],
+            ))
+            self._purge_delete_rows([m[1] for m in moves])
+        params.set_param(self._PURGE_NEXT_ID_PARAM, end)
+        _logger.info("Audit purge: ids %d-%d, %d snapshots rewritten, %d updates folded",
+                     start, end, handled, len(moves))
+        return max(handled + len(moves), 1), end > max_id
+
+    def _purge_empty_without_default(self, model, name, entry):
+        """True for a stored empty value of a field without a default (rule N1)."""
+        field = model._fields.get(name) if model is not None else None
+        if field is None or field.default:
+            return False
+        return (entry or {}).get("raw", "") in self._EMPTY_RAW_VALUES
+
+    def _purge_step_refs(self):
+        self.env.cr.execute(SQL(
+            """DELETE FROM oteny_audit_log_ref WHERE id IN (
+                   SELECT id FROM oteny_audit_log_ref WHERE is_direct LIMIT %s)""",
+            self._PURGE_BATCH * 5,
+        ))
+        count = self.env.cr.rowcount
+        _logger.info("Audit purge: deleted %d direct references", count)
+        return count, count < self._PURGE_BATCH * 5
+
+    def _purge_vacuum(self):
+        """VACUUM FULL gives the space of the deleted rows back to the disk. It takes an
+        ACCESS EXCLUSIVE lock on both tables (seconds to minutes), so every write that adds
+        an audit row waits meanwhile; the action runs at night. VACUUM cannot run inside a
+        transaction, so it gets its own connection in autocommit. Returns False when it could
+        not get its lock within a minute; the next run tries again."""
+        try:
+            with db_connect(self.env.cr.dbname).cursor() as vacuum_cr:
+                vacuum_cr._cnx.autocommit = True
+                vacuum_cr.execute("SET lock_timeout = '60s'")
+                vacuum_cr.execute("VACUUM (FULL, ANALYZE) oteny_audit_log, oteny_audit_log_ref")
+        except Exception:
+            _logger.warning("Audit purge: VACUUM FULL failed; the next run tries again", exc_info=True)
+            return False
+        _logger.info("Audit purge: VACUUM FULL done")
+        return True

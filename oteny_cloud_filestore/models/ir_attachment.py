@@ -394,6 +394,8 @@ def wrap_base_file_read():
 
 class IrAttachment(models.Model):
     _inherit = "ir.attachment"
+    # The audit log skips the technical flag of the Cloud filestore (oteny_audit, cut I).
+    _oteny_audit_ignore_fields = {"cloud_local_only"}
 
     # Stored, because a later batch job must know which files never go to the
     # bucket, and the install_mode context of the create is not kept anywhere.

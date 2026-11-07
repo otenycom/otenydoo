@@ -192,7 +192,7 @@ class TestAuditLogTombstone(TransactionCase):
         self.assertEqual(state.get("email"), "v3@example.com")
 
     def test_snapshot_records_parent_refs(self):
-        """The single snapshot row gets both direct and parent refs, like per-field rows did."""
+        """The single snapshot row gets its parent ref, like per-field rows do."""
         parent = self.parent_model.create({"name": "Parent for ref test"})
         # Drop parent's own logs to focus on the child.
         self.log_model.search(
@@ -212,9 +212,9 @@ class TestAuditLogTombstone(TransactionCase):
         self.assertEqual(len(snapshot_log), 1)
 
         refs = self.env["oteny.audit.log.ref"].search([("audit_log_id", "=", snapshot_log.id)])
-        # Direct ref + parent ref.
-        self.assertEqual(len(refs), 2)
-        self.assertTrue(refs.filtered(lambda r: r.is_direct))
+        # One parent ref; no direct ref since 19.0.1.712 (the view reads the log itself).
+        self.assertEqual(len(refs), 1)
+        self.assertFalse(refs.filtered(lambda r: r.is_direct))
         parent_ref = refs.filtered(lambda r: not r.is_direct)
         self.assertEqual(len(parent_ref), 1)
         self.assertEqual(parent_ref.target_model_name, self.parent_model._name)

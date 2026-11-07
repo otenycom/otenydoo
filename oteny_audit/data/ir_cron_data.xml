@@ -13,4 +13,19 @@
         <field name="priority">100</field>
     </record>
 
+    <!-- One-shot purge of the stored rows that the coverage of 19.0.1.712 would not write.
+         Inactive; the 19.0.1.712 migration switches it on for the next night, and it switches
+         itself off when it is done (plan oteny-audit/plans/audit-storage-reduction.md, § 11). -->
+    <record id="ir_cron_audit_log_purge" model="ir.cron">
+        <field name="name">Audit Log: Purge Rows Outside Coverage</field>
+        <field name="model_id" ref="model_oteny_audit_log" />
+        <field name="state">code</field>
+        <field name="code">model._purge_rows_outside_coverage()</field>
+        <field name="user_id" ref="base.user_root" />
+        <field name="interval_number">1</field>
+        <field name="interval_type">days</field>
+        <field name="priority">100</field>
+        <field name="active" eval="False" />
+    </record>
+
 </odoo>

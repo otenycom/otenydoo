@@ -12,8 +12,11 @@
 #      on the record's `key`, not on the field name.
 import base64
 
+
 from odoo.addons.oteny_audit.models.base_patch import AUDIT_REDACTED, _is_secret_field
 from odoo.tests import TransactionCase, tagged
+
+from .common import end_transaction
 
 
 @tagged("oteny_audit", "post_install", "-at_install")
@@ -135,6 +138,7 @@ class TestAuditLogRedaction(TransactionCase):
         """A rotation is the worst row: without this it keeps the superseded credential
         beside the replacement."""
         record = self._make()
+        end_transaction(self.env)
         record.write({"access_token": "rotated-" + self.SECRET})
         record.flush_recordset()
         rows = self._update_rows(self.model._name, record.id, "access_token")
@@ -147,6 +151,7 @@ class TestAuditLogRedaction(TransactionCase):
 
     def test_update_does_not_redact_a_non_secret_field(self):
         record = self._make()
+        end_transaction(self.env)
         record.write({"cache_key": "places:rotterdam"})
         record.flush_recordset()
         rows = self._update_rows(self.model._name, record.id, "cache_key")
@@ -191,7 +196,7 @@ class TestAuditLogRedaction(TransactionCase):
         param = self.env["ir.config_parameter"].create(
             {"key": "oteny.audit.probe_token", "value": self.SECRET}
         )
-        param.flush_recordset()
+        end_transaction(self.env)
         param.write({"value": "rotated-" + self.SECRET})
         param.flush_recordset()
         rows = self._update_rows("ir.config_parameter", param.id, "value")

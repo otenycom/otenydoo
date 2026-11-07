@@ -14,6 +14,9 @@ class OtenyArticle(models.Model):
     _name = "oteny.article"
     _description = "Article"
     _inherit = ["html.field.history.mixin"]
+    # The audit log skips the revision history of the body: the article keeps it itself
+    # (oteny_audit, cut I of plans/audit-storage-reduction.md).
+    _oteny_audit_ignore_fields = {"html_field_history"}
     _parent_store = True
     _order = "sequence, id"
 

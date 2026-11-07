@@ -28,6 +28,9 @@ class TombstoneMixin(models.AbstractModel):
 
     _name = "riverflow.tombstone.mixin"
     _description = "Tombstone: retire instead of delete inside a compute"
+    # The audit log skips the retire mark: _retire() writes it right before the delete in
+    # the same transaction, and the delete snapshot records the record (oteny_audit, cut I).
+    _oteny_audit_ignore_fields = {"to_be_deleted"}
 
     to_be_deleted = fields.Boolean(
         default=False,

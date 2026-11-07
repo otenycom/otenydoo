@@ -146,6 +146,71 @@ def _maybe_redact(model, field, value, record=None):
     return value
 
 
+# Fields that Odoo itself writes on every record: the log row already holds who and when.
+_MAGIC_FIELD_NAMES = frozenset({"id", "create_uid", "create_date", "write_uid", "write_date"})
+
+
+def _ignored_field_names(model):
+    """The union of `_oteny_audit_ignore_fields` over every class of the model.
+
+    A class attribute of an Odoo model is overridden, not merged, by a later class in the
+    inheritance chain: a mixin's set would disappear as soon as the model declares its own.
+    So the sets of all classes in the MRO are joined, and each module declares only the
+    fields it owns (riverflow's tombstone mixin `to_be_deleted`, a model's own compute, ...).
+    """
+    cls = type(model)
+    cached = cls.__dict__.get("_oteny_audit_ignore_fields_all")
+    if cached is not None:
+        return cached
+    names = frozenset().union(
+        *(klass.__dict__["_oteny_audit_ignore_fields"]
+          for klass in cls.__mro__ if "_oteny_audit_ignore_fields" in klass.__dict__)
+    )
+    cls._oteny_audit_ignore_fields_all = names
+    return names
+
+
+def _is_audited_field(model, field):
+    """True when a change of `field` on `model` belongs in the audit log.
+
+    - A stored field only.
+    - A computed or related field that is read-only stays out: the log explains its value
+      through the inputs it depends on. A computed field with an inverse (or readonly=False)
+      is logged, so a user's override is visible.
+    - A read-only field WITHOUT a compute is logged: in Odoo `readonly=True` means
+      read-only on screen, not "never written", and code writes such fields (an invoice
+      link, the state of an invoice, the type of a salary timeline).
+    - A read-only `active` is not logged: only code that retires the record right before
+      its delete writes it (riverflow.tombstone.mixin); a model with a user archive
+      declares `active` writable, and that one is logged.
+    - `parent_path` is not logged: Odoo builds it from `parent_id`, which is logged.
+    - The Odoo access columns and the names in `_oteny_audit_ignore_fields` stay out.
+    """
+    if not field.store:
+        return False
+    name = field.name
+    if name in _MAGIC_FIELD_NAMES:
+        return False
+    if field.readonly and (field.compute or field.related):
+        return False
+    if name == "active" and field.readonly:
+        return False
+    if name == "parent_path" and model._parent_store:
+        return False
+    return name not in _ignored_field_names(model)
+
+
+def _is_empty_without_default(field, value):
+    """True for an empty value (False, 0, empty x2many) of a field that has no default.
+
+    For such a field, "absent from the insert snapshot" already means "empty", and Odoo
+    reads a NULL number or boolean as 0 or False, so the rebuild of the record gives the
+    same values. An empty value of a field WITH a default is information (the default was
+    overridden), so it stays.
+    """
+    return not field.default and not value
+
+
 def _record_audit_ignored(model, record):
     """Per-RECORD skip, for a model that is audited in general.
 
@@ -250,8 +315,13 @@ def _should_skip_audit_logging(env):
 
 def _create_audit_log_references(env, model, log_records):
     """
-    Create reference entries for all audit logs.
-    Creates both direct references (log points to itself) and parent references (child logs point to parents).
+    Create the parent references of audit logs: a child log points to each of its parents,
+    so it shows under the parent's audit trail.
+
+    A log row needs no reference to its own record: the aggregated view reads the direct
+    rows from `oteny_audit_log` itself. Until 19.0.1.712 every log row also got a "direct"
+    reference that repeated its model, record, name, date and transaction; those were two
+    thirds of the reference table (plan oteny-audit/plans/audit-storage-reduction.md, cut F).
 
     Args:
         env: The Odoo environment.
@@ -263,22 +333,7 @@ def _create_audit_log_references(env, model, log_records):
 
     refs = []
 
-    # First, create direct references for ALL logs (each log points to itself)
-    for log in log_records:
-        refs.append(
-            {
-                "audit_log_id": log.id,
-                "target_model_name": log.model_name,
-                "target_record_id": log.record_id,
-                "target_display_name": log.record_display_name,
-                "parent_display_name": False,  # For direct refs, no parent
-                "is_direct": True,
-                "create_date": log.create_date,
-                "transaction_id": log.transaction_id,
-            }
-        )
-
-    # Now create parent references (for child logs that have parent relationships)
+    # Parent references (for child logs that have parent relationships)
     # Group log records by their source record id to minimize queries
     logs_by_record_id = defaultdict(list)
     for log in log_records:
@@ -503,6 +558,113 @@ def _create_audit_logs(env, model, logs):
 
     log_records = env["oteny.audit.log"].sudo().create(logs)
     _create_audit_log_references(env, model, log_records)
+    return log_records
+
+
+def _parent_config_fields(env, model):
+    """The field names that decide the parent of a record of `model` (empty when none)."""
+    config = getattr(type(model), "_oteny_audit_parent_field", None)
+    if not config:
+        config = getattr(env["oteny.audit.log"], "_model_parent_keys", {}).get(model._name)
+    if not config:
+        return set()
+    return {name.strip() for name in config.split(",")}
+
+
+def _live_insert_log_ids(env, model, record_ids):
+    """{record id: insert log id} for the records of `model` created in this transaction
+    whose insert row still exists. An insert row that is gone (deleted in this transaction,
+    or rolled back to a savepoint) is forgotten, so a later change of that record is logged
+    as an update row, as before."""
+    insert_log_ids = env.cr.precommit.data.get("oteny_audit", {}).get("insert_log_ids", {}).get(model._name)
+    if not insert_log_ids:
+        return {}
+    wanted = {insert_log_ids[rid] for rid in record_ids if rid in insert_log_ids}
+    if not wanted:
+        return {}
+    alive = set(env["oteny.audit.log"].sudo().browse(list(wanted)).exists().ids)
+    for rid in [rid for rid in record_ids if insert_log_ids.get(rid) in wanted - alive]:
+        del insert_log_ids[rid]
+    return {rid: insert_log_ids[rid] for rid in record_ids if rid in insert_log_ids}
+
+
+def _fold_into_insert_snapshots(env, model, entries):
+    """Write field changes of records created in THIS transaction into their insert snapshot.
+
+    `entries` is a list of (record, field, new_cache_value). A value that changes inside the
+    transaction of the create was never visible to another user or process: the insert
+    snapshot with the value at the end of the transaction says everything anybody could see.
+    Stored computes and code that writes right after the create (the salary timeline builder,
+    the computes of a new service) used to give one to seven update rows per new record
+    (plan oteny-audit/plans/audit-storage-reduction.md, cut E).
+
+    Returns the entries that could not be folded (no insert row of this transaction), which
+    the caller logs as update rows as before.
+    """
+    insert_log_ids = _live_insert_log_ids(env, model, [record.id for record, _field, _value in entries])
+    alive = set(insert_log_ids.values())
+    rest = []
+    patches = defaultdict(dict)  # insert log id -> {field name: entry or None (drop the key)}
+    records_by_log = {}
+    for record, field, value in entries:
+        log_id = insert_log_ids.get(record.id)
+        if log_id not in alive:
+            rest.append((record, field, value))
+            continue
+        records_by_log[log_id] = record
+        if value is None or value == "" or (
+            field.default
+            and field.convert_to_cache(field.default(record), record) == value
+        ) or _is_empty_without_default(field, value):
+            patches[log_id][field.name] = None
+            continue
+        raw = str(value)
+        display = _get_display_value(field, value, record.env)
+        raw = _maybe_redact(model, field, _maybe_strip_html(model, field.name, raw), record)
+        display = _maybe_redact(model, field, _maybe_strip_html(model, field.name, display), record)
+        patches[log_id][field.name] = {"raw": raw, "display": display or "", "label": field.string or field.name}
+    if not patches:
+        return rest
+    parent_fields = _parent_config_fields(env, model)
+    for log in env["oteny.audit.log"].sudo().browse(list(patches)):
+        snapshot = dict(log.snapshot or {})
+        for name, entry in patches[log.id].items():
+            if entry is None:
+                snapshot.pop(name, None)
+            else:
+                snapshot[name] = entry
+        log.snapshot = snapshot
+        if parent_fields & set(patches[log.id]):
+            _add_missing_parent_refs(env, log, records_by_log[log.id])
+    return rest
+
+
+def _add_missing_parent_refs(env, log, record):
+    """Give `log` the parent references of `record` that it does not have yet (its parent
+    field was set after the create, in the same transaction)."""
+    if not record.exists():
+        return
+    Ref = env["oteny.audit.log.ref"].sudo()
+    existing = {(ref.target_model_name, ref.target_record_id)
+                for ref in Ref.search([("audit_log_id", "=", log.id), ("is_direct", "=", False)])}
+    refs = []
+    for parent in _resolve_parent_reference_unified(env, record, max_depth=3):
+        key = (parent["parent_model_name"], parent["parent_record_id"])
+        if key in existing:
+            continue
+        existing.add(key)
+        refs.append({
+            "audit_log_id": log.id,
+            "target_model_name": key[0],
+            "target_record_id": key[1],
+            "target_display_name": log.record_display_name,
+            "parent_display_name": parent["parent_display_name"],
+            "is_direct": False,
+            "create_date": log.create_date,
+            "transaction_id": log.transaction_id,
+        })
+    if refs:
+        Ref.create(refs)
 
 
 def _safe_convert_to_cache(field, raw_value, record):
@@ -551,8 +713,9 @@ def _get_display_value(field, value, record_env):
             records = record_env[field.comodel_name].sudo().browse(list(value))
             return ", ".join(records.mapped("display_name"))
         if field.type == "selection":
-            selection_values = dict(field.get_values(record_env))
-            return selection_values.get(value, str(value))
+            # The label, not the technical value ("Incoming Email", not "email").
+            # get_values() returns the values only, so the label never showed before 19.0.1.712.
+            return dict(field._description_selection(record_env)).get(value, str(value))
     except Exception:
         # Fallback to string representation in case of errors (e.g., deleted records)
         # Limit string representation to 1000 characters to prevent excessive storage
@@ -587,11 +750,11 @@ def patched_create(self, vals_list):
     if not records:
         return records
 
-    # Get all stored columns that are not readonly
+    # The stored columns that the audit log covers (see _is_audited_field)
     columns = [
         name
         for name, field in self._fields.items()
-        if field.store and field.column_type and not field.readonly
+        if field.column_type and _is_audited_field(self, field)
     ]
 
     if columns:
@@ -637,7 +800,8 @@ def patched_create(self, vals_list):
                     default_value_cached = field.convert_to_cache(default_value, record)
                     if new_val_cached == default_value_cached:
                         continue
-                elif new_val_cached == "":
+                elif _is_empty_without_default(field, new_val_cached):
+                    # "Absent" already means "empty" for a field without a default.
                     continue
 
                 new_val_display = _get_display_value(field, new_val_cached, record.env)
@@ -679,7 +843,13 @@ def patched_create(self, vals_list):
             )
 
         if logs:
-            _create_audit_logs(self.env, self, logs)
+            log_records = _create_audit_logs(self.env, self, logs)
+            # Remember the insert row of each new record: a change later in this
+            # transaction goes into that snapshot (_fold_into_insert_snapshots).
+            if log_records:
+                insert_log_ids = audit_data.setdefault("insert_log_ids", defaultdict(dict))
+                for log in log_records:
+                    insert_log_ids[self._name][log.record_id] = log.id
 
             # Mark all snapshot fields as initially logged for newly created
             # records so patched_flush won't double-log them as updates if a
@@ -708,7 +878,7 @@ def patched_unlink(self):
     columns = [
         name
         for name, field in self._fields.items()
-        if field.store and field.column_type and not field.readonly
+        if field.column_type and _is_audited_field(self, field)
     ]
 
     old_values = {}
@@ -804,11 +974,11 @@ def patched_write(self, vals):
     if not self or not vals:
         return original_write(self, vals)
 
-    # Get all storable, non-readonly fields from vals
+    # The fields in vals that the audit log covers (see _is_audited_field)
     fields_to_check = {
         name: self._fields[name]
         for name in vals
-        if name in self._fields and self._fields[name].store and not self._fields[name].readonly
+        if name in self._fields and _is_audited_field(self, self._fields[name])
     }
 
     relational_fields = {n: f for n, f in fields_to_check.items() if f.type in ("one2many", "many2many")}
@@ -873,6 +1043,8 @@ def patched_write(self, vals):
         new_values_map = {rec["id"]: rec for rec in new_values_list}
 
         logs = []
+        fold_entries = []
+        insert_log_ids = _live_insert_log_ids(self.env, self, self.ids)
         for record in self:
             if _record_audit_ignored(self, record):
                 continue
@@ -886,6 +1058,11 @@ def patched_write(self, vals):
             for name, field in relational_fields.items():
                 old_ids = old_rec_vals.get(name, [])
                 new_ids = new_rec_vals.get(name, [])
+
+                if record.id in insert_log_ids and set(old_ids) != set(new_ids):
+                    # Created in this transaction: the change goes into its insert snapshot.
+                    fold_entries.append((record, field, tuple(new_ids)))
+                    continue
 
                 # Odoo's read() returns a list of IDs for m2m.
                 # To compare, we can just compare the sets of IDs.
@@ -924,6 +1101,8 @@ def patched_write(self, vals):
                             "change_type": "u",
                         }
                     )
+        if fold_entries:
+            _fold_into_insert_snapshots(self.env, self, fold_entries)
         if logs:
             _create_audit_logs(self.env, self, logs)
 
@@ -966,8 +1145,10 @@ def patched_flush(self, fnames=None):
         # No dirty fields for this model to worry about.
         return original_flush(self)
 
-    # Filter for fields that we can and should log (not readonly).
-    loggable_fields_dict = {field.name: field for field in all_dirty_model_fields if not field.readonly}
+    # The dirty fields that the audit log covers (see _is_audited_field).
+    loggable_fields_dict = {
+        field.name: field for field in all_dirty_model_fields if _is_audited_field(self, field)
+    }
 
     if not loggable_fields_dict:
         return original_flush(self)
@@ -1084,6 +1265,8 @@ def patched_flush(self, fnames=None):
         audit_data["most_recent_logs"] = defaultdict(lambda: defaultdict(dict))
     most_recent_logs = audit_data["most_recent_logs"]
 
+    insert_log_ids = _live_insert_log_ids(self.env, self, all_ids)
+    fold_entries = []
     for name, field in loggable_fields_dict.items():
         for rid in batches.get(name, []):
             if rid in skipped_ids:
@@ -1093,6 +1276,14 @@ def patched_flush(self, fnames=None):
 
             new_val_raw = new_values_map.get(rid, {}).get(name)
             new_val = _safe_convert_to_cache(field, new_val_raw, record)
+
+            if rid in insert_log_ids:
+                # Created in this transaction: the value goes into its insert snapshot
+                # (cut E). The snapshot keeps the value at the end of the transaction.
+                if old_val != new_val:
+                    fold_entries.append((record, field, new_val))
+                logged_changes[field].add(rid)
+                continue
 
             if old_val != new_val:
                 most_recent = most_recent_logs[field].get(rid)
@@ -1146,6 +1337,8 @@ def patched_flush(self, fnames=None):
                 )
                 most_recent_logs[field][rid] = {"old_value": old_val, "new_value": new_val}
 
+    if fold_entries:
+        _fold_into_insert_snapshots(self.env, self, fold_entries)
     if logs:
         _create_audit_logs(self.env, self, logs)
         # Mark these changes as logged to prevent duplicates in the same transaction.

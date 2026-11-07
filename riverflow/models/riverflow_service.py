@@ -25,6 +25,10 @@ class Service(models.Model):
     ]
     _description = "Service"
     _parent_name = "parent_id"
+    # The audit log skips the calendar end date: it is `end_date or deadline`, and its inverse
+    # writes `end_date`; both are audited (oteny_audit, cut B of
+    # plans/audit-storage-reduction.md).
+    _oteny_audit_ignore_fields = {"end_date_for_calendar"}
     _parent_store = True
     _rec_name = "display_name"  # ensure default search is on display_name.
     # Services are a recursive tree, and in order to show the tree correctly in the flat

@@ -8,6 +8,9 @@ class RiverflowHighlightRowMixin(models.AbstractModel):
 
 This helps the user to visually focus on a row after they have just added or updated it.
 The highlighting is temporary and only lasts for 10 seconds."""
+    # The audit log skips the time of the last user write: it changes with every user write
+    # and repeats the time of the audit row itself (oteny_audit, cut I).
+    _oteny_audit_ignore_fields = {"user_write_date"}
 
     user_write_date = fields.Datetime(
         "User Write Date",

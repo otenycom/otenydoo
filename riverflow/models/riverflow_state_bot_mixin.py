@@ -78,6 +78,8 @@ _BOT_LOGIN_PARK_FRESH_HOURS = 4
 
 class RiverflowStateBotMixin(models.AbstractModel):
     _inherit = "riverflow.state.mixin"
+    # The audit log skips the one-time release token of a bot (oteny_audit, cut I).
+    _oteny_audit_ignore_fields = {"bot_released_token"}
 
     bot_work_started_at = fields.Datetime(
         "Bot Work Started",

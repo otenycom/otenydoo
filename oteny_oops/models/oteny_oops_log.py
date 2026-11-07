@@ -48,6 +48,9 @@ class OtenyOopsLog(models.Model):
     _name = "oteny.oops.log"
     _description = "Oops Log"
     _order = "id desc"
+    # The record is itself the log of an error, written by the system: a log of a log has
+    # no audit value (plan oteny-audit/plans/audit-storage-reduction.md, cut G).
+    _oteny_audit_ignore = True
 
     # The text comes from the dialog; nobody edits it by hand. The administrator only
     # archives a record when its fault is handled.

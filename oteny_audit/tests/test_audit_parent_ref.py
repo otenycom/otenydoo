@@ -1,6 +1,8 @@
 from odoo.tests.common import TransactionCase
 from odoo.tests import tagged
 
+from .common import end_transaction
+
 
 @tagged("oteny_audit", "post_install", "-at_install")
 class TestAuditParentRef(TransactionCase):
@@ -42,9 +44,9 @@ class TestAuditParentRef(TransactionCase):
         """Changes to a child record create parent references in the audit log.
 
         With Measure 3, a child create produces ONE tombstone snapshot row for the
-        child, and that single row is the source of both the direct ref (to the
-        child) and the parent ref (to the parent). Subsequent updates remain
-        per-field and produce their own refs.
+        child. The row shows under the child itself without a reference (the view
+        reads it from the log), and it gets one parent ref (to the parent). Later
+        updates remain per-field and get their own parent ref.
         """
         # 1. Create a child record
         child_record = self.child_model.create({"name": "Test Child 1", "parent_id": self.parent_record.id})
@@ -64,15 +66,16 @@ class TestAuditParentRef(TransactionCase):
         self.assertEqual(snapshot["name"]["raw"], "Test Child 1")
         self.assertIn("parent_id", snapshot)
 
-        # The snapshot row has both a direct ref (to child) and a parent ref (to parent).
+        # The snapshot row has only a parent ref (to parent): no direct ref since 19.0.1.712.
         refs = self.ref_model.search([("audit_log_id", "=", snapshot_log.id)])
-        self.assertEqual(len(refs), 2, "Snapshot should have direct + parent refs.")
+        self.assertEqual(len(refs), 1, "Snapshot should have one parent ref and no direct ref.")
         parent_ref = refs.filtered(lambda r: not r.is_direct)
         self.assertEqual(len(parent_ref), 1, "Should find one parent reference.")
         self.assertEqual(parent_ref.target_model_name, self.parent_model._name)
         self.assertEqual(parent_ref.target_record_id, self.parent_record.id)
 
-        # 3. Update the child record (per-field log)
+        # 3. Update the child record in a later transaction (per-field log)
+        end_transaction(self.env)
         child_record.write({"name": "Test Child 1 Updated"})
         child_record.flush_recordset()
 
@@ -87,7 +90,8 @@ class TestAuditParentRef(TransactionCase):
         self.assertEqual(len(update_log_entry), 1, "Should find one update log for the child.")
 
         update_refs = self.ref_model.search([("audit_log_id", "=", update_log_entry.id)])
-        self.assertEqual(len(update_refs), 2, "Update log should have direct + parent refs.")
+        self.assertEqual(len(update_refs), 1, "Update log should have one parent ref.")
+        self.assertFalse(update_refs.is_direct)
 
         # 4. Aggregated view: each captured field of the snapshot insert is
         #    surfaced as its own virtual row (UNNESTed), plus the update for

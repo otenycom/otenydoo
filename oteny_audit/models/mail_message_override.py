@@ -1,4 +1,5 @@
 from odoo import models
+from odoo.tools import SQL
 
 
 class MailMessage(models.Model):
@@ -18,6 +19,22 @@ class MailMessage(models.Model):
     # the polymorphic `model,res_id` parent reference, so audit log rows
     # automatically link to the business record's audit trail.
     _oteny_audit_html_strip_fields = {"body"}
+
+    # How Odoo delivered the message, filled in by mail when it posts: nobody types these,
+    # and none changes what the message says or to whom it went (plan
+    # oteny-audit/plans/audit-storage-reduction.md, rule N3). `message_id` is the e-mail
+    # header id. `email_from`, `author_id`, `message_type`, `subtype_id`, `is_internal`,
+    # `model`, `res_id`, `parent_id`, `date`, `subject`, `body` and `incoming_email_cc`
+    # stay: for an incoming mail `email_from` is the outside sender.
+    _oteny_audit_ignore_fields = {
+        "reply_to",
+        "record_alias_domain_id",
+        "record_company_id",
+        "email_layout_xmlid",
+        "email_add_signature",
+        "reply_to_force_new",
+        "message_id",
+    }
 
     def _oteny_audit_ignore_record(self, record):
         """Skip a message posted into a container that is itself audit-ignored.
@@ -39,3 +56,24 @@ class MailMessage(models.Model):
         if not target:
             return False
         return self.env["oteny.audit.log"]._is_audit_ignored(target)
+
+    def _oteny_audit_purge_record_sql(self):
+        """The rows of the messages that _oteny_audit_ignore_record skips, for the purge of
+        the stored rows (oteny.audit.log._purge_rows_outside_coverage). Only the insert and
+        delete snapshots hold `model`, so the record ids come from them."""
+        self.env.cr.execute(SQL(
+            """SELECT DISTINCT snapshot->'model'->>'raw' FROM oteny_audit_log
+                WHERE model_name = 'mail.message' AND field_name = '__snapshot__'
+                  AND snapshot ? 'model'"""
+        ))
+        Log = self.env["oteny.audit.log"]
+        containers = [row[0] for row in self.env.cr.fetchall() if row[0] and Log._is_audit_ignored(row[0])]
+        if not containers:
+            return None
+        return SQL(
+            """log.record_id IN (
+                   SELECT snap.record_id FROM oteny_audit_log snap
+                    WHERE snap.model_name = 'mail.message' AND snap.field_name = '__snapshot__'
+                      AND snap.snapshot->'model'->>'raw' IN %s)""",
+            tuple(containers),
+        )

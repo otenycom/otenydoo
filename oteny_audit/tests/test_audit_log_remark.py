@@ -1,6 +1,8 @@
 from odoo.tests import tagged
 from odoo.tests.common import TransactionCase
 
+from .common import end_transaction
+
 
 @tagged("oteny_audit", "post_install", "-at_install")
 class TestAuditLogRemark(TransactionCase):
@@ -15,6 +17,7 @@ class TestAuditLogRemark(TransactionCase):
         self.aggregated_model = self.env["oteny.audit.log.aggregated"]
         self.parent = self.env["oteny.audit.test.parent"].create({"name": "Remark Parent"})
         self.child = self.env["oteny.audit.test.child"].create({"name": "Remark Child", "parent_id": self.parent.id})
+        end_transaction(self.env)
 
     def _remarks(self, record):
         return self.log_model.search(

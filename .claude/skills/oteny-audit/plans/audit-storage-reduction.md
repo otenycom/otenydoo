@@ -7,8 +7,8 @@ on 7-Nov-2026: all cuts A to I in one change, and the purge includes the old row
 removed models (§ 9, questions 1 to 3); the purge runs as a one-shot night cron that the
 migration switches on (question 5); fields that code writes but users cannot edit are
 audited too, as cut I (question 4); the noise rules N1 to N4 are part of the build and of the
-purge (question 6). Not built. No question of § 9 is open. Not user-facing, so
-no Basecamp to-do.
+purge (question 6). Built on 7-Nov-2026 on the branches `feat/audit-storage-reduction`
+(otenydoo, radar), oteny_audit 19.0.1.712; outcome in § 14. Not user-facing, so no Basecamp to-do.
 
 ## 1. Why
 
@@ -746,4 +746,40 @@ riverflow `plans/wizard-attachments.md`, built in riverflow 19.0.1.1407 on 7-Nov
 
 ## 13. Roadmap
 
-- [ ] **Fewer audit rows, the same clarity** (this plan): cuts A to I and the noise rules N1 to N4 in one change (§ 3, § 8, § 12), and the one-shot night cron that purges the stored rows outside the coverage and runs `VACUUM FULL` (§ 11). Design decided by Ries on 7-Nov-2026.
+- [ ] **Fewer audit rows, the same clarity** (this plan): cuts A to I and the noise rules N1 to N4 in one change (§ 3, § 8, § 12), and the one-shot night cron that purges the stored rows outside the coverage and runs `VACUUM FULL` (§ 11). Built on `feat/audit-storage-reduction` (oteny_audit 19.0.1.712); not deployed, not merged.
+
+## 14. Outcome of the build (7-Nov-2026)
+
+Built on `feat/audit-storage-reduction` in otenydoo and radar; oteny_audit 19.0.1.712 (the only
+version bump: the other modules change Python attributes only).
+
+- **What was built:** every cut of § 3 and every rule of § 12, as designed, plus two fixes found
+  in the browser check of the audit log of a log entry and a service: a selection field showed
+  its technical value ("Deadline From root_appointment") because `_get_display_value` read
+  `get_values()`, which has no labels; it now stores the label, and the caption maps old rows
+  to their label. And the fields of one insert or delete now read in the order of their label,
+  not in the random order of `jsonb_each`.
+- **Found in the build:**
+  - an update of a record whose insert row is gone within the transaction (a test deletes it, a
+    savepoint rolls it back) was lost by the fold; it is now logged as an update row;
+  - the purge keeps its position in system parameters, and each write of them made an audit
+    row; they are written with `oteny_audit_ignore`;
+  - a manual run of the purge does not use the cron's `deactivate`; phase `done` switches the
+    action off;
+  - the insert snapshot is no sign of a reconciliation timeline, because the fold gives estimates
+    `reconciliation_estimate_timeline_id` too; the purge finds deleted ones by `owner_timeline_id`
+    in their delete snapshot.
+- **Measured on `crmain`** (production backup of 27-Oct-2026): the purge took 77 s and 2.27 GB of
+  WAL in 88 batches; 1,118,457 log rows → 270,692, 1,497,725 refs → 231,380, the audit tables
+  1,065 MB → 289 MB, the database 1,984 MB → 1,208 MB. Before the purge the new view gave the
+  same rows as the old one (473,483 rows since 1-Oct-2026, plus 67 rows of 6 log rows that the
+  new code wrote without a direct ref). Screens after the purge: Audit › Log first page 20 ms,
+  the audit log of log entry 8780 (3,320 rows, was 4,318) 8 ms in SQL and 1.4 to 1.9 s to draw,
+  of service 24568 1.7 ms, a value search over 180 days 1.5 s (was 4.4 s).
+- **Tests:** oteny_audit 131 tests, 0 failed (new: `test_audit_coverage`, `test_audit_purge`;
+  18 existing tests now write in a later transaction through `tests/common.py:end_transaction`,
+  and the ref tests count no direct ref); crewradar `test_salary_timeline_audit`; riverflow
+  `test_transition_audit_remark` runs its transition in a later transaction. Full suite on
+  `cr-test` (oteny_audit, riverflow, rivercreds, crewradar, crewradar_creds, crewradar_cuneus_sign,
+  crewradar_wilma, crewradar_sign, oteny_oops, oteny_article, oteny_cloud_filestore, oteny_bot,
+  oteny_shortcut): 0 failed, 0 errors of 5,698 tests.

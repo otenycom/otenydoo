@@ -37,9 +37,14 @@ Navigate to **Audit > Configuration > Settings** to adjust retention period and 
 
 ### Automatic ORM Patching
 
-The module patches `BaseModel.create`, `write`, `unlink`, and `_flush` at import time. Every stored, non-readonly field change is captured automatically. No per-model opt-in is needed.
+The module patches `BaseModel.create`, `write`, `unlink`, and `_flush` at import time. No per-model opt-in is needed. One helper, `base_patch._is_audited_field`, decides at all four places which fields are logged (19.0.1.712, plan `plans/audit-storage-reduction.md`):
 
-**A stored computed field is never logged.** A compute without an inverse is readonly, so it falls outside "stored, non-readonly" — `crewradar.timesheet.billable_overtime_hours`, `tft_hours`, `contract_work_hours` and the `settled_*` / `pending_*` fields leave no audit row, however far the value moves. To explain such a value, read the audit rows of the **manual inputs** it depends on (here `worked_hours_on_timesheet`, and the log entry's dates and status), and check the deploy history for a formula change. Live example, 2026-09-10: four timesheet corrections were traced to `worked_hours_on_timesheet` edits with a user and a timestamp, while nine others left no row at all and were explained by arithmetic plus the TFT commit of 2025-11-20. Two more limits bite in the same investigation: retention is 180 days (`oteny_audit.retention_days`, cleanup enabled), so on live nothing before that horizon survives; and `riverflow.check.result`, `crewradar.salary.line` and `crewradar.salary.timeline.segment.adjustment` carry no audit rows at all, so the salary side must be read from the records themselves.
+- every **stored** field, also one that is `readonly=True` **without a compute** (cut I): in Odoo that means read-only on screen, not "never written", and code writes such fields — `account.move.state`, `riverflow.service.invoice_line_id` and `salary_timeline_id`, `crewradar.timesheet.billed_on_move_line_id`, `crewradar.salary.timeline.type`;
+- except a **read-only computed or related** field (see below), a read-only `active` (only a retire writes it, right before the delete; a model with a user archive declares `active` writable, and that one is logged), `parent_path` (Odoo builds it from `parent_id`), the access columns (`create_uid`, `write_date`, ...), and the names in `_oteny_audit_ignore_fields` (see *Ignoring Fields*).
+
+A selection value is stored with its label as the display value ("Incoming Email", not `email`); before 19.0.1.712 the label never showed, and the caption maps the old rows to their label.
+
+**A stored computed field without an inverse is never logged.** It is readonly, so the log explains it through its inputs — `crewradar.timesheet.billable_overtime_hours`, `tft_hours`, `contract_work_hours` and the `settled_*` / `pending_*` fields leave no audit row, however far the value moves. To explain such a value, read the audit rows of the **manual inputs** it depends on (here `worked_hours_on_timesheet`, and the log entry's dates and status), and check the deploy history for a formula change. Live example, 2026-09-10: four timesheet corrections were traced to `worked_hours_on_timesheet` edits with a user and a timestamp, while nine others left no row at all and were explained by arithmetic plus the TFT commit of 2025-11-20. Two more limits bite in the same investigation: retention is 180 days (`oteny_audit.retention_days`, cleanup enabled), so on live nothing before that horizon survives; and `riverflow.check.result`, `crewradar.salary.line` and `crewradar.salary.timeline.segment.adjustment` carry no audit rows at all, so the salary side must be read from the records themselves.
 
 ### Which model to query
 
@@ -49,15 +54,15 @@ If you're reading audit data (UI, custom reports, AI snippets, ad-hoc analysis),
 |---|---|---|
 | Field-level drill-down ("what changed on this record", "who set X to Y", group-by-field, filter by `field_name`) | **`oteny.audit.log.aggregated`** (preferred) | One row per (event, field). Inserts/deletes stored as tombstones are auto-unnested into per-field virtual rows. The `'__snapshot__'` sentinel never surfaces. Same shape for every change_type, every era. |
 | Full snapshot dict for a single event ("show every value at delete time, all in one place") | `oteny.audit.log` (raw) | The `snapshot` JSON column lives only here. Use when you need the dict as a unit. |
-| Internal: parent/child reference table | `oteny.audit.log.ref` | Direct + parent refs that link logs to target records. Joined into the aggregated view automatically; rarely queried directly. |
+| Internal: parent reference table | `oteny.audit.log.ref` | Parent refs that link a child's log rows to its parents. Joined into the aggregated view automatically; rarely queried directly. Rows with `is_direct = True` are from before 19.0.1.712: the view ignores them, and the purge removes them. |
 
 ### Three Data Models
 
 | Model | Type | Purpose |
 |-------|------|---------|
 | `oteny.audit.log` | Regular | Audit log entries: one row per field change for **updates**; one tombstone snapshot row per record event for **inserts** and **deletes** (see Tombstone Snapshots below) |
-| `oteny.audit.log.ref` | Regular | Reference table linking logs to target records (direct + parent refs) |
-| `oteny.audit.log.aggregated` | DB View | Joins logs and refs, **UNNESTs snapshot rows back into one virtual row per captured field** so list views, filters by `field_name`, and Group-by-Field behave the same way regardless of underlying row shape (legacy per-field, or modern tombstone). The view's `audit_log_id` column points back to the underlying log row when callers need the full snapshot. |
+| `oteny.audit.log.ref` | Regular | Reference table linking a child's logs to its parents (no direct refs since 19.0.1.712: a log row shows under its own record straight from `oteny.audit.log`) |
+| `oteny.audit.log.aggregated` | DB View | Reads the direct rows from the log and the child rows through the refs, **UNNESTs snapshot rows back into one virtual row per captured field** so list views, filters by `field_name`, and Group-by-Field behave the same way regardless of underlying row shape (legacy per-field, or modern tombstone). The view's `audit_log_id` column points back to the underlying log row when callers need the full snapshot. |
 
 ### Parent/Child References
 
@@ -115,6 +120,8 @@ A short list of high-noise infra models is ignored by default (see `_DEFAULT_IGN
 - `discuss.channel` (per-conversation Wilma scratchpad)
 - `discuss.channel.member` (membership churn)
 - `ir.cron.progress` (cron-internal counters)
+- `ir.cron.trigger` (a row in the scheduler queue; 19.0.1.712)
+- `ir.model.constraint` (the reflection of database constraints, rewritten by every upgrade; 19.0.1.712)
 
 **`mail.message` is deliberately NOT on this list** (the code comment on `_DEFAULT_IGNORED_MODEL_NAMES` says so, and `test_mail_message_is_audited_with_html_strip` pins it). Chatter on a business record is cascade-deleted with that record, so the audit log is its only durable copy afterwards; the cost is paid down with HTML stripping instead.
 
@@ -198,6 +205,15 @@ Notes for anyone adding a second one:
 - **Declare it only where it is needed.** A model without the attribute costs one failed `getattr`, and `patched_flush` skips its whole precompute pass.
 - **It fails OPEN.** If the hook raises, the record is audited as usual. An audit hook must never break the write it observes.
 - **Answer the same way at create and at delete.** The four sites are `patched_create`, the relational branch of `patched_write`, `patched_flush` and `patched_unlink`. A predicate that changes its mind between insert and delete leaves a half-recorded record.
+- **Give the purge its SQL.** Declare `_oteny_audit_purge_record_sql()` beside it: it returns the SQL condition (over the alias `log`) that finds the stored rows of the records the rule skips, for the one-shot purge of 19.0.1.712 (see *The purge of the rows outside the coverage*). The condition must not rest on an insert snapshot key that the fold can add.
+
+The rules today (19.0.1.712):
+
+| Model | Skips | Where |
+|---|---|---|
+| `mail.message` | a message posted into an audit-ignored container (`discuss.channel`) | `oteny_audit/models/mail_message_override.py` |
+| `ir.attachment` | a generated image (`res_field` `thumbnail`, `image_128` to `image_1024`) and a web asset bundle (`url` `/web/assets/…`) | `oteny_audit/models/ir_attachment_override.py` |
+| `crewradar.salary.timeline` | a reconciliation timeline: only the builder makes, changes and deletes it; its estimate stays audited | radar `crewradar/models/salary/crewradar_salary_timeline.py` |
 
 ### HTML Stripping for Selected Fields
 
@@ -263,6 +279,17 @@ By default only direct (parent) logs are shown. Child logs appear when viewing f
 `Audit Log: Cleanup Old Records` is a batch delete over the largest table in the database, and it is the reason a restore must not be run with a server still up. `pg_restore` re-adds constraints last, so a server that reconnects mid-load and fires this cron deletes `oteny_audit_log` rows while `oteny_audit_log_ref_audit_log_id_fkey` does not exist yet. The refs are orphaned, the foreign key can never be re-added, and the database cannot be upgraded again.
 
 `riverdeploy/crewradar_db_restore.py::stop_odoo_servers` now stops such a server before the load, and `migrations/19.0.1.519/pre-migrate.py` repairs a database that already fell in. Full account, with the lock-diagnosis query, in the restore reference under *A running `crmain` server wrecks the restore*.
+
+### The purge of the rows outside the coverage (19.0.1.712)
+
+The coverage rules of 19.0.1.712 apply to new rows. The scheduled action **Audit Log: Purge Rows Outside Coverage** makes the stored rows match them, once (plan `plans/audit-storage-reduction.md`, § 11). It is inactive by default; the 19.0.1.712 post-migrate switches it on for the next night at 01:00 UTC, and it switches itself off at the end.
+
+- **Phases**, kept in the system parameter `oteny_audit.purge_phase` (and `oteny_audit.purge_next_id`), one batch per call; Odoo's cron loop calls again while the progress reports work left (`ir.cron._commit_progress`):
+  `deletes` (rows of ignored or removed models, update rows of fields that are not audited, rows that a per-record rule skips through `_oteny_audit_purge_record_sql`) → `fold` (updates in the transaction of their record's insert go into the snapshot; snapshots lose the keys that the rules now leave out; parent refs of folded rows move to the insert row) → `refs` (the direct refs) → `vacuum` (`VACUUM (FULL, ANALYZE)` of the two tables on its own autocommit connection, `lock_timeout` 60 s; on a timeout the next night tries again) → `done` (a later run only switches the action off).
+- The parameters are written with `oteny_audit_ignore`, or each batch would add audit rows to the table it purges.
+- **Measured on `crmain`** (production backup of 27-Oct-2026, laptop): 88 calls, 77 s (deletes 38 s, fold 26 s, refs 2 s, VACUUM FULL 10 s), 2.27 GB of WAL. 1,118,457 log rows → 270,692; 1,497,725 refs → 231,380; the audit tables 1,065 MB → 289 MB; the database 1,984 MB → 1,208 MB.
+- `VACUUM FULL` locks both tables while it runs, so almost every business write waits; that is why the action runs at night.
+- **On a copy whose crons are off** (a staging build, a laptop), run it by hand (Settings › Technical › Scheduled Actions › Run Manually, repeated until it switches off), or in a shell: call `env["oteny.audit.log"]._purge_rows_outside_coverage()` until `oteny_audit.purge_phase` is `done`, with a commit between the calls. `_purge_all_now()` runs the phases without a commit and without VACUUM, for tests.
 
 ### Cleanup Settings
 
@@ -360,7 +387,7 @@ class CrewradarMissingTimesheet(models.Model):
 | `crewradar.salary.check.result` | Check results rebuilt on regenerate |
 | `crewradar.salary.export.field` | Export fields rebuilt on regenerate |
 
-The parent `crewradar.salary.timeline` keeps audit enabled for tracking creation and state changes.
+The parent `crewradar.salary.timeline` keeps audit enabled for tracking creation and state changes, but only for estimates and sandboxes: a **reconciliation** timeline is skipped per record (19.0.1.712, see *Per-Record Ignore*). Only the builder makes, changes and deletes it, and the estimate that owns it stays audited with its `reconciliation_timeline_id`.
 
 **`crewradar.salary`** is audited with `_oteny_audit_parent_field = "timeline_id"` because it has a user-editable `remarks` field. Builder operations (create/delete during timeline build/rebuild) use `oteny_audit_ignore=True` context to suppress regeneration noise. Only user edits to the salary (like changing remarks) are captured.
 
@@ -389,10 +416,41 @@ One thing this rule does **not** reach, so measure before you assume the noise i
 
 **Discuss messages the bot posts** used to be the largest share of this noise. They are `mail.message` rows, and since `19.0.1.519` a message posted into a `discuss.channel` is skipped per record. See *Default-Ignored Infrastructure Models*.
 
+**Regenerated or system-written models ignored since 19.0.1.712** (plan `plans/audit-storage-reduction.md`):
+
+| Model | Reason |
+|-------|--------|
+| `rivercreds.plan.item` | The slot compute rebuilds every item from audited inputs (credentials, log entries, requirement windows); the views have create, edit and delete off. The daily cron that moves the planning window wrote about 4,000 date updates a day, 46 % of all audit rows |
+| `oteny.oops.log` | The error log itself: a log of a log |
+
 **Ignored by default** (no configuration needed):
 - Transient models (wizards)
 - Infrastructure models on `_DEFAULT_IGNORED_MODEL_NAMES` (mail/discuss/cron — see Default-Ignored Infrastructure Models above)
 - System model prefixes: `oteny.audit`, `ir.ui.view`, `ir.model.data`, `bus.`, `mail.push`, `mail.tracking`, `res.device.log`
+
+#### Ignoring Fields (`_oteny_audit_ignore_fields`)
+
+Declare a set of field names that the audit log skips on a model (19.0.1.712): no update row, and no key in the insert and delete snapshots. Use it for a field whose every value follows from other audited fields, or that only the system writes and that says nothing about a business fact.
+
+```python
+class Service(models.Model):
+    _inherit = "riverflow.service"
+    _oteny_audit_ignore_fields = {"end_date_for_calendar"}
+```
+
+**The sets of all classes are joined.** A class attribute of an Odoo model is normally overridden by a later class in the inheritance chain, so a mixin's set would vanish as soon as the model declares its own. `base_patch._ignored_field_names` joins the sets over the MRO (and caches the result on the registry class), so each module declares only the fields it owns. The declarations today:
+
+| Model or mixin | Fields | Why |
+|---|---|---|
+| `riverflow.service` | `end_date_for_calendar` | `end_date or deadline`; its inverse writes `end_date`; both audited |
+| `riverflow.tombstone.mixin` | `to_be_deleted` | written by `_retire()` right before the delete |
+| `riverflow.highlight.row.mixin` | `user_write_date` | changes with every user write; repeats the time of the audit row |
+| `riverflow.state.mixin` (bot mixin) | `bot_released_token` | a one-time token |
+| `mail.message` | `reply_to`, `record_alias_domain_id`, `record_company_id`, `email_layout_xmlid`, `email_add_signature`, `reply_to_force_new`, `message_id` | how Odoo delivered the message; `email_from` stays (the outside sender of an incoming mail) |
+| `ir.attachment` (oteny_audit) | `index_content`, `checksum`, `mimetype`, `file_size` | technical values of the file; `store_fname` stays, the content hash |
+| `ir.attachment` (oteny_cloud_filestore) | `cloud_local_only` | a flag of the Cloud filestore |
+| `res.users` | `oauth_access_token`, `odoobot_state`, `odoobot_failed` | written by Odoo at every OAuth login, and the OdooBot onboarding |
+| `oteny.article` | `html_field_history` | the article's own revision history |
 
 #### HTML Stripping (`_oteny_audit_html_strip_fields`)
 
@@ -474,11 +532,12 @@ The module detects database restore/copy operations (by monitoring changes to `d
 
 ### How Changes Are Captured
 
-1. **Create**: `patched_create` runs after `original_create`, reads all stored non-readonly columns from the DB, compares to defaults, then folds every non-default value into a single **tombstone snapshot row** with `change_type='i'`, `field_name='__snapshot__'`, and `snapshot={...}`. One row per created record regardless of how many fields were captured.
+1. **Create**: `patched_create` runs after `original_create`, reads the audited columns (`_is_audited_field`) from the DB, compares to defaults, then folds every non-default value into a single **tombstone snapshot row** with `change_type='i'`, `field_name='__snapshot__'`, and `snapshot={...}`. One row per created record regardless of how many fields were captured. An empty value (`False`, `0`, empty x2many) of a field **without** a default is left out too (rule N1): for such a field "absent" already means "empty". An empty value of a field with a default stays: it says the default was overridden.
 2. **Write (relational)**: `patched_write` captures old values before write, then reads new values after write, logs immediately for m2m/o2m fields (per-field `change_type='u'` rows).
-3. **Write (scalar)**: `patched_write` captures old values from cache, then `patched_flush` compares old vs new after the ORM flush, logging the difference (per-field `change_type='u'` rows). Late-arriving fields on newly-created records (e.g. computed-field side effects whose recompute happens after the create-time snapshot read) are also recorded as `'u'` rows — they're conceptually post-create updates, since the tombstone snapshot already covered the create event atomically.
+3. **Write (scalar)**: `patched_write` captures old values from cache, then `patched_flush` compares old vs new after the ORM flush, logging the difference (per-field `change_type='u'` rows).
+   **The fold (cut E, 19.0.1.712).** A change of a record **in the transaction of its create** writes no update row: `_fold_into_insert_snapshots` writes the value into the record's insert snapshot (the insert row ids are kept in `precommit.data["oteny_audit"]["insert_log_ids"]`). A value that changes before the commit was never visible to anyone else, so the snapshot with the value at the end of the transaction says everything anybody could have seen. Stored computes and code that writes right after the create (the computes of a new service, the salary timeline builder) gave one to seven update rows per new record; on production 197,478 rows in 180 days. Both write branches fold, with the same strip, redaction, default and N1 rules as the create. When the folded field decides the parent (`_oteny_audit_parent_field`, `_model_parent_keys`), the insert row gets the missing parent refs, so a service created first and linked to its log entry after still shows under that log entry. When the insert row is gone (deleted in the transaction, or rolled back to a savepoint), the change is logged as an update row, as before. A test that checks an update row writes after `tests/common.py:end_transaction(env)`.
 4. **Unlink**: `patched_unlink` reads all stored field values before deletion, then folds every non-default value into a single **tombstone snapshot row** with `change_type='d'`, `field_name='__snapshot__'`, and `snapshot={...}`. One row per deleted record. The delete snapshot is intentionally inclusive of fields that were defaults at create time (omitted from the create snapshot), so the delete tombstone preserves the full reconstructable state.
-5. **References**: After creating log records, `_create_audit_log_references` creates both direct refs (log points to itself) and parent refs (log points to parent chain, up to 3 levels). Snapshot rows get the same direct + parent ref treatment as per-field rows.
+5. **References**: After creating log records, `_create_audit_log_references` creates the parent refs (log points to its parent chain, up to 3 levels). Since 19.0.1.712 it writes no direct ref: the view reads a log row under its own record from `oteny_audit_log` itself (cut F; the direct refs were two thirds of the ref table).
 
 These four are also the four **emitting sites** — the only places a field value becomes an audit row. Each one runs `_record_audit_ignored` on the record (the per-record skip) and `_maybe_redact` on every raw and display value (the credential redaction). A change to either rule must touch all four, or it leaks through the one it missed; that is why the write-relational branch carries a redaction call it cannot currently need.
 
@@ -591,11 +650,11 @@ for log in env['oteny.audit.log'].search([
 
 #### Aggregated view filter push-down
 
-The `oteny.audit.log.aggregated` view is structured as a single SELECT with `LEFT JOIN LATERAL jsonb_each(log.snapshot) WITH ORDINALITY` (no UNION ALL, no window function). This shape lets PostgreSQL push outer filters — most importantly `WHERE create_date >= ...` from the default "From Yesterday onwards" filter — down to a Bitmap Index Scan on `oteny_audit_log_create_date_idx` before unnesting. An earlier UNION ALL + `ROW_NUMBER()` shape blocked push-down (window functions are an opaque planner barrier), forcing PostgreSQL to materialize all 4 M view rows before applying the filter. Measured on production-shape `crmain`: **4.8 s → 113 ms (~43×)** for the date-filtered count query, cold cache.
+Since 19.0.1.712 the view is a UNION ALL of four branches: {direct rows from `oteny_audit_log`, child rows through the parent refs} × {plain rows, snapshot rows unnested by a LATERAL `jsonb_each`}. The plain branches expose the log columns as they are, so a value search pushes into the log scan; there is no window function over the union. Inside the snapshot LATERAL a `row_number()` orders the fields of one insert or delete by their label, so they read alphabetically on screen; it runs per log row and does not block the push-down. Measured on `crmain` (production backup of 27-Oct-2026) after the purge: the Audit > Log first page 20 ms, the audit log of a busy log entry (3,320 rows) 8 ms, of a busy service 1.7 ms, a value search over the whole 180 days 1.5 s (4.4 s before the purge). The history of the shape: the view was once a single SELECT with `LEFT JOIN LATERAL jsonb_each(log.snapshot) WITH ORDINALITY` (no UNION ALL, no window function). That shape let PostgreSQL push outer filters — most importantly `WHERE create_date >= ...` from the default "From Yesterday onwards" filter — down to a Bitmap Index Scan on `oteny_audit_log_create_date_idx` before unnesting. An earlier UNION ALL + `ROW_NUMBER()` shape blocked push-down (window functions are an opaque planner barrier), forcing PostgreSQL to materialize all 4 M view rows before applying the filter. Measured on production-shape `crmain`: **4.8 s → 113 ms (~43×)** for the date-filtered count query, cold cache.
 
 #### Row id encoding
 
-Virtual rows in the aggregated view use `ref.id::bigint * 1000 + COALESCE(jek.idx, 0)` where `jek.idx` is the LATERAL `WITH ORDINALITY` counter (0 for non-snapshot rows, 1..N for snapshot-derived rows). This stays well within JavaScript's safe-integer range (2^53). An earlier `<<` 32 encoding overflowed that range for ref.id > 2 M and caused the web client to silently lose precision — the audit list view came up empty even though the SQL view returned rows.
+Virtual rows use `(log.id * 1000 + idx) * 2` for direct rows and `(ref.id * 1000 + idx) * 2 + 1` for child rows (19.0.1.712), where `idx` is 0 for a plain row and 1..N for the fields of a snapshot. Even ids are direct rows, odd ids child rows; the ids stay unique over the four branches and well within JavaScript's safe-integer range (2^53). An earlier `<<` 32 encoding overflowed that range for ref.id > 2 M and caused the web client to silently lose precision — the audit list view came up empty even though the SQL view returned rows.
 
 ### Key Files
 
@@ -607,10 +666,13 @@ Virtual rows in the aggregated view use `ref.id::bigint * 1000 + COALESCE(jek.id
 | `oteny_audit/models/oteny_audit_log_aggregated.py` | DB view model with HTML caption generation |
 | `oteny_audit/models/oteny_audit_mixin.py` | Optional mixin adding audit_log_ids to models |
 | `oteny_audit/models/mail_thread_override.py` | Disables Odoo's MailThread tracking |
-| `oteny_audit/models/mail_message_override.py` | `mail.message`: HTML strip on `body`, and the per-record skip for a message in an audit-ignored container |
+| `oteny_audit/models/mail_message_override.py` | `mail.message`: HTML strip on `body`, the per-record skip for a message in an audit-ignored container, the ignored delivery fields |
+| `oteny_audit/models/ir_attachment_override.py` | `ir.attachment`: the per-record skip of generated images and asset bundles, the ignored technical fields |
+| `oteny_audit/models/res_users_override.py` | `res.users`: the ignored fields that Odoo writes by itself |
 | `oteny_audit/models/ir_config_parameter_override.py` | `ir.config_parameter`: redact `value` when the parameter `key` names a credential |
 | `oteny_audit/migrations/19.0.1.519/post-migrate.py` | One-off scrub of credentials already stored in the audit log |
 | `oteny_audit/migrations/19.0.1.598/pre-migrate.py` | Converts `transaction_id` to `bigint` on the log and ref tables (the 2026-09-12 outage) |
+| `oteny_audit/migrations/19.0.1.712/post-migrate.py` | Switches on the one-shot purge of the rows outside the coverage for the next night |
 | `oteny_audit/models/oteny_audit_fields.py` | `BigInteger`: an `int8` field for the 64-bit transaction number |
 | `oteny_audit/models/registry_patch.py` | Runs audit setup on registry invalidation |
 | `oteny_audit/models/ir_module_module.py` | Runs audit setup after module install |
@@ -637,6 +699,8 @@ Virtual rows in the aggregated view use `ref.id::bigint * 1000 + COALESCE(jek.id
 - [ ] `wilma.transport.review.assessment` is not in any `_oteny_audit_html_strip_fields`, so the pre-`19.0.1.519` rows hold full unstripped LLM HTML (56 MB on `test1`). The model is ignored now, so this only matters if the flag is ever reverted
 
 ### Completed
+
+- [x] 2026-11-07: fewer audit rows, the same clarity (19.0.1.712, plan `plans/audit-storage-reduction.md`). Cuts A to I and rules N1 to N4: credential plan items, the calendar end date, generated images and asset bundles, cron triggers, the fold of changes in the transaction of the create, no direct refs, the error log and reconciliation salary timelines leave the log; fields that code writes but users cannot edit (invoice links, salary links, the invoice state, the timeline type) enter it. A selection shows its label, and the fields of an insert read in label order. The one-shot night purge makes the stored rows match: on the production backup of 27-Oct-2026 the audit tables went from 1,065 MB to 289 MB.
 
 - [x] Legacy residue of the already-ignored models: the retention cleanup removed it. On `crmain` restored from the production backup of 27-Oct-2026, no row of a model on `_DEFAULT_IGNORED_MODEL_NAMES` remains, and the oldest row is from 29-Apr-2026 (plan `plans/audit-storage-reduction.md`).
 - [x] 2026-09-12: `transaction_id` is a 64-bit column (`BigInteger`, 19.0.1.598). Production passed 2^31 transactions and every write failed with `integer out of range` until the columns were widened. The counter is the shared Odoo.sh server's, not ours; see "The transaction number is a 64-bit column" for the growth analysis (2026-09-14).

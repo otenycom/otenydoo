@@ -194,15 +194,18 @@ class TestAuditLogChatterPreservation(TransactionCase):
         message.flush_recordset()
         partner.unlink()
 
-        # Search for ALL audit log rows tied to the (gone) partner via refs.
+        # Search for ALL audit log rows tied to the (gone) partner: its own rows,
+        # and the rows of its children through their parent refs.
         partner_refs = self.ref_model.search(
             [
                 ("target_model_name", "=", "res.partner"),
                 ("target_record_id", "=", partner_id),
             ]
         )
-        log_ids = partner_refs.mapped("audit_log_id.id")
-        partner_logs = self.log_model.browse(log_ids)
+        own_logs = self.log_model.search(
+            [("model_name", "=", "res.partner"), ("record_id", "=", partner_id)]
+        )
+        partner_logs = own_logs | partner_refs.mapped("audit_log_id")
 
         # We expect to find: partner insert snapshot, partner delete snapshot,
         # mail.message insert snapshot, mail.message delete snapshot.

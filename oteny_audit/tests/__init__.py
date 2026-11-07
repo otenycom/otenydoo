@@ -13,3 +13,5 @@ from . import test_perf_audit_index
 from . import test_audit_aggregated_partition
 from . import test_audit_log_transaction_id_bigint
 from . import test_audit_log_remark
+from . import test_audit_coverage
+from . import test_audit_purge

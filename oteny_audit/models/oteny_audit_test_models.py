@@ -93,3 +93,47 @@ class OtenyAuditTestSecret(models.Model):
     token_payload = fields.Json(string="Token Payload")
     retry_token = fields.Integer(string="Retry Token")
     cache_key = fields.Char(string="Cache Key")
+
+
+class OtenyAuditTestCoverageMixin(models.AbstractModel):
+    """A mixin that declares its own audit-ignored field: the model's own declaration must
+    not hide it (the sets of all classes are joined)."""
+
+    _name = "oteny.audit.test.coverage.mixin"
+    _description = "Oteny Audit Test Coverage Mixin"
+    _oteny_audit_ignore_fields = {"mixin_note"}
+
+    mixin_note = fields.Char()
+
+
+class OtenyAuditTestCoverage(models.Model):
+    """Test model for the coverage rules of 19.0.1.712 (plan audit-storage-reduction.md):
+    cut I (`code_state`, read-only without a compute, is logged; `name_upper`, a read-only
+    compute, is not), the read-only `active`, `parent_path`, rule N1 (`flag`, `count` without
+    a default; `flag_on` with one) and `_oteny_audit_ignore_fields` (`skipped_note`, and the
+    mixin's `mixin_note`)."""
+
+    _name = "oteny.audit.test.coverage"
+    _description = "Oteny Audit Test Coverage Model"
+    _inherit = ["oteny.audit.test.coverage.mixin"]
+    _oteny_audit_ignore = False
+    _oteny_audit_ignore_fields = {"skipped_note"}
+    _parent_store = True
+
+    name = fields.Char()
+    code_state = fields.Char(readonly=True)
+    name_upper = fields.Char(compute="_compute_name_upper", store=True)
+    active = fields.Boolean(default=True, readonly=True)
+    skipped_note = fields.Char()
+    flag = fields.Boolean()
+    flag_on = fields.Boolean(default=True)
+    count = fields.Integer()
+    parent_id = fields.Many2one("oteny.audit.test.coverage", index=True)
+    parent_path = fields.Char(index=True)
+    tag_ids = fields.Many2many("oteny.audit.test.child")
+    kind = fields.Selection([("alpha", "Alpha kind"), ("beta", "Beta kind")])
+
+    @api.depends("name")
+    def _compute_name_upper(self):
+        for record in self:
+            record.name_upper = (record.name or "").upper()

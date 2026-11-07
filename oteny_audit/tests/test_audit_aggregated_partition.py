@@ -11,6 +11,8 @@
 # (branch A) and snapshot-captured values (branch B).
 from odoo.tests import TransactionCase, tagged
 
+from .common import end_transaction
+
 
 @tagged("oteny_audit", "post_install", "-at_install", "partition")
 class TestAuditAggregatedPartition(TransactionCase):
@@ -25,21 +27,24 @@ class TestAuditAggregatedPartition(TransactionCase):
 
     def _expected_agg_count(self, model_name, record_ids):
         """Recompute the expected aggregated row count straight from the base
-        tables: every ref yields len(snapshot) rows when its log is a non-empty
-        snapshot tombstone (branch B), else exactly one row (branch A)."""
-        refs = self.ref_model.search(
+        tables: every log row of the records themselves (direct rows) and every
+        parent ref pointing to them (child rows) yields len(snapshot) rows when
+        its log is a non-empty snapshot tombstone, else exactly one row."""
+        def rows_of(log):
+            snap = log.snapshot or {}
+            return len(snap) if log.field_name == "__snapshot__" and snap else 1
+
+        own_logs = self.log_model.search(
+            [("model_name", "=", model_name), ("record_id", "in", record_ids)]
+        )
+        child_refs = self.ref_model.search(
             [
                 ("target_model_name", "=", model_name),
                 ("target_record_id", "in", record_ids),
+                ("is_direct", "=", False),
             ]
         )
-        expected = 0
-        for ref in refs:
-            log = ref.audit_log_id
-            snap = log.snapshot or {}
-            is_nonempty_snapshot = log.field_name == "__snapshot__" and bool(snap)
-            expected += len(snap) if is_nonempty_snapshot else 1
-        return expected
+        return sum(rows_of(log) for log in own_logs) + sum(rows_of(ref.audit_log_id) for ref in child_refs)
 
     def test_partition_exhaustive_and_disjoint(self):
         """Aggregated row count equals the sum, over every ref, of the snapshot
@@ -47,7 +52,9 @@ class TestAuditAggregatedPartition(TransactionCase):
         branches together reproduce exactly the old view's row set."""
         # Branch B: multi-field snapshot insert (name + computed_field captured).
         p_multi = self.parent_model.create({"name": "Partition multi"})
-        # Branch A: plain update(s) (name change also recomputes computed_field).
+        # Branch A: plain update(s) in a later transaction (name change also
+        # recomputes computed_field).
+        end_transaction(self.env)
         p_multi.name = "Partition multi v2"
         # Branch B: snapshot delete.
         p_del = self.parent_model.create({"name": "Partition del"})
@@ -103,6 +110,7 @@ class TestAuditAggregatedPartition(TransactionCase):
         value (branch A) and a snapshot-captured value (branch B)."""
         # Branch A: the new value lives directly on the update log row.
         p_plain = self.parent_model.create({"name": "Zphirae_Init"})
+        end_transaction(self.env)
         p_plain.name = "Zphirae_Plainval_8471"
         # Branch B: the value is captured inside the insert snapshot.
         p_snap = self.parent_model.create({"name": "Zphirae_Snapval_9352"})

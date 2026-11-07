@@ -142,18 +142,19 @@ class OtenyAuditLogAggregated(models.Model):
             change_type = log.change_type
             field_name = markupsafe.escape(log.field_display_name or "")
             is_html_field = self._is_html_field(log)
+            old_display, new_display = self._caption_values(log)
 
             if change_type == "i":
-                new_val = self._format_field_value(log.new_value_display_name or "", is_html_field)
+                new_val = self._format_field_value(new_display, is_html_field)
                 field_change_str = f"Set <b>{field_name}</b> to <b>{new_val}</b>"
             elif change_type == "u":
-                old_val = self._format_field_value(log.old_value_display_name or "", is_html_field)
-                new_val = self._format_field_value(log.new_value_display_name or "", is_html_field)
+                old_val = self._format_field_value(old_display, is_html_field)
+                new_val = self._format_field_value(new_display, is_html_field)
                 field_change_str = (
                     f"Updated <b>{field_name}</b> from '<b>{old_val}</b>' to '<b>{new_val}</b>'"
                 )
             elif change_type == "d":
-                old_val = self._format_field_value(log.old_value_display_name or "", is_html_field)
+                old_val = self._format_field_value(old_display, is_html_field)
                 field_change_str = f"<b>{field_name}</b> was <b>{old_val}</b>"
             elif change_type == "r":
                 # A remark holds text, not a field value: always plain, even when its key
@@ -171,6 +172,27 @@ class OtenyAuditLogAggregated(models.Model):
         for log in self:
             if log.caption is False:
                 log.caption = ""
+
+    def _caption_values(self, log):
+        """(old, new) display values of a row. A selection field shows its label: rows written
+        before 19.0.1.712 hold the technical value ("email") as their display value."""
+        old_display = log.old_value_display_name or ""
+        new_display = log.new_value_display_name or ""
+        field = self._audited_field(log)
+        if field is not None and field.type == "selection":
+            labels = dict(field._description_selection(self.env))
+            if old_display == (log.old_value or ""):
+                old_display = labels.get(old_display, old_display)
+            if new_display == (log.new_value or ""):
+                new_display = labels.get(new_display, new_display)
+        return old_display, new_display
+
+    def _audited_field(self, log):
+        """The field object of a row, or None (a removed model or field, a remark key)."""
+        model_name, field_name = log.field_model_name, log.field_name
+        if not model_name or not field_name or model_name not in self.env:
+            return None
+        return self.env[model_name]._fields.get(field_name)
 
     def _is_html_field(self, log):
         """Check if the field being audited is an HTML field."""
@@ -245,21 +267,10 @@ class OtenyAuditLogAggregated(models.Model):
                 log.child_record_ref = False
 
     def init(self):
-        """Materialize the view as a UNION ALL of:
-
-        * non-snapshot rows (legacy pre-M3 inserts/deletes + all updates) — passed
-          through one row per (ref, log) pair, exactly the legacy shape.
-        * snapshot rows (M3 tombstones) — UNNESTed via `jsonb_each` to produce
-          one virtual row per (ref, log, snapshot_field) triple. Each virtual
-          row carries field_name, field_display_name, and the appropriate
-          old/new values derived from the snapshot entry.
-
-        Row-id encoding: `ref.id::bigint * 1000 + field_index` (field_index=0
-        for non-snapshot rows, 1..N for snapshot-derived rows). Avoids
-        collision while staying within JavaScript's safe-integer range
-        (2^53 ≈ 9×10^15) — `<< 32` would overflow that range for ref.id > 2M
-        and the web client would silently lose precision. Field-count cap
-        per record event is well under 1000 in practice.
+        """Materialize the view: one row per (log row, field) for the log row's own record
+        (direct rows, read from oteny_audit_log), and one per (parent reference, field) for
+        each parent of that record (child rows). Snapshot rows are unnested into one row per
+        captured field. The comment above the CREATE VIEW gives the branches and the row id.
         """
         tools.drop_view_if_exists(self.env.cr, self._table)
 
@@ -312,143 +323,114 @@ class OtenyAuditLogAggregated(models.Model):
             """
         )
 
-        # UNION ALL of two disjoint branches, partitioned on whether the log
-        # row is a non-empty snapshot tombstone. This is a performance rewrite
-        # of what used to be a single SELECT with a LATERAL + CASE machinery
-        # for every row.
+        # UNION ALL of four disjoint branches: {direct, child} x {plain, snapshot}.
         #
-        # WHY: a value search (`unaccent(new_value_display_name) ILIKE '%x%'`)
-        # against the old single-SELECT could not be pushed into the log scan,
-        # because new_value_display_name was a CASE coupling `log` with the
-        # snapshot LATERAL (`jek`). The planner estimated rows=1 over that
-        # opaque expression, chose a nested loop, and seq-scanned the multi-
-        # million-row oteny_audit_log_ref table once per matching log row — a
-        # ~36s, 400M-row join explosion on production data.
+        # DIRECT rows come from oteny_audit_log itself: a log row is shown under its own
+        # record without a reference row (cut F of plans/audit-storage-reduction.md; until
+        # 19.0.1.712 each log row had a "direct" reference that repeated its model, record,
+        # name, date and transaction). CHILD rows come from the parent references
+        # (`NOT ref.is_direct`); old direct references that the purge has not removed yet
+        # are ignored, so a change never shows twice.
         #
-        # THE SPLIT: update rows (the ~7/8 majority) NEVER carry a snapshot, so
-        # the non-snapshot branch (A) can expose PLAIN log columns
-        # (new_value_display_name = log.new_value_display_name, etc.). With a
-        # plain column the planner pushes the value filter straight into the
-        # log scan (create_date index + filter), then index-joins ref via
-        # oteny_audit_log_ref(audit_log_id). Measured 36s -> ~100ms.
+        # PLAIN rows (updates, remarks, legacy per-field inserts/deletes, empty snapshots)
+        # expose the log columns as they are, so a value search
+        # (`unaccent(new_value_display_name) ILIKE ...`) pushes into the log scan. That split
+        # took the value search from ~36 s to ~100 ms on production data; a CASE coupling log
+        # and the snapshot LATERAL hid the predicate from the planner. SNAPSHOT rows unnest
+        # the insert/delete tombstone into one row per captured field (`jsonb_each WITH
+        # ORDINALITY`). No window function, so an outer `create_date` filter pushes into each
+        # branch.
         #
-        # The two branch predicates are exact negations, so the union is total
-        # and disjoint; UNION ALL (no dedup) is correct. The synthetic id
-        # encoding is preserved: branch A always ends in 0
-        # (ref.id*1000 + 0), branch B ends in 1..N (ref.id*1000 + ord), so ids
-        # stay collision-free and JS-safe. No window function is used, so the
-        # outer `create_date` filter still pushes into each Append child
-        # (the historical UNION-pushdown hazard was ROW_NUMBER specifically).
-        #
-        # Branch A also catches the empty-snapshot tombstone rows (snapshot
-        # IS NULL or '{}'): they surface as a single row with the sentinel
-        # field_name='__snapshot__' and empty values, exactly as before.
-        self.env.cr.execute(
-            """
-            CREATE OR REPLACE VIEW %s AS (
-                -- Branch A: non-snapshot rows (updates, legacy per-field
-                -- inserts/deletes, and empty-snapshot tombstones). Plain log
-                -- columns only — no jsonb, no LATERAL — so value searches push
-                -- into the log scan.
-                SELECT
-                    (ref.id::bigint * 1000) + 0 AS id,
-                    ref.audit_log_id,
-                    log.create_date,
-                    log.create_uid,
-                    log.transaction_id,
-
-                    ref.target_model_name AS model_name,
-                    COALESCE(im_target.name->>'en_US', ref.target_model_name) AS model_display_name,
-                    ref.target_record_id AS record_id,
-                    ref.target_display_name AS record_display_name,
-
-                    COALESCE(ref.parent_display_name, log.record_display_name) AS parent_record_display_name,
-
-                    -- Cast to text so the column types match the snapshot
-                    -- branch (jek.key / COALESCE are text) and the pre-rewrite
-                    -- view, keeping CREATE OR REPLACE VIEW type-compatible.
-                    log.field_name::text AS field_name,
-                    log.field_display_name::text AS field_display_name,
-                    log.model_name AS field_model_name,
-                    COALESCE(im_field.name->>'en_US', log.model_name) AS field_model_display_name,
-
-                    log.old_value AS old_value,
-                    log.new_value AS new_value,
-                    log.old_value_display_name AS old_value_display_name,
-                    log.new_value_display_name AS new_value_display_name,
-                    log.change_type,
-
-                    NOT ref.is_direct AS is_child_log,
-                    CASE WHEN NOT ref.is_direct THEN log.model_name ELSE NULL END AS child_model_name,
-                    CASE WHEN NOT ref.is_direct
-                         THEN COALESCE(im_child.name->>'en_US', log.model_name)
-                         ELSE NULL
-                    END AS child_model_display_name,
-                    CASE WHEN NOT ref.is_direct THEN log.record_id ELSE NULL END AS child_record_id
-
+        # Row id: (log.id * 1000 + ordinal) * 2 for direct rows, (ref.id * 1000 + ordinal)
+        # * 2 + 1 for child rows (ordinal 0 for plain rows, 1..N for snapshot fields). Unique
+        # over the four branches and far below the web client's 2^53.
+        def branch(child, snapshot):
+            if child:
+                row_id = "((ref.id::bigint * 1000) + %s) * 2 + 1" % ("jek.idx" if snapshot else "0")
+                model = "ref.target_model_name"
+                record_id = "ref.target_record_id"
+                record_name = "ref.target_display_name"
+                parent_name = "COALESCE(ref.parent_display_name, log.record_display_name)"
+                child_cols = """
+                    TRUE AS is_child_log,
+                    log.model_name AS child_model_name,
+                    COALESCE(im_child.name->>'en_US', log.model_name) AS child_model_display_name,
+                    log.record_id AS child_record_id"""
+                source = """
                 FROM oteny_audit_log_ref ref
                 JOIN oteny_audit_log log ON ref.audit_log_id = log.id
                 LEFT JOIN ir_model im_target ON ref.target_model_name = im_target.model
-                LEFT JOIN ir_model im_field ON log.model_name = im_field.model
-                LEFT JOIN ir_model im_child ON (NOT ref.is_direct AND log.model_name = im_child.model)
-                WHERE
-                    log.field_name <> '__snapshot__'
-                    OR log.snapshot IS NULL
-                    OR log.snapshot = '{}'::jsonb
-
-                UNION ALL
-
-                -- Branch B: snapshot tombstone rows with a non-empty snapshot
-                -- (inserts/deletes). UNNEST each captured field via LATERAL
-                -- jsonb_each WITH ORDINALITY; map the value onto old/new by
-                -- change_type (insert -> new_value, delete -> old_value).
-                SELECT
-                    (ref.id::bigint * 1000) + jek.idx AS id,
-                    ref.audit_log_id,
-                    log.create_date,
-                    log.create_uid,
-                    log.transaction_id,
-
-                    ref.target_model_name AS model_name,
-                    COALESCE(im_target.name->>'en_US', ref.target_model_name) AS model_display_name,
-                    ref.target_record_id AS record_id,
-                    ref.target_display_name AS record_display_name,
-
-                    COALESCE(ref.parent_display_name, log.record_display_name) AS parent_record_display_name,
-
+                LEFT JOIN ir_model im_child ON log.model_name = im_child.model"""
+                child_filter = "NOT ref.is_direct AND "
+            else:
+                row_id = "((log.id::bigint * 1000) + %s) * 2" % ("jek.idx" if snapshot else "0")
+                model = "log.model_name"
+                record_id = "log.record_id"
+                record_name = "log.record_display_name"
+                parent_name = "log.record_display_name"
+                child_cols = """
+                    FALSE AS is_child_log,
+                    NULL::varchar AS child_model_name,
+                    NULL::varchar AS child_model_display_name,
+                    NULL::integer AS child_record_id"""
+                source = """
+                FROM oteny_audit_log log
+                LEFT JOIN ir_model im_target ON log.model_name = im_target.model"""
+                child_filter = ""
+            if snapshot:
+                value_cols = """
                     jek.key AS field_name,
                     COALESCE(jek.value->>'label', log.field_display_name) AS field_display_name,
                     log.model_name AS field_model_name,
                     COALESCE(im_field.name->>'en_US', log.model_name) AS field_model_display_name,
-
                     CASE WHEN log.change_type = 'd' THEN jek.value->>'raw' ELSE '' END AS old_value,
                     CASE WHEN log.change_type = 'i' THEN jek.value->>'raw' ELSE '' END AS new_value,
                     CASE WHEN log.change_type = 'd' THEN jek.value->>'display' ELSE '' END AS old_value_display_name,
-                    CASE WHEN log.change_type = 'i' THEN jek.value->>'display' ELSE '' END AS new_value_display_name,
-                    log.change_type,
-
-                    NOT ref.is_direct AS is_child_log,
-                    CASE WHEN NOT ref.is_direct THEN log.model_name ELSE NULL END AS child_model_name,
-                    CASE WHEN NOT ref.is_direct
-                         THEN COALESCE(im_child.name->>'en_US', log.model_name)
-                         ELSE NULL
-                    END AS child_model_display_name,
-                    CASE WHEN NOT ref.is_direct THEN log.record_id ELSE NULL END AS child_record_id
-
-                FROM oteny_audit_log_ref ref
-                JOIN oteny_audit_log log ON ref.audit_log_id = log.id
-                LEFT JOIN ir_model im_target ON ref.target_model_name = im_target.model
-                LEFT JOIN ir_model im_field ON log.model_name = im_field.model
-                LEFT JOIN ir_model im_child ON (NOT ref.is_direct AND log.model_name = im_child.model)
+                    CASE WHEN log.change_type = 'i' THEN jek.value->>'display' ELSE '' END AS new_value_display_name,"""
+                lateral = """
                 CROSS JOIN LATERAL (
-                    SELECT key, value, ord AS idx
-                    FROM jsonb_each(log.snapshot) WITH ORDINALITY AS s(key, value, ord)
-                ) jek
-                WHERE
-                    log.field_name = '__snapshot__'
+                    -- The fields of one insert or delete read in the order of their label:
+                    -- the list sorts by id descending, so the label Z gets ordinal 1.
+                    SELECT key, value,
+                           row_number() OVER (ORDER BY COALESCE(value->>'label', key) DESC, key DESC) AS idx
+                    FROM jsonb_each(log.snapshot) AS s(key, value)
+                ) jek"""
+                where = """log.field_name = '__snapshot__'
                     AND log.snapshot IS NOT NULL
-                    AND log.snapshot <> '{}'::jsonb
-            )
-            """
-            % self._table
+                    AND log.snapshot <> '{}'::jsonb"""
+            else:
+                # Cast to text so the column types match the snapshot branches.
+                value_cols = """
+                    log.field_name::text AS field_name,
+                    log.field_display_name::text AS field_display_name,
+                    log.model_name AS field_model_name,
+                    COALESCE(im_field.name->>'en_US', log.model_name) AS field_model_display_name,
+                    log.old_value AS old_value,
+                    log.new_value AS new_value,
+                    log.old_value_display_name AS old_value_display_name,
+                    log.new_value_display_name AS new_value_display_name,"""
+                lateral = ""
+                where = """(log.field_name <> '__snapshot__'
+                    OR log.snapshot IS NULL
+                    OR log.snapshot = '{}'::jsonb)"""
+            return f"""
+                SELECT
+                    {row_id} AS id,
+                    log.id AS audit_log_id,
+                    log.create_date,
+                    log.create_uid,
+                    log.transaction_id,
+                    {model} AS model_name,
+                    COALESCE(im_target.name->>'en_US', {model}) AS model_display_name,
+                    {record_id} AS record_id,
+                    {record_name} AS record_display_name,
+                    {parent_name} AS parent_record_display_name,{value_cols}
+                    log.change_type,{child_cols}
+                {source}
+                LEFT JOIN ir_model im_field ON log.model_name = im_field.model{lateral}
+                WHERE {child_filter}{where}"""
+
+        branches = "\n                UNION ALL\n".join(
+            branch(child, snapshot) for child in (False, True) for snapshot in (False, True)
         )
+        self.env.cr.execute(f"CREATE OR REPLACE VIEW {self._table} AS ({branches}\n            )")

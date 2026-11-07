@@ -2,6 +2,8 @@
 from odoo.tests import TransactionCase
 from odoo.tests import tagged
 
+from .common import end_transaction
+
 
 @tagged("oteny_audit", "post_install", "-at_install")
 class TestAuditLogOrdering(TransactionCase):
@@ -18,6 +20,7 @@ class TestAuditLogOrdering(TransactionCase):
     def test_create_then_write_ordering(self):
         """Create then immediately write: a single insert snapshot precedes per-field updates."""
         parent = self.parent_model.create({"name": "Initial Name"})
+        end_transaction(self.env)
         parent.write({"name": "Updated Name"})
         parent.flush_recordset()
 
@@ -59,6 +62,7 @@ class TestAuditLogOrdering(TransactionCase):
         ).unlink()
 
         child = self.child_model.create({"name": "Initial Child Name", "parent_id": parent.id})
+        end_transaction(self.env)
         child.write({"name": "Updated Child Name"})
         child.flush_recordset()
 
@@ -98,6 +102,7 @@ class TestAuditLogOrdering(TransactionCase):
     def test_multiple_writes_before_flush(self):
         """Multiple writes without intermediate flush coalesce into a single update log."""
         parent = self.parent_model.create({"name": "Name 1"})
+        end_transaction(self.env)
         parent.write({"name": "Name 2"})
         parent.write({"name": "Name 3"})
         parent.write({"name": "Name 4"})
@@ -124,6 +129,7 @@ class TestAuditLogOrdering(TransactionCase):
     def test_writes_with_intermediate_flushes(self):
         """Writes with intermediate flushes create one update log per flushed transition."""
         parent = self.parent_model.create({"name": "Name 1"})
+        end_transaction(self.env)
 
         parent.write({"name": "Name 2"})
         parent.flush_recordset()
@@ -213,7 +219,8 @@ class TestAuditLogOrdering(TransactionCase):
             "Computed field result must be captured either in snapshot or as a subsequent update",
         )
 
-        # Now write to the record after creation; subsequent changes are 'u'.
+        # Now write to the record in a later transaction; subsequent changes are 'u'.
+        end_transaction(self.env)
         parent.write({"name": "Updated After Creation"})
         parent.flush_recordset()
 

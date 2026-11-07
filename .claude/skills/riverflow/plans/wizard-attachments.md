@@ -1,7 +1,9 @@
 # Plan: attachments that stay on a wizard
 
 Status: analysis done on 7-Nov-2026, read-only, on `crmain` restored from `~/Downloads/cr.zip`
-(production backup of 27-Oct-2026). Design decided by Ries on 7-Nov-2026 (§ 7). Not built. Basecamp: [BC 10487076751](https://3.basecamp.com/5527227/buckets/38887735/todos/10487076751).
+(production backup of 27-Oct-2026). Design decided by Ries on 7-Nov-2026 (§ 7). Built on
+7-Nov-2026 in riverflow 19.0.1.1407 (otenydoo `main`), verified on `cr-test` and `crmain`
+(§ 9). Not released yet. Basecamp: [BC 10487076751](https://3.basecamp.com/5527227/buckets/38887735/todos/10487076751).
 
 **Builds on its own** (Ries, 7-Nov-2026). This plan is about files, not about the audit log. No
 part of it depends on the audit plan (oteny-audit `plans/audit-storage-reduction.md`, where
@@ -90,10 +92,15 @@ An `@api.autovacuum` method on `ir.attachment` deletes an attachment when:
 - its `res_model` is a transient model and `res_field` is empty;
 - `create_date` and `write_date` are more than one day old (the rule of Odoo's
   `_gc_lost_attachments`, so a wizard that is still open keeps its files);
+- it has no `access_token` (decided by Ries on 7-Nov-2026, § 7). An image that a user pastes
+  into the HTML text of a wizard gets a token, and the sent email and the chatter show it
+  through `/web/image/<id>?access_token=...`. No database link shows that URL. On the backup
+  29 such images of the email sender wizard are shown in 1 to 9 chatter messages each. A file
+  upload of a wizard has no token;
 - no record of a model that is not transient points to it. The method finds these links from
   the database: every foreign key to `ir_attachment`, minus the tables of transient models and
   the relation tables whose other column points to such a table. On the backup that leaves 22
-  links, among them `message_attachment_rel`, `riverflow_service.sent_attachment_id`,
+  links (23 on the build), among them `message_attachment_rel`, `riverflow_service.sent_attachment_id`,
   `rivercreds_credential_attachment.attachment_id` and
   `rivercreds_document_import_job.file_attachment_id`.
 
@@ -104,8 +111,13 @@ is closed without saving, and every wizard that is added later, without code in 
 
 A riverflow migration moves each attachment of a transient model that a chatter message links
 to the record of that message (`res_model`, `res_id` from `mail_message.model` and `res_id`):
-8,382 attachments. The 49 pinned as `riverflow_service.sent_attachment_id` move to that service.
-It runs as SQL, so it writes no audit rows; it changes two columns of 8,4xx rows.
+8,382 attachments. The 49 pinned as `riverflow_service.sent_attachment_id` are all on a chatter
+message of that same service, so this move covers them. The migration does not name
+`sent_attachment_id`: that field belongs to `crewradar_cuneus_sign`, and a riverflow migration
+names only its own fields and those of its dependencies. It reads the transient models from
+`ir_model.transient`, because the registry of a riverflow post-migrate does not hold the models
+of the modules that load later. It runs as SQL, so it writes no audit rows; it changes two
+columns of 8,382 rows.
 
 After the repair, the garbage collection of § 4.2 deletes the 2,117 real orphans at its first
 run.
@@ -132,10 +144,38 @@ bump of riverflow only.
 ## 7. Decisions (Ries, 7-Nov-2026)
 
 1. **The garbage collection lives in riverflow**, not in `oteny_base`.
-2. **The repair runs:** a riverflow migration moves the 8,431 linked files to their service.
+2. **The repair runs:** a riverflow migration moves the linked files to their service.
 3. **The copying wizards get no code of their own:** the credential, import and permit wizards
    keep leaving their upload behind, and the garbage collection deletes it after one day.
+4. **An upload with an access token stays.** The garbage collection skips it, because a URL to
+   it can live in an HTML text or a sent email. The 29 pasted images stay on the wizard model;
+   their token keeps them readable.
 
 ## 8. Roadmap
 
-- [ ] **Wizard uploads: move them to the service, clean up the rest** (this plan, § 4): the email sender wizard moves its uploads to the service; a nightly garbage collection deletes wizard uploads that are older than one day and linked to nothing; a migration moves the 8,431 chatter files that still point to a wizard to their service. Riverflow only. · [BC 10487076751](https://3.basecamp.com/5527227/buckets/38887735/todos/10487076751)
+- [x] **Wizard uploads: move them to the service, clean up the rest** (built 7-Nov-2026, riverflow 19.0.1.1407, not released) (this plan, § 4): the email sender wizard moves its uploads to the service; a nightly garbage collection deletes wizard uploads that are older than one day and linked to nothing; a migration moves the 8,382 chatter files that still point to a wizard to their service. Riverflow only. · [BC 10487076751](https://3.basecamp.com/5527227/buckets/38887735/todos/10487076751)
+
+## 9. Built (7-Nov-2026)
+
+- **4.1:** `riverflow.service.email.sender.wizard._move_uploads_to_service`, called after
+  `message_post` in `_send_email`.
+- **4.2:** `ir.attachment._gc_wizard_uploads` and `_wizard_upload_links` in
+  `riverflow/models/ir_attachment.py`, with the `access_token` rule of decision 4.
+- **4.3:** `riverflow/migrations/19.0.1.1407/post-migrate.py`.
+- **Tests:** `riverflow/tests/test_wizard_uploads.py` (4 tests). The 4.1 test fails without
+  the move. The full first-party suite on `cr-test` (the tags of all 18 modules of
+  `odoo.installModules`): 0 failed, 0 errors of 5,850 tests.
+
+Result of `-u riverflow` and one run of the garbage collection on `crmain` (the backup of
+27-Oct-2026):
+
+| Check | Before | After |
+|---|---|---|
+| Attachments of a transient model on a chatter message | 8,382 | 0 |
+| Attachments of a transient model | 10,499 | 2,117 after the migration, 31 after the garbage collection |
+| `sent_attachment_id` not on its service | 49 | 0 |
+| Attachment 68945 readable by `bambam`, `khinmaungsoe@cuneusmm.com`, `r.lafeber@cuneuscrew.com` | no | yes |
+
+The migration took 1.4 s. The garbage collection deleted 2,086 attachments in 30 s and wrote one
+audit snapshot row for each. The 31 that stay are the pasted images with an `access_token`.
+

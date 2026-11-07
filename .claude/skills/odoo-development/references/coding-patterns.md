@@ -2196,7 +2196,7 @@ self.attachment_ids.write(
 
 **Do not use `message_type='comment'` with `subtype_xmlid='mail.mt_note'`** for these attachment messages. The riverflow mixin's `internal_notes_summary` field picks up all `comment` + `internal=True` messages into the top-3 summary, so file-name listings would pollute it. The default `notification` type is deliberately excluded from both `internal_notes_summary` and `external_messages_summary`. The tradeoff: individual attachment delete buttons work, but the message itself cannot be deleted (notification messages are not editable in Odoo's JS).
 
-Applied in: `riverflow_enter_train_ticket.py`, `riverflow_enter_airline_ticket.py`.
+Applied in: `riverflow_enter_train_ticket.py`, `riverflow_enter_airline_ticket.py`, and the email sender wizard (`_move_uploads_to_service`, riverflow 19.0.1.1407). A wizard that copies the bytes elsewhere and does not move its upload needs no code: riverflow's `ir.attachment._gc_wizard_uploads` deletes a wizard upload that nothing holds after one day ([riverflow SKILL.md, Wizard Attachment Posting](../../riverflow/SKILL.md#wizard-attachment-posting)).
 
 ## Translation Method
 

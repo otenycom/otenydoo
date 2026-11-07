@@ -243,6 +243,16 @@ module_name/
 
 The version folder must match the version in `__manifest__.py` that introduces the breaking change.
 
+### The registry of a migration holds only the modules loaded so far
+
+An upgrade loads the modules in dependency order, and a module's migration runs while the
+registry holds only that module and the modules below it. A post-migrate that lists models
+from `env.registry` (for example every transient model) misses the models of the modules that
+load later, such as the wizards of an app that depends on it. Read such a list from the
+database instead: `SELECT model FROM ir_model WHERE transient` holds every installed model.
+Worked example: riverflow `migrations/19.0.1.1407/post-migrate.py`, which moves the chatter
+files of every wizard, also of the apps above riverflow.
+
 ### Basic Migration Script Structure
 
 ```python
@@ -720,6 +730,8 @@ Live data from the AUV Send Reminder 19.0.4.10 backfill on Cuneus production:
 | `res_model='riverflow.service.email.sender.wizard'`, `res_id=0` (HR uploaded via wizard form) | 370 |
 
 The PDFs at `res_model='wizard', res_id=0` are JS-side uploads from the wizard form's attachment field. Odoo's `web/binary/upload_attachment` controller stamps `res_model` with the wizard's model and `res_id=0` (NewId) and never rewrites them, even after `message_post(attachment_ids=...)` posts the outgoing email. The 19.0.4.10 backfill missed ~22% of services because of this.
+
+Since riverflow 19.0.1.1407 the email sender wizard moves its uploads to the service, and that version's post-migrate moved the older chatter files of every wizard to the record of their message. A backfill on a database at that version or later finds them by `res_model` and `res_id`. The chatter join below stays right for a file that a message holds.
 
 **The reliable source of truth is the chatter.** Both code paths end up at the same `message_post` call, so the attachment is always findable via `mail_message` + `message_attachment_rel`. The 19.0.4.11 fix:
 

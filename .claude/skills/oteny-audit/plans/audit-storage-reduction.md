@@ -3,9 +3,11 @@
 Status: analysis done on 7-Nov-2026, on `crmain` restored from `~/Downloads/cr.zip` (production
 backup of 27-Oct-2026, retention window 29-Apr to 27-Oct-2026). The purge that removes the
 stored rows outside the new coverage is designed and measured on a copy (§ 11). Decided by Ries
-on 7-Nov-2026: all cuts A to H in one change, and the purge includes the old rows of ignored and
+on 7-Nov-2026: all cuts A to I in one change, and the purge includes the old rows of ignored and
 removed models (§ 9, questions 1 to 3); the purge runs as a one-shot night cron that the
-migration switches on (question 5). Not built. Questions 4 and 6 of § 9 are open. Not user-facing, so
+migration switches on (question 5); fields that code writes but users cannot edit are
+audited too, as cut I (question 4); the noise rules N1 to N4 are part of the build and of the
+purge (question 6). Not built. No question of § 9 is open. Not user-facing, so
 no Basecamp to-do.
 
 ## 1. Why
@@ -165,8 +167,9 @@ counted once, in the first cut that takes it).
   purge of § 11 deletes the direct refs in batches.
 - **Risks to check:**
   - The view id is `ref.id * 1000 + ordinal` today. Direct rows have no ref id, so the id needs
-    a new encoding that cannot collide, for example `(log.id * 1000 + ordinal) * 2` for direct
-    rows and `(ref.id * 1000 + ordinal) * 2 + 1` for child rows. It must stay below 2^53.
+    a new encoding that cannot collide: `(log.id * 1000 + ordinal) * 2` for direct rows and
+    `(ref.id * 1000 + ordinal) * 2 + 1` for child rows (decided by Ries on 7-Nov-2026). It must
+    stay below 2^53.
   - The view was tuned twice for speed (the date filter from 4.8 s to 113 ms, the value search
     from 36 s to about 100 ms; see the comments in `oteny_audit_log_aggregated.py`). The direct
     branches must use the log indexes: (`model_name`, `record_id`, `create_date DESC`, `id
@@ -196,6 +199,61 @@ counted once, in the first cut that takes it).
   `type == "reconciliation"`. `type` is `readonly=True` and only the builder sets it, at the
   create, so the answer is the same at create and at delete.
 
+### I. Audit the fields that code writes but users cannot edit
+
+Added by Ries on 7-Nov-2026 (§ 9, question 4). This cut adds rows instead of removing them; it
+closes the gap of § 7.
+
+- **What changes:** today the patch logs a stored field only when it is not `readonly`. In
+  Odoo, `readonly=True` on a field without a compute means "read-only on screen", not "never
+  written", so code writes such fields and the log never shows them. From now on the patch logs
+  every stored field with a column **except a computed or related field that is read-only**
+  (as today, the log explains such a value through its inputs). A computed field with an
+  inverse stays logged, as today. One helper decides this for all four places that write
+  audit rows (`patched_create`, the relational branch of `patched_write`, `patched_flush`,
+  `patched_unlink`), together with `_oteny_audit_ignore_fields` of cut B.
+- **What this adds to the log** (measured on the backup, window 29-Apr to 27-Oct-2026, after the
+  exclusions below): 33 fields; 16,091 values in insert snapshots (no new rows, only keys), and
+  at most 3,599 update rows on records made before the window (the count of such records that
+  hold a value and changed in the window; updates of records made in the window are mostly
+  folded by cut E). The fields that matter most:
+  - `account.move.state`, `move_type`, `is_move_sent`, `reversed_entry_id`: who posted, sent,
+    cancelled or reversed an invoice; today the log does not show the posting of an invoice;
+  - `account.move.line.move_id`, `full_reconcile_id`: the invoice of a line, and its payment
+    match;
+  - `riverflow.service.invoice_line_id`, `salary_timeline_id`, `follow_up_of_service_id`,
+    `credential_closed_by_plan`;
+  - `crewradar.timesheet.billed_on_move_line_id`, `salary_timeline_id`;
+    `crewradar.leg.pax.invoice_line_id`; `crewradar.vacation.payout.salary_timeline_id`: which
+    invoice or salary month included the item, and the release when a salary is cancelled or
+    deleted (`_unlink_included_items`);
+  - `crewradar.salary.timeline.type`: whether a timeline is an estimate, a sandbox or a
+    reconciliation;
+  - `crewradar.contract.created_with_agency_id`; the fields of the salary and accounting export
+    files (`crewradar.salary.export.file`, `crewradar.accounting.export`).
+- **Excluded, because they are technical or would be noise** (each in the module that owns the
+  field, with `_oteny_audit_ignore_fields`):
+  - riverflow, `riverflow.tombstone.mixin`: `to_be_deleted`. A read-only `active` is not logged
+    either (rule in `oteny_audit`): only `_retire()` writes it, right before the delete in the
+    same transaction, and a model with a user archive (services, log entries) redefines
+    `active` as writable, so it stays logged there;
+  - riverflow: `user_write_date` (`riverflow.state.record`, `riverflow.highlight.row.mixin`; it
+    changes with every user write and repeats the time of the audit row itself) and
+    `bot_released_token` (`riverflow.state.bot.mixin`);
+  - `oteny_audit`, `ir.attachment`: `index_content` (the full text of a document, 11.8 MB in the
+    window; the file itself is the source), `checksum` (`store_fname` already holds it),
+    `mimetype`, `file_size`;
+  - `oteny_cloud_filestore`, `ir.attachment`: `cloud_local_only`;
+  - `oteny_audit`, `mail.message`: `message_id` (the e-mail header id; it joins rule N3);
+  - `oteny_audit`, `res.users`: `oauth_access_token` (it changes at every OAuth login),
+    `odoobot_state`, `odoobot_failed`;
+  - `oteny_article`, `oteny.article`: `html_field_history` (the article's own revision history);
+  - `oteny_audit`: `ir.model.constraint` joins `_DEFAULT_IGNORED_MODEL_NAMES` (the reflection
+    of database constraints, rewritten by every upgrade). `ir.module.module` stays audited: its
+    `state` and `latest_version` say who installed or upgraded which module, and when.
+- **Old rows:** the rows written before the change hold none of these fields, and nothing can
+  add them afterwards. The purge of § 11 does not touch this cut.
+
 ## 4. Effect
 
 | | Log rows | Log bytes | Ref rows |
@@ -206,7 +264,8 @@ counted once, in the first cut that takes it).
 | After the purge of § 11 (A to H and the old rows of ignored and removed models) | 271,421 | | 233,805 |
 
 Measured on a copy of `crmain` (§ 11): after the purge and `VACUUM FULL`, the audit tables go
-from 1,062 MB to 302 MB, and the database from 1,974 MB to 1,214 MB. Writes: cut A alone removes about 4,000
+from 1,062 MB to 302 MB, and the database from 1,974 MB to 1,214 MB. Cut I adds at most about
+3,600 update rows and 16,091 snapshot values per 180 days, which does not change these numbers. Writes: cut A alone removes about 4,000
 log rows and 4,000 ref rows per day; cut E removes six to seven log rows and their refs per new
 service.
 
@@ -321,29 +380,19 @@ rows on `test1`) is already done by the retention cleanup: the backup holds no r
 the cleanup "never will" remove these rows; that was wrong. The item moved to Completed on
 7-Nov-2026.
 
-## 7. A clarity gap found on the way
+## 7. A clarity gap found on the way, closed by cut I
 
-The patch logs only fields that are stored and not `readonly`. In Odoo, `readonly=True` on a
-field without a compute means "read-only on screen". It does not mean "never written". Code
-writes such fields, and the audit log never records them, not even in the insert snapshot.
-54 fields of the Radar and otenydoo models have this shape. Among them are links that an
-investigator can need:
-
-- `riverflow.service.invoice_line_id`, `salary_timeline_id`, `follow_up_of_service_id`,
-  `credential_closed_by_plan`;
-- `crewradar.timesheet.billed_on_move_line_id`, `salary_timeline_id`;
-- `crewradar.leg.pax.invoice_line_id`, `crewradar.vacation.payout.salary_timeline_id`;
-- `crewradar.salary.timeline.type`: the insert snapshot of a salary timeline does not say
-  whether it is a sandbox, an estimate or a reconciliation;
-- `crewradar.contract.created_with_agency_id`.
-
-This plan does not change it, because it adds rows instead of removing them. See question 4.
+The patch logged only fields that are stored and not `readonly`. In Odoo, `readonly=True` on a
+field without a compute means "read-only on screen", not "never written". Code writes such
+fields, so the audit log never recorded them, not even in the insert snapshot: among them the
+invoice and salary links of services and timesheets, the type of a salary timeline, and the
+state of an invoice. Cut I (§ 3) closes this gap; Ries added it to this plan on 7-Nov-2026.
 
 ## 8. Build order and checks
 
-All cuts, A to H, go in one change (decided by Ries on 7-Nov-2026, § 9).
+All cuts, A to I, go in one change (decided by Ries on 7-Nov-2026, § 9).
 
-1. **Cuts A to H** (otenydoo: `oteny_audit`, `riverflow`, `oteny_oops`; radar: `rivercreds`,
+1. **Cuts A to I** (otenydoo: `oteny_audit`, `riverflow`, `oteny_oops`, `oteny_cloud_filestore`, `oteny_article`; radar: `rivercreds`,
    `crewradar`). Tests in `oteny_audit/tests` unless noted:
    - E: create a record and let a stored compute change it in the same transaction: one insert
      row with the final values, no update row. The same write in a later transaction: one
@@ -355,8 +404,17 @@ All cuts, A to H, go in one change (decided by Ries on 7-Nov-2026, § 9).
    - C: create and delete an attachment with `res_field = "thumbnail"`: no rows; the same with
      `image_1920`: rows.
    - D and G: create an `ir.cron.trigger` and an `oteny.oops.log`: no rows.
+   - N1: an insert of a record with an empty value for a field without a default leaves that
+     key out; an empty value for a field with a default (`mail.message.email_add_signature`
+     False) stays. N2: no `parent_path` key in the snapshot of a `riverflow.service` child.
+     N3: a posted message has none of the keys of § 12 N3, nor `message_id`. N4: an asset
+     bundle attachment (`url` `/web/assets/…`) writes no row.
    - A (in `rivercreds/tests`): the plan item cron writes no audit row; a change of a credential
      still writes its rows.
+   - I: a write by code on a read-only field without a compute writes an update row, and its
+     value is in the insert and delete snapshots; a read-only computed or related field still
+     writes none; `to_be_deleted`, a read-only `active` and the excluded fields of § 3 I write
+     none; `account.move` posted from draft writes a `state` row.
    - H (in `crewradar/tests`): building an estimate whose previous month is confirmed writes
      rows for the estimate and none for its reconciliation; regenerate and delete of the
      estimate write no rows for the reconciliation; a state button on the estimate still writes
@@ -375,7 +433,7 @@ All cuts, A to H, go in one change (decided by Ries on 7-Nov-2026, § 9).
      date filter, 113 ms today; the value search, about 100 ms today). Test the new id encoding:
      no two view rows share an id, and every id stays below 2^53.
 
-## 9. Open questions for the Radar dev team
+## 9. Questions and decisions (all decided by Ries on 7-Nov-2026)
 
 1. **Cuts A to E, G and H.** Situation: 68 % of the audit rows hold no information that is not
    in another audit row or that any person could ever have seen; the largest part is the daily
@@ -384,10 +442,7 @@ All cuts, A to H, go in one change (decided by Ries on 7-Nov-2026, § 9).
    **Decided by Ries on 7-Nov-2026: yes.**
 2. **Cut F.** **Decided by Ries on 7-Nov-2026: build F in the same change and delete the direct
    refs in the same purge** (in place of the recommended second change). § 8 and § 11
-   follow this decision. Situation: after the other cuts, the direct ref rows are still 61 % of the ref table, and
-   they repeat their log row. Removing them needs a view rewrite on a view that was tuned twice
-   for speed. Question: do we build F after A to E? Recommended: yes, as a second change, with a
-   speed measurement before and after on `crmain`.
+   follow this decision.
 3. **Old rows of removed models** (changed on 7-Nov-2026: Ries asked for a migration that makes
    the stored rows match the new coverage, § 11; the old rows of ignored models such as
    `wilma.*` are part of it). Situation: 26,950 rows remain of models that the switch to
@@ -399,8 +454,7 @@ All cuts, A to H, go in one change (decided by Ries on 7-Nov-2026, § 9).
 4. **Read-only fields that code writes.** Situation: invoice links, salary timeline links and the
    salary timeline type are never in the audit log, because those fields are read-only on
    screen. Question: do we audit stored fields that are read-only on screen but have no compute?
-   Recommended: yes, in a separate plan, after A to F, because it adds rows and needs its own
-   measurement.
+   **Decided by Ries on 7-Nov-2026: yes, in this plan, as cut I (§ 3).**
 5. **Where the purge runs.** Situation: Ries asked on 7-Nov-2026 whether a dedicated cron after
    the upgrade is wiser than a migration. A migration adds 40 to 60 seconds (laptop) or an
    estimated 2 to 5 minutes (odoo.sh) to the upgrade, rolls back the whole upgrade on a failure,
@@ -413,7 +467,7 @@ All cuts, A to H, go in one change (decided by Ries on 7-Nov-2026, § 9).
    asset bundles show as inserts by OdooBot. Question: do we add rules N1 to N4 to this change,
    and strip them from the stored rows in the purge? Recommended: yes, because each rule is a
    few lines in `oteny_audit`, loses no information, and the purge already rewrites 23,617 of
-   the 56,745 rows concerned.
+   the 56,745 rows concerned. **Decided by Ries on 7-Nov-2026: yes.**
 
 ## 10. Skill updates after the build
 
@@ -426,6 +480,12 @@ All cuts, A to H, go in one change (decided by Ries on 7-Nov-2026, § 9).
 - `oteny-audit/SKILL.md`, "Salary sub-models": reconciliation timelines are skipped per record;
   estimates and sandboxes stay audited for their creation, state and deletion.
 - otenydoo `oteny-oops` skill: `oteny.oops.log` is audit-ignored.
+- `oteny-audit/SKILL.md`, "How Changes Are Captured": an empty value of a field without a
+  default is left out of the insert snapshot (N1); `parent_path` is never logged (N2); the
+  `mail.message` delivery fields are ignored (N3); asset bundles join the per-record rule of
+  `ir.attachment` (N4).
+- `oteny-audit/SKILL.md`, "Automatic ORM Patching": a read-only field without a compute is
+  logged (cut I); the list of excluded fields and where each is declared.
 
 ## 11. Purge: remove the stored rows that the new coverage would not write
 
@@ -453,13 +513,17 @@ The purge applies the cuts to the rows that already exist, in this order:
    - H: `crewradar.salary.timeline` rows of a reconciliation. A live record is found by
      `type = 'reconciliation'`. A deleted one is found by the shape of its snapshot: the
      insert holds `reconciliation_estimate_timeline_id`, or the delete holds
-     `owner_timeline_id` (5,623 records in all).
+     `owner_timeline_id` (5,623 records in all);
+   - N4: `ir.attachment` snapshot rows whose `url` starts with `/web/assets/` (§ 12).
 4. **The fold** (cut E): each update row in the same transaction as the insert of its record
    (same `model_name`, `record_id`, `transaction_id`) goes into the insert snapshot: one
    `UPDATE` per insert row with `snapshot || jsonb_object_agg(field_name, {raw, display, label}
    ORDER BY id)`, so the last value of the transaction wins. The values in the update rows are
    already stripped and redacted. A parent ref of a folded row that the insert row lacks moves
-   to the insert row (3,051 refs on the backup). Then the folded rows are deleted.
+   to the insert row (3,051 refs on the backup). Then the folded rows are deleted. The same
+   `UPDATE` strips the noise of § 12 (N1 to N3) from the insert snapshot; an insert snapshot
+   that carries such a key but is no fold target gets its own `UPDATE` (33,128 rows on the
+   backup, estimated 260 MB of WAL and 8 seconds on the laptop, not measured).
 5. **The delete.** The refs of every row of steps 1 to 4, and every direct ref (cut F), go
    first; then the log rows. Deleting the refs first keeps the foreign key
    `oteny_audit_log_ref_audit_log_id_fkey` (`ON DELETE CASCADE`) from looking up each ref one
@@ -546,9 +610,10 @@ after the upgrade is wiser than a migration. It is, for four reasons:
   the release sets the cron active and calls `_trigger()` for the next 02:00. It writes no audit
   row and takes milliseconds.
 - **H stays in its own layer:** the SQL that finds reconciliation timelines knows the fields of
-  `crewradar.salary.timeline`, so `crewradar` adds it through a hook that the purge calls (for
-  example a method `_oteny_audit_purge_record_sql()` on the model that declares
-  `_oteny_audit_ignore_record`, returning the `WHERE` part over `oteny_audit_log`). The
+  `crewradar.salary.timeline`, so `crewradar` adds it through a hook that the purge calls: a
+  method `_oteny_audit_purge_record_sql()` on the model that declares
+  `_oteny_audit_ignore_record`, returning the `WHERE` part over `oteny_audit_log` (decided by
+  Ries on 7-Nov-2026). The
   `ir.attachment` and `mail.message` hooks in `oteny_audit` give theirs the same way. The purge
   itself names no model.
 - **The window between the upgrade and the night run is harmless.** The new code writes no new
@@ -582,7 +647,8 @@ after the upgrade is wiser than a migration. It is, for four reasons:
 
 ## 12. Noise inside the rows that stay
 
-Asked by Ries on 7-Nov-2026, from a screenshot of **Audit > Log**: an attachment insert shows
+Rules N1 to N4 are part of the build and of the purge (decided by Ries on 7-Nov-2026, § 9,
+question 6). Asked by Ries on 7-Nov-2026, from a screenshot of **Audit > Log**: an attachment insert shows
 "Stored Filename", "Resource Model", "Resource ID 0", "Is public document", "Url", and much of
 that looks like noise. This section looks at the fields inside a row (the keys of an insert
 snapshot, and the update rows of one field), not at whole models.
@@ -676,8 +742,8 @@ laptop): about 260 MB of WAL and 8 seconds more. Not measured.
 Attachments that still point to a wizard (10,499 on the backup). Most of them (8,382) are
 live chatter files that the email sender wizard never moved to its service; 2,117 are real
 orphans, and deleting them frees 122 MB, not 4.9 GB as first estimated here. Analysis and fix:
-riverflow `plans/wizard-attachments.md`.
+riverflow `plans/wizard-attachments.md`, built in riverflow 19.0.1.1407 on 7-Nov-2026.
 
 ## 13. Roadmap
 
-- [ ] **Fewer audit rows, the same clarity** (this plan): cuts A to H in one change (§ 3, § 8), rules N1 to N4 if question 6 says so (§ 12), and the one-shot night cron that purges the stored rows outside the coverage and runs `VACUUM FULL` (§ 11). Open: questions 4 and 6 of § 9.
+- [ ] **Fewer audit rows, the same clarity** (this plan): cuts A to I and the noise rules N1 to N4 in one change (§ 3, § 8, § 12), and the one-shot night cron that purges the stored rows outside the coverage and runs `VACUUM FULL` (§ 11). Design decided by Ries on 7-Nov-2026.

@@ -27,4 +27,5 @@ from . import res_partner
 from . import riverflow_oteny_bot
 from . import res_users
 from . import mail_thread
+from . import mail_thread_send_email
 from . import ir_attachment

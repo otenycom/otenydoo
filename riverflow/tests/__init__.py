@@ -43,3 +43,4 @@ from . import test_deadline_follows_appointment
 from . import test_offer_next_transition
 from . import test_radar_new_menu
 from . import test_wizard_uploads
+from . import test_chatter_send_email

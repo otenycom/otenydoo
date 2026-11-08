@@ -4,8 +4,10 @@
 the services on a top-level contact (§ 5 D); rivercreds for the credential wizard. Status:
 Ries set the structure on 8-Nov-2026 (§ 5) and answered four interviews (§ 4); no
 question is open. § 7 is the inventory of every kind of staff e-mail and its home. Goal
-(Ries, 8-Nov-2026): one plan with one style for every Send message function. Nothing is
-built. Basecamp:
+(Ries, 8-Nov-2026): one plan with one style for every Send message function. Built on
+8-Nov-2026 on `feat/send-message` (radar and otenydoo), § 9; test to-do
+[BC 10487893479](https://3.basecamp.com/5527227/buckets/38887735/todos/10487893479).
+Basecamp:
 [BC 10487142172](https://3.basecamp.com/5527227/buckets/38887735/todos/10487142172)
 (the messages that reached no one, training first).*
 
@@ -306,3 +308,44 @@ that the screen offers first.*
 ## 8. Open questions
 
 None. Q1 to Q12 were answered on 8-Nov-2026 (decisions 2 to 5 and 9 to 18).
+
+## 9. Build (8-Nov-2026, `feat/send-message`)
+
+What was built, by module:
+
+- **riverflow.** `email_kind` on `riverflow.transition.action` ("plain" or "document"; set on
+  Send Email Action). `models/mail_thread_send_email.py`: the mode per record
+  (`_riverflow_chatter_email_mode`, sent to the chatter as `riverflowEmailMode` with the ids
+  of the incoming e-mails), `action_riverflow_send_email`, `action_riverflow_reply` and the
+  fallback service. `riverflow.mail.send.mixin` holds the recipient rules for the Send Email
+  wizard and the reply wizard. New wizards `riverflow.mail.reply.wizard` and
+  `riverflow.send.email.choice`. The create mode of the transition wizard starts a new
+  record in the transition's from-state, so the fallback service is made only on Send.
+  Services on a top-level contact: `service_ids` and a Services tab with Add Service on
+  `res.partner`, for service readers. JS: `chatter_send_email_patch.js` (the button, the
+  Reply action, the guard on Odoo's Send message).
+- **rivercreds.** A credential is `note_only`; the credential wizard offers the pages of the
+  child services (`_chatter_services`).
+- **crewradar_sign, crewradar_cuneus_sign.** `email_kind` on Generate & Email (document),
+  Request Appointment (plain), Send Permit + Letter and Request Return (document), with a
+  post-migrate in 19.0.1.334 and 19.0.6.345.
+- **Tests.** `riverflow/tests/test_chatter_send_email.py` (10 tests); two tests in
+  `rivercreds/tests/test_credential_wizard.py`. The full suite ran with 0 failures; the one
+  oteny_bot error it found (the contact form read services for a user without service
+  rights) is fixed by the group on the Services tab.
+
+Where the build differs from § 5:
+
+- The flag is a selection `email_kind`, not a boolean `sends_email`, because decision 3
+  needs to know whether a transition sends a document.
+- Services on a contact live in riverflow, not crewradar: the Send Email button of a
+  contact needs them, and `res.partner` and the services are both riverflow's concern.
+- Edge case 4 (a state that the bot owns): the chatter lists the transitions that the form
+  header offers, so it follows the header's bot rules; no separate rule.
+- Odoo's Reply All and Forward open their own full composer; on a record with Send Email they
+  are hidden, so Send Email stays the one door (decision 1).
+- The fallback service takes the team of the service, else the writer's home team, because
+  the Send Email wizard requires a responsible team.
+- The chatter hides Odoo's Send message until the thread data says which button applies, so
+  the old button does not flash while a riverflow record loads.
+

@@ -2,6 +2,7 @@ from . import riverflow_transition_wizard
 from . import riverflow_service_wizard
 from . import riverflow_start_wizard
 from . import riverflow_start_service_wizard
+from . import riverflow_mail_send_mixin
 from . import riverflow_service_email_sender
 from . import riverflow_supplier_confirmed
 from . import riverflow_service_register_wizard
@@ -10,3 +11,5 @@ from . import riverflow_enter_train_ticket
 from . import riverflow_enter_distance_wizard
 from . import riverflow_set_deadline_tomorrow_wizard
 from . import riverflow_verify_trip_locations_wizard
+from . import riverflow_mail_reply_wizard
+from . import riverflow_send_email_choice

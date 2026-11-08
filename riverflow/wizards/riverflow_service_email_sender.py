@@ -13,6 +13,7 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
     _inherit = [
         "riverflow.service.wizard",
         "mail.render.mixin",
+        "riverflow.mail.send.mixin",
     ]
     _description = "Riverflow Service Email Sender Wizard"
 
@@ -257,10 +258,11 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
         """The service's followers as default recipients, unless the transition's
         action context has template_recipients_only: then only the template's own
         recipients get the e-mail (radar: the unpaid leave letter e-mails go to the
-        employee alone, not to the planner who follows the service)."""
+        employee alone, not to the planner who follows the service). The writer is
+        never a default recipient (plan chatter-send-message.md, decision 6)."""
         if self.env.context.get("template_recipients_only"):
             return self.env["res.partner"]
-        return service._get_default_recipients()
+        return self._riverflow_without_writer(service._get_default_recipients())
 
     def _render_recipients_from_template(self, service):
         if not self.mail_template_id:
@@ -389,51 +391,10 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
         if self.is_supply_order:
             recipient_ids = recipient_ids.union(self.supplier_partner_id)
 
-        if not recipient_ids:
-            raise UserError(_("Please select at least one recipient."))
-
-        # Check that all recipients have email addresses
-        recipients_without_email = recipient_ids.filtered(
-            lambda partner: not partner.email or not partner.email.strip()
-        )
-        if recipients_without_email:
-            partner_names = ", ".join(recipients_without_email.mapped("name"))
-            raise UserError(
-                _(
-                    "The following recipients do not have email addresses: %s. Please enter email addresses for these contacts."
-                )
-                % partner_names
-            )
+        self._riverflow_check_email_recipients(recipient_ids)
 
         # Use updatable content for sending
         safe_body = tools.html_sanitize(self.body_updatable)
-
-        allowed_domains = (
-            self.env["ir.config_parameter"]
-            .sudo()
-            .get_param("riverflow.restrict_email_recipients_to", "")
-            .split(",")
-        )
-        allowed_domains = [domain.strip().lower() for domain in allowed_domains if domain.strip()]
-
-        if allowed_domains:
-            invalid_recipients = recipient_ids.filtered(
-                lambda partner: partner.email
-                and not any(partner.email.lower().endswith(f"@{domain}") for domain in allowed_domains)
-            )
-
-            if invalid_recipients:
-                # TODO: change the recipient to the email of the current user
-                raise UserError(
-                    _(
-                        "Email sending is restricted to specific domains (%s). "
-                        "The following recipients have invalid email domains: %s"
-                    )
-                    % (
-                        ", ".join(allowed_domains),
-                        ", ".join(invalid_recipients.mapped("email_formatted")),
-                    )
-                )
 
         if not self.subject_updatable:
             raise ValueError(_("Subject is required"))

@@ -159,7 +159,14 @@ class TransitionWizard(models.AbstractModel):
             create_vals = {}
             if createNewRecord:
                 create_vals["workflow_id"] = transition.workflow_id.id
-                in_memory_record = self.env[self._workflow_model].new(create_vals)
+                # A start transition has no from-state. A transition that has one (the
+                # chatter's Send Email creates a Send Email service with its Send Email
+                # transition, plan chatter-send-message.md § 5 A) creates the record as if it
+                # stood in that state, so the state check below holds and the transition's
+                # own wizard runs once, on save.
+                in_memory_record = self.env[self._workflow_model].new(
+                    dict(create_vals, state_id=transition.from_state_id.id)
+                )
 
                 recordsToTransition = [in_memory_record]
 

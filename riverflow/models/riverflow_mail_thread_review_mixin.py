@@ -380,6 +380,11 @@ class MailThreadReviewMixin(models.AbstractModel):
         for record in self:
             record.unreviewed_message_count = len(record.unreviewed_message_ids)
 
+    def _riverflow_chatter_email_mode(self):
+        """Every record with this mixin replaces Send message by Send Email (plan
+        riverflow/plans/chatter-send-message.md, decision 1)."""
+        return "send_email"
+
     def action_mark_external_messages_reviewed(self):
         self.write({"last_external_message_review_time": fields.Datetime.now()})
         self._bus_send_unreviewed_message_count()

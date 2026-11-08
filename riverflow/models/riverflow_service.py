@@ -1299,6 +1299,23 @@ class Service(models.Model):
         for service in self:
             service.is_root_a_template = bool(service.root_id.is_this_a_template)
 
+    def _riverflow_email_service_defaults(self):
+        """The Send Email service of a service is its child service, with the same subject
+        (plan riverflow/plans/chatter-send-message.md, decision 2), as Add Service makes it."""
+        self.ensure_one()
+        return {
+            "default_parent_id": self.id,
+            "default_company_id": self.company_id.id,
+            "default_res_model": self.res_model,
+            "default_res_id": self.res_id,
+            "default_responsible_team_id": self._riverflow_email_responsible_team().id,
+        }
+
+    def _riverflow_email_responsible_team(self):
+        """The team of the service works the case, so it also reviews the reply; a service
+        without a team falls back to the writer's home team."""
+        return self.responsible_team_id or super()._riverflow_email_responsible_team()
+
     def _get_default_recipients(self):
         """Get default recipients for email templates based on active followers who receive comments"""
         self.ensure_one()

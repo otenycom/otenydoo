@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <!-- Send Email takes the place of Send message on a riverflow record and a contact; a
+         document record shows only Log note (plan riverflow/plans/chatter-send-message.md). -->
+    <t t-inherit="mail.Chatter" t-inherit-mode="extension">
+        <xpath expr="//button[hasclass('o-mail-Chatter-sendMessage')]" position="attributes">
+            <attribute name="t-if">!riverflowHidesSendMessage</attribute>
+        </xpath>
+        <xpath expr="//button[hasclass('o-mail-Chatter-sendMessage')]" position="before">
+            <button t-if="state.thread.riverflowEmailMode === 'send_email'"
+                class="o-riverflow-Chatter-sendEmail btn btn-primary text-nowrap me-1"
+                t-att-class="{ 'my-2': !props.compactHeight }"
+                t-att-disabled="!state.thread.canPostMessage and props.threadId"
+                title="Send an e-mail through the workflow: the e-mail transition of this state, a reply to the incoming e-mail, or a new Send Email service"
+                data-hotkey="m" t-on-click="onClickRiverflowSendEmail">
+                <i class="fa fa-envelope me-1" aria-hidden="true"/>Send Email
+            </button>
+        </xpath>
+    </t>
+</templates>

@@ -23,6 +23,7 @@
                             <field name="icon" on_change="1" />
                             <field name="icon_name_html" readonly="1" />
                             <field name="odoo_view" />
+                            <field name="email_kind" />
                         </group>
                     </group>
                 </sheet>
@@ -40,6 +41,7 @@
                 <field name="icon_name_html" />
                 <field name="name" optional="hide" />
                 <field name="description" />
+                <field name="email_kind" optional="show" />
             </list>
         </field>
     </record>

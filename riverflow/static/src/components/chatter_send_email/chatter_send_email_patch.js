@@ -50,9 +50,10 @@ patch(Chatter.prototype, {
     get riverflowHidesSendMessage() {
         const thread = this.state.thread;
         const mode = thread?.riverflowEmailMode;
-        // Until the thread data arrives the mode is unknown; showing Send message then
-        // flashes the old button on every riverflow record while it loads.
-        if (thread?.id && mode === undefined) {
+        // Until the thread has loaded the mode is unknown; showing Send message then
+        // flashes the old button on every riverflow record while it loads. Once loaded, an
+        // unknown mode (a server without this field) keeps Odoo's Send message.
+        if (thread?.id && mode === undefined && !thread.isLoaded) {
             return true;
         }
         return mode === "send_email" || mode === "note_only";

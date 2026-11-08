@@ -788,6 +788,14 @@ version bump: the other modules change Python attributes only).
   4 minutes; its end then rolled back on the cron write described above. After the fix, one more
   run did the VACUUM in 5 s, set the phase to `done` and switched the action off. The audit log
   of log entry 6809 (1,635 rows) answers in 0.07 s through the API.
+- **On production** (oteny_audit 19.0.1.724): started on 8-Nov-2026 at 15:10 UTC on Ries's
+  request instead of the night run, by setting the action's next run to now through the API
+  (production SSH is closed). The cron worker ran it to the end in about 2 minutes 10 seconds:
+  1,115,258 → 272,843 log rows and 1,495,271 → 233,706 refs; the VACUUM phase took about 6 s; the
+  phase is `done`, the action is off, no failure. The audit log of log entry 6809 (1,635 rows)
+  answers in 0.08 s through the API. The purge wrote 13 audit rows on its own parameters
+  `oteny_audit.purge_phase` and `oteny_audit.purge_next_id`, although `_purge_params()` says that
+  it writes them without an audit row.
 - **Tests:** oteny_audit 131 tests, 0 failed (new: `test_audit_coverage`, `test_audit_purge`;
   18 existing tests now write in a later transaction through `tests/common.py:end_transaction`,
   and the ref tests count no direct ref); crewradar `test_salary_timeline_audit`; riverflow

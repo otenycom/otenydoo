@@ -242,3 +242,59 @@ class TestChatterSendEmail(TransactionCase):
         wizard.action_save()
         self.assertEqual(company.service_ids.mapped("name"), ["Yearly confirmation"])
         self.assertFalse(person.service_ids)
+
+
+@tagged("post_install", "-at_install", "riverflow", "test_chatter_send_email")
+class TestFollowUpSubject(TransactionCase):
+    """A follow-up keeps its subject when the user switches the template (decision 20); a
+    first e-mail takes the subject of the template, as before."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        service_model = cls.env["ir.model"]._get("riverflow.service")
+        cls.workflow = cls.env["riverflow.workflow"].create({"model_id": service_model.id, "name": "Follow-up WF"})
+        cls.state_open = cls.env["riverflow.state"].create(
+            {"workflow_id": cls.workflow.id, "name": "Ordered", "sequence": 10}
+        )
+        cls.template_order = cls.env["mail.template"].create(
+            {"name": "Order", "model_id": service_model.id, "subject": "Order for the ship",
+             "body_html": "<p>Order body</p>"}
+        )
+        cls.template_blank = cls.env["mail.template"].create(
+            {"name": "Blank", "model_id": service_model.id, "subject": "", "body_html": "<p>Dear</p>"}
+        )
+        cls.transition = cls.env["riverflow.transition"].create(
+            {"name": "Re-order", "from_state_id": cls.state_open.id, "to_state_id": cls.state_open.id,
+             "action_id": cls.env.ref("riverflow.transition_action_email_sender").id,
+             "mail_template_id": cls.template_order.id}
+        )
+
+    def _form(self, service):
+        from odoo.tests import Form
+
+        action = service.with_context(transition_id=self.transition.id).action_button_click()
+        return Form(self.env[action["res_model"]].with_context(action["context"]))
+
+    def _service(self):
+        return self.env["riverflow.service"].create(
+            {"name": "Taxi order", "workflow_id": self.workflow.id, "state_id": self.state_open.id}
+        )
+
+    def test_follow_up_keeps_the_subject_on_a_template_switch(self):
+        service = self._service()
+        service.message_post(body="First order", subject="Order for the ship", message_type="comment",
+                             subtype_xmlid="mail.mt_comment")
+        form = self._form(service)
+        self.assertEqual(form.subject_updatable, "Order for the ship")
+        form.mail_template_id = self.template_blank
+        self.assertEqual(form.subject_updatable, "Order for the ship")
+        self.assertIn("Dear", form.body_updatable)
+
+    def test_first_email_takes_the_subject_of_the_new_template(self):
+        service = self._service()
+        form = self._form(service)
+        self.assertEqual(form.subject_updatable, "Order for the ship")
+        other = self.template_order.copy({"name": "Other", "subject": "Another subject"})
+        form.mail_template_id = other
+        self.assertEqual(form.subject_updatable, "Another subject")

@@ -79,6 +79,17 @@ class MailThread(models.AbstractModel):
             .sorted(lambda m: (m.date, m.id))
         )
 
+    def _riverflow_has_email_conversation(self):
+        """Whether an e-mail went out from this record or came in on it: a message of the
+        Discussions subtype, written as an e-mail or with Send message."""
+        self.ensure_one()
+        discussions = self.env.ref("mail.mt_comment")
+        return bool(
+            self.message_ids.filtered(
+                lambda m: m.message_type in ("email", "comment") and m.subtype_id == discussions
+            )
+        )
+
     def _riverflow_email_transitions(self):
         """The transitions offered from the current state whose action sends an e-mail.
 

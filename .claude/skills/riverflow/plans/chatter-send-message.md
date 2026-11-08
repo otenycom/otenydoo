@@ -170,6 +170,18 @@ when the workflow has an e-mail transition) did that; Ries replaced it with § 5
 18. **No new door to a root Send Email service.** Radar › New › New Service › Send Email
     stays the way for the rare e-mail without a record (§ 7 kind 10); the chatter of the
     record stays the first door.
+19. **The reply screen keeps the subject editable** (Ries, 8-Nov-2026). A reply comes back
+    into the same chatter whatever its subject, because Odoo routes an incoming e-mail by its
+    `References` and `In-Reply-To` headers (`mail_thread.py`, `message_route`). A new
+    subject does start a separate conversation in Outlook and Gmail, which group by subject;
+    the writer chooses that.
+20. **A follow-up keeps its subject when the template is switched** (Ries, 8-Nov-2026). When
+    the record already has an e-mail conversation, a template that the user picks in the
+    Send Email wizard brings its body but keeps the current subject, so the e-mail stays in
+    the recipient's conversation. The screen still opens with the subject of the
+    transition's own template, so a reminder keeps its "Reminder" subject. The user can
+    still edit the subject. Built in `riverflow.service.email.sender.wizard`
+    (`has_email_conversation`, `subject_filled`, `onchange_email_template_id`).
 
 ## 5. The structure (draft)
 

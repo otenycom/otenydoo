@@ -24,6 +24,12 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
     )
 
     subject = fields.Char(string="Subject")
+    # A follow-up in an e-mail conversation keeps its subject when the user switches the
+    # template, so the recipient's mail program keeps it in one conversation (plan
+    # riverflow/plans/chatter-send-message.md, decision 20). The transition's own template
+    # still fills the subject when the screen opens.
+    has_email_conversation = fields.Boolean(readonly=True)
+    subject_filled = fields.Boolean(help="Set once a template has filled the subject.")
     body = fields.Html(
         string="Body",
         sanitize=False,
@@ -141,6 +147,7 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
             default_recipients = self._followers_as_recipients(service)
             defaultValues["recipient_partner_ids"] = [Command.set(default_recipients.ids)]
             defaultValues["subject_updatable"] = service.name
+            defaultValues["has_email_conversation"] = service._riverflow_has_email_conversation()
 
         # Resolve the email template: transition-level overrides service-level.
         # This allows different email transitions in the same workflow to use
@@ -287,7 +294,9 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
                 template_recipients = self._render_recipients_from_template(service)
                 self.recipient_partner_ids = default_recipients | template_recipients
 
-            self.subject = self.mail_template_id.subject
+            keep_subject = self.has_email_conversation and self.subject_filled and self.subject_updatable
+            self.subject = self.subject_updatable if keep_subject else self.mail_template_id.subject
+            self.subject_filled = True
             self.body = self.mail_template_id.body_html
             self.render()
 

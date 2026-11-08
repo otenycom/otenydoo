@@ -9,7 +9,9 @@ migration switches on (question 5); fields that code writes but users cannot edi
 audited too, as cut I (question 4); the noise rules N1 to N4 are part of the build and of the
 purge (question 6). Built on 7-Nov-2026 and merged into otenydoo `main` and radar `dev` the
 same day (oteny_audit 19.0.1.723: the migration folder was renumbered from 19.0.1.712 above the
-versions of `main`); outcome in § 14. Not user-facing, so no Basecamp to-do.
+versions of `main`); outcome in § 14. On production since 8-Nov-2026 (radar `main` `1ba4fc8f2`,
+otenydoo `422b281`; oteny_audit 19.0.1.724); the scheduled action of the purge is on for its
+first run, 9-Nov-2026 at 01:00 UTC. Not user-facing, so no Basecamp to-do.
 
 ## 1. Why
 

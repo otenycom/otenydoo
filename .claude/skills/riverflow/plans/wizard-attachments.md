@@ -3,7 +3,8 @@
 Status: analysis done on 7-Nov-2026, read-only, on `crmain` restored from `~/Downloads/cr.zip`
 (production backup of 27-Oct-2026). Design decided by Ries on 7-Nov-2026 (§ 7). Built on
 7-Nov-2026 in riverflow 19.0.1.1407 (otenydoo `main`), verified on `cr-test` and `crmain`
-(§ 9). Not released yet. Basecamp: [BC 10487076751](https://3.basecamp.com/5527227/buckets/38887735/todos/10487076751).
+(§ 9). On production since 8-Nov-2026 (radar `main` `1ba4fc8f2`, otenydoo `422b281`;
+riverflow 19.0.1.1422). Basecamp: [BC 10487076751](https://3.basecamp.com/5527227/buckets/38887735/todos/10487076751).
 
 **Builds on its own** (Ries, 7-Nov-2026). This plan is about files, not about the audit log. No
 part of it depends on the audit plan (oteny-audit `plans/audit-storage-reduction.md`, where

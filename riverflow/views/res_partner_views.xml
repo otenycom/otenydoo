@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- Services on a top-level contact: Send Email in the contact's chatter makes a Send
+         Email service here, and Add Service starts any other (plan
+         riverflow/plans/chatter-send-message.md, § 5 D). A person of a company has no tab:
+         its services go on the company. -->
+    <record id="view_partner_form_riverflow_services" model="ir.ui.view">
+        <field name="name">res.partner.form.riverflow.services</field>
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="base.view_partner_form" />
+        <field name="arch" type="xml">
+            <xpath expr="//page[@name='internal_notes']" position="before">
+                <page name="riverflow_services" string="Services" invisible="parent_id"
+                    groups="riverflow.group_service_reader">
+                    <div class="d-flex align-items-center gap-2 mb-3">
+                        <button name="action_add_service" type="object" class="btn btn-primary"
+                            string="Add Service" icon="fa-plus" />
+                    </div>
+                    <field name="service_ids" readonly="1">
+                        <list create="0" delete="0" edit="0">
+                            <field name="is_end_state" column_invisible="1" />
+                            <field name="display_name" string="Service" />
+                            <field name="responsible_team_id" string="Responsible" optional="show" />
+                            <field name="transition_buttons_json" widget="transition_buttons" width="240px" optional="show" />
+                            <field name="state_id" optional="show" decoration-success="is_end_state" />
+                            <field name="deadline" optional="show" />
+                            <field name="write_date" string="Updated On" optional="hide" />
+                        </list>
+                    </field>
+                </page>
+            </xpath>
+        </field>
+    </record>
+</odoo>

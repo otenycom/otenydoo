@@ -4,8 +4,10 @@
 the services on a top-level contact (§ 5 D); rivercreds for the credential wizard. Status:
 Ries set the structure on 8-Nov-2026 (§ 5) and answered four interviews (§ 4); no
 question is open. § 7 is the inventory of every kind of staff e-mail and its home. Goal
-(Ries, 8-Nov-2026): one plan with one style for every Send message function. Nothing is
-built. Basecamp:
+(Ries, 8-Nov-2026): one plan with one style for every Send message function. Built on
+8-Nov-2026 on `feat/send-message` (radar and otenydoo), § 9; test to-do
+[BC 10487893479](https://3.basecamp.com/5527227/buckets/38887735/todos/10487893479).
+Basecamp:
 [BC 10487142172](https://3.basecamp.com/5527227/buckets/38887735/todos/10487142172)
 (the messages that reached no one, training first).*
 
@@ -108,9 +110,11 @@ when the workflow has an e-mail transition) did that; Ries replaced it with § 5
    service, a service on a log entry, an employee or a ship) and opens its Send Email wizard
    at once, with no recipient filled in. An error alone would send the user to Outlook, and
    the e-mail would not be on the Radar.
-3. **A plain e-mail next to a document transition.** When every e-mail transition of the
-   state sends a document (Send AUV), the button also offers the fallback service as
-   "Other e-mail", so a user can ask the skipper a question before the contract goes out.
+3. **No plain e-mail next to the workflow.** When the state has e-mail transitions, the
+   button offers only those, also when each of them sends a document (Send AUV). A user
+   has no reason to bypass the workflow, and no case shows the need. A user who needs
+   another e-mail adds a separate service (Ries, 9-Nov-2026; the first build offered an
+   "Other e-mail" here).
 4. **A reply marks the incoming e-mails up to the replied one as reviewed**, because the
    reply shows that the user read them.
 5. **Colleagues write a Log note with an @mention** on every riverflow record. The colleague
@@ -168,6 +172,18 @@ when the workflow has an e-mail transition) did that; Ries replaced it with § 5
 18. **No new door to a root Send Email service.** Radar › New › New Service › Send Email
     stays the way for the rare e-mail without a record (§ 7 kind 10); the chatter of the
     record stays the first door.
+19. **The reply screen keeps the subject editable** (Ries, 8-Nov-2026). A reply comes back
+    into the same chatter whatever its subject, because Odoo routes an incoming e-mail by its
+    `References` and `In-Reply-To` headers (`mail_thread.py`, `message_route`). A new
+    subject does start a separate conversation in Outlook and Gmail, which group by subject;
+    the writer chooses that.
+20. **A follow-up keeps its subject when the template is switched** (Ries, 8-Nov-2026). When
+    the record already has an e-mail conversation, a template that the user picks in the
+    Send Email wizard brings its body but keeps the current subject, so the e-mail stays in
+    the recipient's conversation. The screen still opens with the subject of the
+    transition's own template, so a reminder keeps its "Reminder" subject. The user can
+    still edit the subject. Built in `riverflow.service.email.sender.wizard`
+    (`has_email_conversation`, `subject_filled`, `onchange_email_template_id`).
 
 ## 5. The structure (draft)
 
@@ -187,8 +203,7 @@ transition of the current state, so the workflow records that it went out.
   one. With one transition it opens it at once.
 - With none (Collect Rijnvaartverklaring today, a log entry, an employee, a ship, a Done
   service of Arrange MFNL Notification), the button offers the fallback service
-  (decision 2). When every listed transition sends a document, the list also holds "Other
-  e-mail", the fallback service (decision 3).
+  (decision 2). With e-mail transitions, the list holds only those (decision 3).
 
 **B. An incoming e-mail exists: the reply.** An ad-hoc reply wizard sends the reply. It is
 not a transition: the state and the deadline stay as they are.
@@ -236,8 +251,8 @@ not a transition: the state and the deadline stay as they are.
 1. **Two or more e-mail transitions in one state** (Arrange Work Permit, Not Started:
    Request Appointment and Request Pickup): the button lists them, and the user picks one.
 2. **An e-mail transition that sends a document.** In Arrange AUV Contract, Not Started, the
-   only e-mail transition is Send AUV, which renders and sends the contract. A user who first
-   wants to ask the skipper a question picks "Other e-mail" (decision 3).
+   only e-mail transition is Send AUV, which renders and sends the contract. The button
+   opens Send AUV; it offers no plain e-mail next to it (decision 3).
 3. **A transition with a gate.** Send AUV refuses when a required field is empty. The chatter
    button then shows the same error as the header button. No new rule.
 4. **A state that the bot owns** (`is_owned_by_bot`, Arrange MFNL Notification): a person
@@ -306,3 +321,56 @@ that the screen offers first.*
 ## 8. Open questions
 
 None. Q1 to Q12 were answered on 8-Nov-2026 (decisions 2 to 5 and 9 to 18).
+
+## 9. Build (8-Nov-2026, `feat/send-message`)
+
+What was built, by module:
+
+- **riverflow.** The flag `sends_email` on `riverflow.transition.action` (set on Send Email
+  Action). `models/mail_thread_send_email.py`: the mode per record
+  (`_riverflow_chatter_email_mode`, sent to the chatter as `riverflowEmailMode` with the ids
+  of the incoming e-mails), `action_riverflow_send_email`, `action_riverflow_reply` and the
+  fallback service. `riverflow.mail.send.mixin` holds the recipient rules for the Send Email
+  wizard and the reply wizard. New wizards `riverflow.mail.reply.wizard` and
+  `riverflow.send.email.choice`. The create mode of the transition wizard starts a new
+  record in the transition's from-state, so the fallback service is made only on Send.
+  Services on a top-level contact: `service_ids` and a Services tab with Add Service on
+  `res.partner`, for service readers. JS: `chatter_send_email_patch.js` (the button, the
+  Reply action, the guard on Odoo's Send message).
+- **rivercreds.** A credential is `note_only`; the credential wizard offers the pages of the
+  child services (`_chatter_services`).
+- **crewradar_sign, crewradar_cuneus_sign.** `sends_email` on Generate & Email, Request
+  Appointment, Send Permit + Letter and Request Return, with a post-migrate in 19.0.1.337
+  and 19.0.6.348 (the records are noupdate).
+- **Tests.** `riverflow/tests/test_chatter_send_email.py` (10 tests); two tests in
+  `rivercreds/tests/test_credential_wizard.py`. The full suite ran with 0 failures; the one
+  oteny_bot error it found (the contact form read services for a user without service
+  rights) is fixed by the group on the Services tab.
+
+Where the build differs from § 5:
+
+- The first build had a selection `email_kind` ("plain" or "document") for the first
+  decision 3. The revised decision 3 (9-Nov-2026) made "document" change no behaviour, so
+  the flag became the boolean `sends_email` of § 5 A.
+- Services on a contact live in riverflow, not crewradar: the Send Email button of a
+  contact needs them, and `res.partner` and the services are both riverflow's concern.
+- Edge case 4 (a state that the bot owns): the chatter lists the transitions that the form
+  header offers, so it follows the header's bot rules; no separate rule.
+- Odoo's Reply All and Forward open their own full composer; on a record with Send Email they
+  are hidden, so Send Email stays the one door (decision 1).
+- The fallback service takes the team of the service, else the writer's home team, because
+  the Send Email wizard requires a responsible team.
+- The fallback service skips the Start transition of Send Email, so it also applies the action
+  context of Start (`riverflow.trans_se_1`). The service then starts as Add Service starts it:
+  in crewradar with the template Blank Email (9-Nov-2026, Ries: a contact's Send Email opened
+  with an empty Template).
+- A change of the team or the deadline on the Send Email screen renders the template again,
+  because the text can show them (the signature names the team). Before 9-Nov-2026 this
+  overwrote a subject and a text that the user had typed. The screen now remembers what it
+  rendered last (`subject_last_rendered`, `body_last_rendered`) and renders again only what
+  the user did not change; the text is compared without its markup, because the HTML editor
+  rewrites inline styles. Cost: an edited text keeps the signature of the team before the
+  change. A template switch still replaces the text.
+- The chatter hides Odoo's Send message until the thread data says which button applies, so
+  the old button does not flash while a riverflow record loads.
+

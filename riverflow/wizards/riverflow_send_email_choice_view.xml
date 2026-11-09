@@ -1,0 +1,20 @@
+<odoo>
+    <record id="view_send_email_choice_form" model="ir.ui.view">
+        <field name="name">riverflow.send.email.choice.form</field>
+        <field name="model">riverflow.send.email.choice</field>
+        <field name="arch" type="xml">
+            <form string="Send Email">
+                <sheet>
+                    <field name="res_model" invisible="1" />
+                    <field name="res_id" invisible="1" />
+                    <field name="transition_ids" invisible="1" />
+                    <p class="text-muted">Choose the e-mail to send. The transition records in the workflow that it went out.</p>
+                    <field name="transition_buttons_json" widget="transition_buttons" style="width: 100%" />
+                </sheet>
+                <footer>
+                    <button string="Cancel" class="btn-secondary" special="cancel" data-hotkey="x" />
+                </footer>
+            </form>
+        </field>
+    </record>
+</odoo>

@@ -231,6 +231,8 @@ Actions executed when a transition occurs:
 | `transition_action_register_service` | Register for billing |
 | `transition_action_supplier_confirmed` | Mark supplier confirmation |
 
+An action whose wizard sends e-mail sets `sends_email`. The chatter's Send Email offers those transitions from the current state; see plan [chatter-send-message.md](plans/chatter-send-message.md).
+
 ### Transition Action Context
 
 The `action_context` Text field on `riverflow.transition` stores a Python dict literal that is parsed by `_prepare_action_context()` in `riverflow.transition.mixin` and merged into the wizard context. This allows per-transition configuration without custom wizard subclasses.

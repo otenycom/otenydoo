@@ -52,6 +52,10 @@
                     </group>
                     <group colspan="2">
                         <field name="subject_updatable" required="1" />
+                        <field name="has_email_conversation" invisible="1" force_save="1" />
+                        <field name="subject_filled" invisible="1" force_save="1" />
+                        <field name="subject_last_rendered" invisible="1" />
+                        <field name="body_last_rendered" invisible="1" />
                     </group>
                     <notebook>
                         <page string="Message" name="message">

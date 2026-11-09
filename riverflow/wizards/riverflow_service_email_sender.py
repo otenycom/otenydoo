@@ -13,6 +13,7 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
     _inherit = [
         "riverflow.service.wizard",
         "mail.render.mixin",
+        "riverflow.mail.send.mixin",
     ]
     _description = "Riverflow Service Email Sender Wizard"
 
@@ -23,6 +24,12 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
     )
 
     subject = fields.Char(string="Subject")
+    # A follow-up in an e-mail conversation keeps its subject when the user switches the
+    # template, so the recipient's mail program keeps it in one conversation (plan
+    # riverflow/plans/chatter-send-message.md, decision 20). The transition's own template
+    # still fills the subject when the screen opens.
+    has_email_conversation = fields.Boolean(readonly=True)
+    subject_filled = fields.Boolean(help="Set once a template has filled the subject.")
     body = fields.Html(
         string="Body",
         sanitize=False,
@@ -69,6 +76,13 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
         store=True,
         sanitize=False,
     )
+
+    # The subject and the text as the template rendered them last. A subject_updatable or
+    # a body_updatable that differs from them holds the user's own text, which a change of
+    # the team or the deadline must not overwrite (plan riverflow/plans/
+    # chatter-send-message.md, § 9).
+    subject_last_rendered = fields.Char()
+    body_last_rendered = fields.Html(sanitize=False)
 
     attachment_ids = fields.Many2many(
         "ir.attachment",
@@ -140,6 +154,7 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
             default_recipients = self._followers_as_recipients(service)
             defaultValues["recipient_partner_ids"] = [Command.set(default_recipients.ids)]
             defaultValues["subject_updatable"] = service.name
+            defaultValues["has_email_conversation"] = service._riverflow_has_email_conversation()
 
         # Resolve the email template: transition-level overrides service-level.
         # This allows different email transitions in the same workflow to use
@@ -212,6 +227,7 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
                 # Update editable fields when template changes
                 wizard.subject_updatable = wizard.subject
                 wizard.body_updatable = wizard.body
+                wizard._remember_rendered_content()
                 continue
 
             service = wizard.records_to_transition_ids[0]
@@ -243,6 +259,7 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
                 wizard.subject_updatable = wizard.subject_rendered
             if wizard.body_rendered:
                 wizard.body_updatable = wizard.body_rendered
+            wizard._remember_rendered_content()
 
     @api.depends("subject_rendered", "body_rendered", "subject", "body")
     def _compute_updatable_content(self):
@@ -252,15 +269,34 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
                 wizard.subject_updatable = wizard.subject_rendered
             if not wizard.body_updatable or wizard.body != wizard._origin.body:
                 wizard.body_updatable = wizard.body_rendered
+            wizard._remember_rendered_content()
+
+    def _remember_rendered_content(self):
+        self.subject_last_rendered = self.subject_updatable
+        self.body_last_rendered = self.body_updatable
+
+    def _edited_content(self):
+        """The subject and the text that the user changed after the last render. The text
+        is compared without its markup, because the HTML editor rewrites the markup (inline
+        styles) without a change by the user."""
+        edited = {}
+        if self.subject_updatable and self.subject_updatable != self.subject_last_rendered:
+            edited["subject_updatable"] = self.subject_updatable
+        if self.body_updatable and tools.html2plaintext(self.body_updatable) != tools.html2plaintext(
+            self.body_last_rendered or ""
+        ):
+            edited["body_updatable"] = self.body_updatable
+        return edited
 
     def _followers_as_recipients(self, service):
         """The service's followers as default recipients, unless the transition's
         action context has template_recipients_only: then only the template's own
         recipients get the e-mail (radar: the unpaid leave letter e-mails go to the
-        employee alone, not to the planner who follows the service)."""
+        employee alone, not to the planner who follows the service). The writer is
+        never a default recipient (plan chatter-send-message.md, decision 6)."""
         if self.env.context.get("template_recipients_only"):
             return self.env["res.partner"]
-        return service._get_default_recipients()
+        return self._riverflow_without_writer(service._get_default_recipients())
 
     def _render_recipients_from_template(self, service):
         if not self.mail_template_id:
@@ -285,7 +321,9 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
                 template_recipients = self._render_recipients_from_template(service)
                 self.recipient_partner_ids = default_recipients | template_recipients
 
-            self.subject = self.mail_template_id.subject
+            keep_subject = self.has_email_conversation and self.subject_filled and self.subject_updatable
+            self.subject = self.subject_updatable if keep_subject else self.mail_template_id.subject
+            self.subject_filled = True
             self.body = self.mail_template_id.body_html
             self.render()
 
@@ -297,7 +335,11 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
         "supply_order_instructions",
     )
     def onchange_supply_fields(self):
+        """The text can show these fields (the signature names the team), so the template
+        renders again. A subject or a text that the user changed stays as typed."""
+        edited = self._edited_content()
         self.render()
+        self.update(edited)
 
     def _get_render_context(self, service, vals):
         res_id = vals.get("res_id") or service.res_id
@@ -389,51 +431,10 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
         if self.is_supply_order:
             recipient_ids = recipient_ids.union(self.supplier_partner_id)
 
-        if not recipient_ids:
-            raise UserError(_("Please select at least one recipient."))
-
-        # Check that all recipients have email addresses
-        recipients_without_email = recipient_ids.filtered(
-            lambda partner: not partner.email or not partner.email.strip()
-        )
-        if recipients_without_email:
-            partner_names = ", ".join(recipients_without_email.mapped("name"))
-            raise UserError(
-                _(
-                    "The following recipients do not have email addresses: %s. Please enter email addresses for these contacts."
-                )
-                % partner_names
-            )
+        self._riverflow_check_email_recipients(recipient_ids)
 
         # Use updatable content for sending
         safe_body = tools.html_sanitize(self.body_updatable)
-
-        allowed_domains = (
-            self.env["ir.config_parameter"]
-            .sudo()
-            .get_param("riverflow.restrict_email_recipients_to", "")
-            .split(",")
-        )
-        allowed_domains = [domain.strip().lower() for domain in allowed_domains if domain.strip()]
-
-        if allowed_domains:
-            invalid_recipients = recipient_ids.filtered(
-                lambda partner: partner.email
-                and not any(partner.email.lower().endswith(f"@{domain}") for domain in allowed_domains)
-            )
-
-            if invalid_recipients:
-                # TODO: change the recipient to the email of the current user
-                raise UserError(
-                    _(
-                        "Email sending is restricted to specific domains (%s). "
-                        "The following recipients have invalid email domains: %s"
-                    )
-                    % (
-                        ", ".join(allowed_domains),
-                        ", ".join(invalid_recipients.mapped("email_formatted")),
-                    )
-                )
 
         if not self.subject_updatable:
             raise ValueError(_("Subject is required"))

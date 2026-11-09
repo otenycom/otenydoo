@@ -26,6 +26,14 @@ class RiverflowTransitionAction(models.Model):
 
     odoo_view = fields.Text("Odoo View", help="Odoo wizard form-view")
 
+    # The chatter's Send Email button lists the transitions whose action sends an e-mail
+    # (plan riverflow/plans/chatter-send-message.md, § 5 A).
+    sends_email = fields.Boolean(
+        string="Sends E-mail",
+        help="Set when the wizard of this action sends an e-mail. The chatter's Send Email "
+        "button offers the transitions with such an action from the current state.",
+    )
+
     # Upgrade to Odoo 19 constraint style
     _name_uniq = models.Constraint(
         "unique (name)",

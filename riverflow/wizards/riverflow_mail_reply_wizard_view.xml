@@ -1,0 +1,32 @@
+<odoo>
+    <record id="view_mail_reply_wizard_form" model="ir.ui.view">
+        <field name="name">riverflow.mail.reply.wizard.form</field>
+        <field name="model">riverflow.mail.reply.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Reply">
+                <sheet>
+                    <field name="res_model" invisible="1" />
+                    <field name="res_id" invisible="1" />
+                    <field name="parent_message_id" invisible="1" />
+                    <group>
+                        <field name="recipient_partner_ids" widget="many2many_tags_email"
+                            placeholder="Who gets the reply" required="1"
+                            options="{'no_create': True}" />
+                        <field name="subject" required="1" />
+                    </group>
+                    <field name="body" class="o-riverflow-reply-body" placeholder="Write your reply..."
+                        options="{'height': 200}" />
+                    <field name="attachment_ids" widget="many2many_binary" string="Attach a file" />
+                    <details class="mt-3">
+                        <summary class="text-muted">The e-mail you reply to</summary>
+                        <field name="parent_message_body" readonly="1" class="mt-2" />
+                    </details>
+                </sheet>
+                <footer>
+                    <button string="Send" name="action_send" type="object" class="btn-primary" data-hotkey="q" />
+                    <button string="Cancel" class="btn-secondary" special="cancel" data-hotkey="x" />
+                </footer>
+            </form>
+        </field>
+    </record>
+</odoo>

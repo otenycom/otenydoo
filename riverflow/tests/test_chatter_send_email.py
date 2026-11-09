@@ -31,7 +31,7 @@ class TestChatterSendEmail(TransactionCase):
                 "description": "Renders and e-mails a document",
                 "odoo_view": "view_service_email_sender_form",
                 "model_id": service_model.id,
-                "email_kind": "document",
+                "sends_email": True,
             }
         )
         cls.workflow = cls.env["riverflow.workflow"].create({"model_id": service_model.id, "name": "Chatter Mail WF"})
@@ -67,7 +67,7 @@ class TestChatterSendEmail(TransactionCase):
             {"name": "Mail B", "from_state_id": cls.state_two.id, "to_state_id": cls.state_end.id,
              "action_id": cls.document_action.id, "sequence": 20}
         )
-        Transition.create(
+        cls.trans_doc = Transition.create(
             {"name": "Send contract", "from_state_id": cls.state_doc.id, "to_state_id": cls.state_end.id,
              "action_id": cls.document_action.id}
         )
@@ -124,23 +124,18 @@ class TestChatterSendEmail(TransactionCase):
         self.assertEqual(action["res_model"], "riverflow.service.email.sender.wizard")
         self.assertEqual(action["context"]["transition_id"], self.trans_one.id)
 
-    def test_two_transitions_open_the_choice_without_other_email(self):
+    def test_two_transitions_open_the_choice(self):
         action = self._service(self.state_two).action_riverflow_send_email()
         choice = self.env["riverflow.send.email.choice"].browse(action["res_id"])
         self.assertEqual(choice.transition_ids.mapped("name"), ["Mail A", "Mail B"])
-        self.assertFalse(choice.offer_other_email)
         captions = [b["caption"] for b in choice.transition_buttons_json["buttons"]]
         self.assertEqual(captions, ["Mail A", "Mail B"])
 
-    def test_document_transition_also_offers_other_email(self):
+    def test_one_document_transition_opens_it_without_a_plain_e_mail(self):
         service = self._service(self.state_doc)
         action = service.action_riverflow_send_email()
-        choice = self.env["riverflow.send.email.choice"].browse(action["res_id"])
-        self.assertTrue(choice.offer_other_email)
-        captions = [b["caption"] for b in choice.transition_buttons_json["buttons"]]
-        self.assertEqual(captions, ["Send contract", "Other e-mail"])
-        fallback = choice.action_other_email()
-        self.assertEqual(fallback["context"]["default_parent_id"], service.id)
+        self.assertEqual(action["context"]["transition_id"], self.trans_doc.id)
+        self.assertFalse(service.child_ids, "No Send Email service next to the workflow")
 
     # ---- the fallback service --------------------------------------------------------
 

@@ -12,7 +12,7 @@
         <field name="description">Sends an email related to the service</field>
         <field name="odoo_view">view_service_email_sender_form</field>
         <field name="model_id" ref="riverflow.model_riverflow_service" />
-        <field name="email_kind">plain</field>
+        <field name="sends_email" eval="True" />
     </record>
 
     <record id="transition_action_supplier_confirmed" model="riverflow.transition.action">

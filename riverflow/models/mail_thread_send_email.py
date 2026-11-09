@@ -47,7 +47,7 @@ class MailThread(models.AbstractModel):
             return self._riverflow_reply_action(incoming[-1])
 
         transitions = self._riverflow_email_transitions()
-        if len(transitions) == 1 and transitions.action_id.email_kind == "plain":
+        if len(transitions) == 1:
             return self._riverflow_open_email_transition(transitions)
         if transitions:
             return self._riverflow_email_choice_action(transitions)
@@ -105,21 +105,18 @@ class MailThread(models.AbstractModel):
             for button in buttons
             if (button.get("context") or {}).get("transition_id")
         ]
-        return Transition.browse(transition_ids).filtered(lambda t: t.action_id.email_kind)
+        return Transition.browse(transition_ids).filtered(lambda t: t.action_id.sends_email)
 
     def _riverflow_open_email_transition(self, transition):
         return self.with_context(transition_id=transition.id).action_button_click()
 
     def _riverflow_email_choice_action(self, transitions):
-        """A screen with the e-mail transitions; with "Other e-mail" when each of them sends
-        a document (decision 3)."""
-        offer_other_email = all(t.action_id.email_kind == "document" for t in transitions)
+        """A screen with the e-mail transitions of the current state."""
         choice = self.env["riverflow.send.email.choice"].create(
             {
                 "res_model": self._name,
                 "res_id": self.id,
                 "transition_ids": [(6, 0, transitions.ids)],
-                "offer_other_email": offer_other_email,
             }
         )
         return {

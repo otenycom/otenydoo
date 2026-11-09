@@ -8,7 +8,6 @@
                     <field name="res_model" invisible="1" />
                     <field name="res_id" invisible="1" />
                     <field name="transition_ids" invisible="1" />
-                    <field name="offer_other_email" invisible="1" />
                     <p class="text-muted">Choose the e-mail to send. The transition records in the workflow that it went out.</p>
                     <field name="transition_buttons_json" widget="transition_buttons" style="width: 100%" />
                 </sheet>

@@ -110,9 +110,11 @@ when the workflow has an e-mail transition) did that; Ries replaced it with § 5
    service, a service on a log entry, an employee or a ship) and opens its Send Email wizard
    at once, with no recipient filled in. An error alone would send the user to Outlook, and
    the e-mail would not be on the Radar.
-3. **A plain e-mail next to a document transition.** When every e-mail transition of the
-   state sends a document (Send AUV), the button also offers the fallback service as
-   "Other e-mail", so a user can ask the skipper a question before the contract goes out.
+3. **No plain e-mail next to the workflow.** When the state has e-mail transitions, the
+   button offers only those, also when each of them sends a document (Send AUV). A user
+   has no reason to bypass the workflow, and no case shows the need. A user who needs
+   another e-mail adds a separate service (Ries, 9-Nov-2026; the first build offered an
+   "Other e-mail" here).
 4. **A reply marks the incoming e-mails up to the replied one as reviewed**, because the
    reply shows that the user read them.
 5. **Colleagues write a Log note with an @mention** on every riverflow record. The colleague
@@ -201,8 +203,7 @@ transition of the current state, so the workflow records that it went out.
   one. With one transition it opens it at once.
 - With none (Collect Rijnvaartverklaring today, a log entry, an employee, a ship, a Done
   service of Arrange MFNL Notification), the button offers the fallback service
-  (decision 2). When every listed transition sends a document, the list also holds "Other
-  e-mail", the fallback service (decision 3).
+  (decision 2). With e-mail transitions, the list holds only those (decision 3).
 
 **B. An incoming e-mail exists: the reply.** An ad-hoc reply wizard sends the reply. It is
 not a transition: the state and the deadline stay as they are.
@@ -250,8 +251,8 @@ not a transition: the state and the deadline stay as they are.
 1. **Two or more e-mail transitions in one state** (Arrange Work Permit, Not Started:
    Request Appointment and Request Pickup): the button lists them, and the user picks one.
 2. **An e-mail transition that sends a document.** In Arrange AUV Contract, Not Started, the
-   only e-mail transition is Send AUV, which renders and sends the contract. A user who first
-   wants to ask the skipper a question picks "Other e-mail" (decision 3).
+   only e-mail transition is Send AUV, which renders and sends the contract. The button
+   opens Send AUV; it offers no plain e-mail next to it (decision 3).
 3. **A transition with a gate.** Send AUV refuses when a required field is empty. The chatter
    button then shows the same error as the header button. No new rule.
 4. **A state that the bot owns** (`is_owned_by_bot`, Arrange MFNL Notification): a person
@@ -325,8 +326,8 @@ None. Q1 to Q12 were answered on 8-Nov-2026 (decisions 2 to 5 and 9 to 18).
 
 What was built, by module:
 
-- **riverflow.** `email_kind` on `riverflow.transition.action` ("plain" or "document"; set on
-  Send Email Action). `models/mail_thread_send_email.py`: the mode per record
+- **riverflow.** The flag `sends_email` on `riverflow.transition.action` (set on Send Email
+  Action). `models/mail_thread_send_email.py`: the mode per record
   (`_riverflow_chatter_email_mode`, sent to the chatter as `riverflowEmailMode` with the ids
   of the incoming e-mails), `action_riverflow_send_email`, `action_riverflow_reply` and the
   fallback service. `riverflow.mail.send.mixin` holds the recipient rules for the Send Email
@@ -338,9 +339,9 @@ What was built, by module:
   Reply action, the guard on Odoo's Send message).
 - **rivercreds.** A credential is `note_only`; the credential wizard offers the pages of the
   child services (`_chatter_services`).
-- **crewradar_sign, crewradar_cuneus_sign.** `email_kind` on Generate & Email (document),
-  Request Appointment (plain), Send Permit + Letter and Request Return (document), with a
-  post-migrate in 19.0.1.334 and 19.0.6.345.
+- **crewradar_sign, crewradar_cuneus_sign.** `sends_email` on Generate & Email, Request
+  Appointment, Send Permit + Letter and Request Return, with a post-migrate in 19.0.1.337
+  and 19.0.6.348 (the records are noupdate).
 - **Tests.** `riverflow/tests/test_chatter_send_email.py` (10 tests); two tests in
   `rivercreds/tests/test_credential_wizard.py`. The full suite ran with 0 failures; the one
   oteny_bot error it found (the contact form read services for a user without service
@@ -348,8 +349,9 @@ What was built, by module:
 
 Where the build differs from § 5:
 
-- The flag is a selection `email_kind`, not a boolean `sends_email`, because decision 3
-  needs to know whether a transition sends a document.
+- The first build had a selection `email_kind` ("plain" or "document") for the first
+  decision 3. The revised decision 3 (9-Nov-2026) made "document" change no behaviour, so
+  the flag became the boolean `sends_email` of § 5 A.
 - Services on a contact live in riverflow, not crewradar: the Send Email button of a
   contact needs them, and `res.partner` and the services are both riverflow's concern.
 - Edge case 4 (a state that the bot owns): the chatter lists the transitions that the form

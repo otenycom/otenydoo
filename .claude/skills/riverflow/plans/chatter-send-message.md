@@ -360,6 +360,17 @@ Where the build differs from § 5:
   are hidden, so Send Email stays the one door (decision 1).
 - The fallback service takes the team of the service, else the writer's home team, because
   the Send Email wizard requires a responsible team.
+- The fallback service skips the Start transition of Send Email, so it also applies the action
+  context of Start (`riverflow.trans_se_1`). The service then starts as Add Service starts it:
+  in crewradar with the template Blank Email (9-Nov-2026, Ries: a contact's Send Email opened
+  with an empty Template).
+- A change of the team or the deadline on the Send Email screen renders the template again,
+  because the text can show them (the signature names the team). Before 9-Nov-2026 this
+  overwrote a subject and a text that the user had typed. The screen now remembers what it
+  rendered last (`subject_last_rendered`, `body_last_rendered`) and renders again only what
+  the user did not change; the text is compared without its markup, because the HTML editor
+  rewrites inline styles. Cost: an edited text keeps the signature of the team before the
+  change. A template switch still replaces the text.
 - The chatter hides Odoo's Send message until the thread data says which button applies, so
   the old button does not flash while a riverflow record loads.
 

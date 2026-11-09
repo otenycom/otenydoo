@@ -149,10 +149,18 @@ class MailThread(models.AbstractModel):
 
         The service is made only when the user sends (the create mode of the transition
         wizard), so a cancel leaves no service behind. Its name becomes the e-mail
-        subject, and its "To" starts empty."""
+        subject, and its "To" starts empty. The screen skips the workflow's Start
+        transition, so the action context of Start applies here too: the service starts as
+        Add Service starts it, for example with the default template of the app."""
+        start = self.env.ref("riverflow.trans_se_1")
         transition = self.env.ref("riverflow.trans_se_3")
-        context = dict(self._riverflow_email_service_defaults(), transition_id=transition.id)
-        starter = self.env["riverflow.start.service"].with_context(**context).create({})
+        Starter = self.env["riverflow.start.service"]
+        context = dict(
+            Starter._prepare_action_context(start),
+            **self._riverflow_email_service_defaults(),
+            transition_id=transition.id,
+        )
+        starter = Starter.with_context(**context).create({})
         return starter.with_context(**context)._prepare_transition_action()
 
     def _riverflow_reply_action(self, message):

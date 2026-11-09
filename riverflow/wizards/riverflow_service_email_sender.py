@@ -77,6 +77,13 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
         sanitize=False,
     )
 
+    # The subject and the text as the template rendered them last. A subject_updatable or
+    # a body_updatable that differs from them holds the user's own text, which a change of
+    # the team or the deadline must not overwrite (plan riverflow/plans/
+    # chatter-send-message.md, § 9).
+    subject_last_rendered = fields.Char()
+    body_last_rendered = fields.Html(sanitize=False)
+
     attachment_ids = fields.Many2many(
         "ir.attachment",
         "riverflow_service_mail_attachments_rel",
@@ -220,6 +227,7 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
                 # Update editable fields when template changes
                 wizard.subject_updatable = wizard.subject
                 wizard.body_updatable = wizard.body
+                wizard._remember_rendered_content()
                 continue
 
             service = wizard.records_to_transition_ids[0]
@@ -251,6 +259,7 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
                 wizard.subject_updatable = wizard.subject_rendered
             if wizard.body_rendered:
                 wizard.body_updatable = wizard.body_rendered
+            wizard._remember_rendered_content()
 
     @api.depends("subject_rendered", "body_rendered", "subject", "body")
     def _compute_updatable_content(self):
@@ -260,6 +269,24 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
                 wizard.subject_updatable = wizard.subject_rendered
             if not wizard.body_updatable or wizard.body != wizard._origin.body:
                 wizard.body_updatable = wizard.body_rendered
+            wizard._remember_rendered_content()
+
+    def _remember_rendered_content(self):
+        self.subject_last_rendered = self.subject_updatable
+        self.body_last_rendered = self.body_updatable
+
+    def _edited_content(self):
+        """The subject and the text that the user changed after the last render. The text
+        is compared without its markup, because the HTML editor rewrites the markup (inline
+        styles) without a change by the user."""
+        edited = {}
+        if self.subject_updatable and self.subject_updatable != self.subject_last_rendered:
+            edited["subject_updatable"] = self.subject_updatable
+        if self.body_updatable and tools.html2plaintext(self.body_updatable) != tools.html2plaintext(
+            self.body_last_rendered or ""
+        ):
+            edited["body_updatable"] = self.body_updatable
+        return edited
 
     def _followers_as_recipients(self, service):
         """The service's followers as default recipients, unless the transition's
@@ -308,7 +335,11 @@ class RiverflowServiceEmailSenderWizard(models.TransientModel):
         "supply_order_instructions",
     )
     def onchange_supply_fields(self):
+        """The text can show these fields (the signature names the team), so the template
+        renders again. A subject or a text that the user changed stays as typed."""
+        edited = self._edited_content()
         self.render()
+        self.update(edited)
 
     def _get_render_context(self, service, vals):
         res_id = vals.get("res_id") or service.res_id

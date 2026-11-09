@@ -168,6 +168,32 @@ class TestChatterSendEmail(TransactionCase):
         self.assertEqual(sent.partner_ids, self.client)
         self.assertIn(self.client, child.message_partner_ids, "The recipient follows the new service")
 
+    def test_fallback_service_starts_with_the_template_of_start(self):
+        template = self.env["mail.template"].create(
+            {
+                "name": "Plain Letter",
+                "model_id": self.env["ir.model"]._get("riverflow.service").id,
+                "subject": "",
+                "body_html": "<p>Dear </p>",
+            }
+        )
+        self.env.ref("riverflow.trans_se_1").action_context = f"{{'default_mail_template_id': {template.id}}}"
+        service = self._service(self.state_quiet)
+        action = service.action_riverflow_send_email()
+        wizard = self.env[action["res_model"]].with_context(action["context"]).create({})
+        self.assertEqual(wizard.mail_template_id, template, "The screen opens with the template of Start")
+
+        wizard.write(
+            {
+                "recipient_partner_ids": [(6, 0, self.client.ids)],
+                "subject_updatable": "Typed subject",
+                "body_updatable": "<p>Dear client</p>",
+            }
+        )
+        wizard.action_save()
+        self.assertEqual(service.child_ids.mail_template_id, template)
+        self.assertEqual(service.child_ids.name, "Typed subject")
+
     # ---- the writer is never a recipient ---------------------------------------------
 
     def test_writer_is_no_default_recipient(self):
@@ -293,3 +319,31 @@ class TestFollowUpSubject(TransactionCase):
         other = self.template_order.copy({"name": "Other", "subject": "Another subject"})
         form.mail_template_id = other
         self.assertEqual(form.subject_updatable, "Another subject")
+
+    # ---- a change of the team renders again, and keeps the user's own text -----------
+
+    def _team_form(self):
+        template = self.template_order.copy(
+            {"name": "Team", "body_html": '<p>Dear</p><p>Team <t t-out="object.responsible_team_id.name"/></p>'}
+        )
+        self.transition.mail_template_id = template
+        form = self._form(self._service())
+        form.responsible_team_id = self.env.ref("riverflow.team_logistics").partner_id
+        return form
+
+    def test_team_change_renders_an_untouched_text_again(self):
+        form = self._team_form()
+        self.assertIn(self.env.ref("riverflow.team_logistics").partner_id.name, form.body_updatable)
+        form.responsible_team_id = self.env.ref("riverflow.team_hr").partner_id
+        self.assertIn(self.env.ref("riverflow.team_hr").partner_id.name, form.body_updatable)
+        self.assertEqual(form.subject_updatable, "Order for the ship")
+
+    def test_team_change_keeps_the_typed_subject_and_text(self):
+        form = self._team_form()
+        form.subject_updatable = "My own subject"
+        form.body_updatable = "<p>My own text</p>"
+        form.responsible_team_id = self.env.ref("riverflow.team_hr").partner_id
+        self.assertEqual(form.subject_updatable, "My own subject")
+        self.assertIn("My own text", form.body_updatable)
+        form.mail_template_id = self.template_blank
+        self.assertIn("Dear", form.body_updatable, "A template switch still replaces the text")

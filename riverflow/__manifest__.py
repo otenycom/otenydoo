@@ -1,6 +1,6 @@
 {
     "name": "Riverflow",
-    "version": "19.0.1.1422",
+    "version": "19.0.1.1423",
     "depends": ["base", "mail", "oteny_shortcut", "oteny_bot"],
     "author": "Vriend Studio",
     "category": "Workflow",

@@ -231,7 +231,7 @@ Actions executed when a transition occurs:
 | `transition_action_register_service` | Register for billing |
 | `transition_action_supplier_confirmed` | Mark supplier confirmation |
 
-An action whose wizard sends e-mail sets `sends_email`. The chatter's Send Email offers those transitions from the current state; see plan [chatter-send-message.md](plans/chatter-send-message.md).
+An action whose wizard sends e-mail sets `sends_email`. The chatter's Send Email offers those transitions from the current state; see [Send Email in the chatter](references/chatter-send-email.md).
 
 ### Transition Action Context
 

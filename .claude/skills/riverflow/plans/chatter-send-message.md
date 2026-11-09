@@ -1,7 +1,9 @@
 # Send message in the chatter: one structure for every e-mail that staff send
 
-*Draft plan, 8-Nov-2026. Modules: riverflow (otenydoo) for the structure; crewradar for
-the services on a top-level contact (§ 5 D); rivercreds for the credential wizard. Status:
+*Plan, 8-Nov-2026. Status: built; merged on 9-Nov-2026 into otenydoo `main` `f71c1f1`
+and radar `dev` `8388b91e3`; user guide and reference:
+[chatter-send-email.md](../references/chatter-send-email.md). Modules: riverflow (otenydoo) for the structure; crewradar for
+the services on a top-level contact (§ 5 D); rivercreds for the credential wizard. Decisions:
 Ries set the structure on 8-Nov-2026 (§ 5) and answered four interviews (§ 4); no
 question is open. § 7 is the inventory of every kind of staff e-mail and its home. Goal
 (Ries, 8-Nov-2026): one plan with one style for every Send message function. Built on

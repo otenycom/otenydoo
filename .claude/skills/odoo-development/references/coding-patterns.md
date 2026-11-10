@@ -2198,6 +2198,24 @@ self.attachment_ids.write(
 
 Applied in: `riverflow_enter_train_ticket.py`, `riverflow_enter_airline_ticket.py`, and the email sender wizard (`_move_uploads_to_service`, riverflow 19.0.1.1407). A wizard that copies the bytes elsewhere and does not move its upload needs no code: riverflow's `ir.attachment._gc_wizard_uploads` deletes a wizard upload that nothing holds after one day ([riverflow SKILL.md, Wizard Attachment Posting](../../riverflow/SKILL.md#wizard-attachment-posting)).
 
+## No Translated Fields in Radar
+
+The radar workspace does not use translated fields: no `translate=True` on a `Char`,
+`Text` or `Html` field of its models (Ries, 10-Nov-2026). Users type a name or a
+description in one language. A translated field gives the input a language button that
+opens a dialog with one box per active language (English and German on Cuneus), which
+only confuses them. Write `fields.Char(required=True)`, not
+`fields.Char(required=True, translate=True)`. This is about stored record values; the
+texts of the code (`_()`, view labels, help texts) stay translatable as below.
+
+First case: the ship contact type (`crewradar.site.contact.type`, crewradar 19.0.12.24)
+had a translated name and description; Ries saw the dialog on the Ship Contact Types list
+and asked to remove it. Note for a removal: a translated field is a `jsonb` column. After
+`translate=True` was removed, `-u crewradar` on `cr-test` left both columns `jsonb` (cause
+not found, 10-Nov-2026). Here the field was new and never on production, so the staging
+databases were restored or installed again instead; a field that is already on production
+needs a pre-migrate that converts the column (`USING "<column>"->>'en_US'`).
+
 ## Translation Method
 
 Use the underscore `_()` method for translatable strings:

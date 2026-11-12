@@ -11,7 +11,8 @@ question is open. § 7 is the inventory of every kind of staff e-mail and its ho
 [BC 10487893479](https://3.basecamp.com/5527227/buckets/38887735/todos/10487893479).
 Basecamp:
 [BC 10487142172](https://3.basecamp.com/5527227/buckets/38887735/todos/10487142172)
-(the messages that reached no one, training first).*
+(the messages that reached no one, training first). Fix built on 10-Nov-2026 in otenydoo
+`main`: a follow-up to an e-mail that the writer sent (§ 10).*
 
 ## 1. Why
 
@@ -107,8 +108,8 @@ when the workflow has an e-mail transition) did that; Ries replaced it with § 5
 
 1. **One structure replaces Send message** on riverflow records: the first e-mail goes
    through an e-mail transition, a reply through an ad-hoc reply wizard (§ 5).
-2. **The fallback service.** When the current state has no e-mail transition, the button
-   offers it: Radar creates a blank service of the workflow Send Email (a child service on a
+2. **The fallback service.** When the current state has no e-mail transition and no e-mail
+   went out from the record yet, the button offers it (§ 10 adds the second condition): Radar creates a blank service of the workflow Send Email (a child service on a
    service, a service on a log entry, an employee or a ship) and opens its Send Email wizard
    at once, with no recipient filled in. An error alone would send the user to Outlook, and
    the e-mail would not be on the Radar.
@@ -203,9 +204,12 @@ transition of the current state, so the workflow records that it went out.
 - The chatter button lists the flagged transitions that leave the current state (for
   example Resend, Send Reminder, Request Appointment, Request Pickup) and opens the chosen
   one. With one transition it opens it at once.
-- With none (Collect Rijnvaartverklaring today, a log entry, an employee, a ship, a Done
-  service of Arrange MFNL Notification), the button offers the fallback service
-  (decision 2). With e-mail transitions, the list holds only those (decision 3).
+- With none, and an e-mail already went out from the record to an outside contact (a
+  Registered Taxi Supply Order after Order Now), the button opens the reply screen on the
+  newest such e-mail, as Reply All does in a mail program (§ 10).
+- With none and no e-mail sent yet (Collect Rijnvaartverklaring today, a log entry, an
+  employee, a ship), the button offers the fallback service (decision 2). With e-mail
+  transitions, the list holds only those (decision 3).
 
 **B. An incoming e-mail exists: the reply.** An ad-hoc reply wizard sends the reply. It is
 not a transition: the state and the deadline stay as they are.
@@ -259,8 +263,10 @@ not a transition: the state and the deadline stay as they are.
    button then shows the same error as the header button. No new rule.
 4. **A state that the bot owns** (`is_owned_by_bot`, Arrange MFNL Notification): a person
    does not run the bot's transitions there, so the button falls back as with no transition.
-5. **An e-mail transition went out, and no reply came yet.** Path A applies again, so the
-   user sends Resend or Send Reminder, which the workflow records.
+5. **An e-mail transition went out, and no reply came yet.** Path A applies again. When the
+   state still offers Resend or Send Reminder, the user sends it, and the workflow records
+   it. When the state offers none (an end state such as Registered), the button replies to
+   the e-mail that went out (§ 10).
 6. **An incoming e-mail that is not part of a conversation** (a bounce, an auto-reply, a
    copy that the team-channel rules posted): the reply wizard proposes its sender. A bounce
    already opens its own review service. No new rule.
@@ -269,8 +275,9 @@ not a transition: the state and the deadline stay as they are.
 8. **Colleague messages on a record with outside followers.** Today a Send message "to the
    colleague" on such a record also e-mails the agency or the supplier. With Log note and an
    @mention for colleagues (decision 5), this stops.
-9. **The fallback service starts with an empty "To"** (decisions 2 and 6). The user picks the
-   contact; the wizard refuses a send without one. Help to find the right contact is the
+9. **The fallback service starts with an empty "To"** (decisions 2 and 6). It opens only on a
+   record from which no e-mail went out yet (§ 10), so no earlier recipient is lost. The
+   user picks the contact; the wizard refuses a send without one. Help to find the right contact is the
    later topic of decision 11.
 10. **Bots and code** post with `message_post` and do not use the chatter button. No change.
 11. **Staff and team contacts are top-level contacts too** (15 active contacts belong to a
@@ -376,3 +383,89 @@ Where the build differs from § 5:
 - The chatter hides Odoo's Send message until the thread data says which button applies, so
   the old button does not flash while a riverflow record loads.
 
+
+## 10. Fix: a follow-up to an e-mail that the writer sent (10-Nov-2026, built)
+
+**The report.** On 10-Nov-2026 Ka Sin (Operations NL) wanted to tell the taxi supplier a new
+pick-up time on the Taxi Supply Order "Panta Rhei |" (service 40791, a child service of AB
+Arrange Transport 38077, Anasco). Send Email opened a screen with an empty "To". On service
+38024 (E-Ticket, Kajal) the same button opened the reply screen with the agency in "To".
+
+**The evidence (prod, read-only JSON-2 and the audit log; times UTC).** 10:40 Order Now
+(Not Started to Ordered) sent message 100818 to Hey Shuttle (Saricam) (1035) and V.O.F.
+Weijma Shipping (742); both became followers. 13:45 a Log note "pick up 09:45 oc clock, not
+08:30 o clock". 14:08 Confirmed, then Register, so the state is Registered. About 14:14 Send
+Email; no Send Email child service exists, so the screen was cancelled. The supplier never
+e-mailed back. Service 38024 has two incoming e-mails from ODI, so it took path B.
+
+**The cause.** `action_riverflow_send_email` knows a thread to answer only when an e-mail
+came in (path B). Registered offers Return to Confirmed and Cancel, and neither sends
+e-mail, so the button fell to the fallback service of decision 2: a new thread with a new
+subject and an empty "To". Edge case 5 assumed that the state after an e-mail transition
+still offers Resend; an end state does not. Every Taxi Supply Order ends in Registered, the
+workflow with the most sends (§ 3). The fallback also breaks decision 13: the follow-up
+belongs in the thread where the order went out.
+
+**The fix (riverflow).**
+
+1. **Send Email replies to the record's own last e-mail.** The order of the button becomes:
+   an incoming e-mail opens the reply screen on it (path B, as today); else an e-mail
+   transition of the state opens (path A, as today); else, when an e-mail already went out
+   from the record to an outside contact, the reply screen opens on the newest such e-mail;
+   else the fallback service opens (decision 2). Such an e-mail is a message of the record
+   with the subtype Discussions whose recipients (`partner_ids`) hold at least one contact
+   that is not staff. This covers e-mails of a transition, of the reply screen, of Odoo's old
+   Send message, and replies that a colleague wrote from their own mailbox. A transition
+   keeps priority over this reply, so a state with Re-order or Resend still records the
+   resend in the workflow (edge case 5).
+2. **The reply screen also takes the recipients of the message.**
+   `_riverflow_reply_recipients` adds `message.partner_ids` to the sender and the known To
+   and Cc. On an e-mail that went out these are the people it went to: the template's Cc is
+   among them, because the Send Email wizard turns `partner_to`, `email_to` and `email_cc`
+   into partners. On an incoming e-mail they are the known To and Cc contacts already, so
+   nothing changes there. The writer and staff stay out (decisions 5 and 6).
+3. **The Reply arrow also shows on an e-mail that went out from the record**, not only on an
+   incoming one. `action_riverflow_reply` accepts such an e-mail, and the chatter gets its
+   ids next to `riverflowIncomingEmailIds`. This gives back what the hidden Odoo Reply All
+   gave (§ 9): a reply to any e-mail of the thread.
+4. **Tests** in `riverflow/tests/test_chatter_send_email.py`: a service sent an e-mail and
+   stands in a state without an e-mail transition; Send Email opens the reply screen on that
+   e-mail with its recipients and without the writer, and no fallback service. Controls: a
+   state with an e-mail transition still opens it; a record with only a Log note or only an
+   e-mail to a colleague still gets the fallback service. A hoot test for the Reply arrow
+   on a sent e-mail.
+5. **The user guide** [chatter-send-email.md](../references/chatter-send-email.md) has the
+   new rule.
+
+**Built (10-Nov-2026).** `_riverflow_sent_emails()` in `models/mail_thread_send_email.py`
+(the sent e-mails, also sent to the chatter as `riverflowSentEmailIds`);
+`action_riverflow_send_email` replies to the newest one after the e-mail transitions;
+`action_riverflow_reply` accepts it. The rule "not staff" is one method,
+`_riverflow_outside_contacts` on `riverflow.mail.send.mixin`, used by the sent e-mails and
+by the reply recipients. The reply recipients add `message.partner_ids`. JS: the Reply
+arrow also shows for `riverflowSentEmailIds`. Tests: three new Python tests and one hoot
+test; the two main ones failed on the old code and pass on the new. `riverflow` and
+`rivercreds` ran 841 tests with 0 failures, and all hoot suites passed.
+
+**Checked: it works as Reply All in a mail program.** In Outlook and Gmail, Reply All on an
+e-mail in Sent addresses the original To and Cc, without the writer, with the subject
+"Re: …", in the same conversation. The fix does the same:
+
+- *Recipients.* Odoo's own Reply All, which § 9 hid, proposes `partner_ids` and the author
+  of the message plus its incoming To and Cc (`mail/models/models.py`,
+  `_message_get_suggested_recipients_batch`, `reply_message`). Fix item 2 gives the reply
+  screen the same set; then it removes the writer and staff, which a mail program does not
+  do for staff (decision 5).
+- *One conversation for the recipient.* The reply is posted with the sent e-mail as parent,
+  subject "Re: …". Odoo puts the message ids of the last three public messages of the record
+  in the `References` header (`mail_thread.py`, `_notify_by_email_get_base_mail_values`),
+  so the supplier's mail program files the follow-up under the order e-mail. Every
+  recipient sees the others in "To" (`X-Msg-To-Add`), as in Reply All.
+- *The answer comes back.* The supplier's answer carries those `References`, so the mail
+  gateway posts it on the same service (`message_route`), and it becomes an incoming e-mail
+  for path B.
+
+**A fact to check in the data, not in the code.** The e-mail address of the contact Hey
+Shuttle (Saricam) is `kirstenmax@cuneuscrew.eu`, a Cuneus address, and V.O.F. Weijma Shipping
+(`Florisweijma@hotmail.com`) also got the order. The follow-up goes to the same people as
+the order.

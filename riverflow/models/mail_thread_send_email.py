@@ -12,8 +12,10 @@ class MailThread(models.AbstractModel):
 
     A record without an incoming e-mail sends its first e-mail through an e-mail transition
     of its current state, else through a Send Email service on the record (§ 5 A). A record
-    with an incoming e-mail answers it with the reply wizard (§ 5 B). Each conversation thus
-    is a record with its own subject (decision 13).
+    with an incoming e-mail answers it with the reply wizard (§ 5 B). A record whose e-mail
+    went out and whose state has no e-mail transition replies to that e-mail, as Reply All
+    on a sent e-mail does (§ 10). Each conversation thus is a record with its own subject
+    (decision 13).
     """
 
     _inherit = "mail.thread"
@@ -27,9 +29,10 @@ class MailThread(models.AbstractModel):
         if request_list and "riverflowEmailMode" in request_list:
             for thread in self:
                 mode = thread._riverflow_chatter_email_mode()
-                values = {"riverflowEmailMode": mode, "riverflowIncomingEmailIds": []}
+                values = {"riverflowEmailMode": mode, "riverflowIncomingEmailIds": [], "riverflowSentEmailIds": []}
                 if mode == EMAIL_MODE_SEND_EMAIL and thread.id:
                     values["riverflowIncomingEmailIds"] = thread._riverflow_incoming_emails().ids
+                    values["riverflowSentEmailIds"] = thread._riverflow_sent_emails().ids
                 store.add(thread, values, as_thread=True)
 
     # ------------------------------------------------------------
@@ -51,14 +54,20 @@ class MailThread(models.AbstractModel):
             return self._riverflow_open_email_transition(transitions)
         if transitions:
             return self._riverflow_email_choice_action(transitions)
+
+        sent = self._riverflow_sent_emails()
+        if sent:
+            return self._riverflow_reply_action(sent[-1])
         return self._riverflow_email_service_action()
 
     def action_riverflow_reply(self, message_id):
-        """The Reply action on an incoming e-mail in the chatter."""
+        """The Reply action on an incoming e-mail, or on an e-mail that went out, in the
+        chatter."""
         self.ensure_one()
-        message = self._riverflow_incoming_emails().filtered(lambda m: m.id == message_id)
+        repliable = self._riverflow_incoming_emails() | self._riverflow_sent_emails()
+        message = repliable.filtered(lambda m: m.id == message_id)
         if not message:
-            raise UserError(_("This message is not an incoming e-mail of this record."))
+            raise UserError(_("This message is not an e-mail of this record."))
         return self._riverflow_reply_action(message)
 
     def _riverflow_incoming_emails(self):
@@ -75,6 +84,27 @@ class MailThread(models.AbstractModel):
                 lambda m: m.message_type == "email"
                 and m.create_uid == system_user
                 and not m.author_id.user_ids.filtered(lambda user: not user.share)
+            )
+            .sorted(lambda m: (m.date, m.id))
+        )
+
+    def _riverflow_sent_emails(self):
+        """The e-mails that went out from this record to an outside contact, oldest first.
+
+        A message of the Discussions subtype whose recipients hold a contact that is not
+        staff: an e-mail of a transition or of the reply wizard, an old Send message, or a
+        reply that a colleague wrote from their own mailbox. A Log note and a message only to
+        colleagues are left out, so the reply to it would have an empty "To".
+        """
+        self.ensure_one()
+        discussions = self.env.ref("mail.mt_comment")
+        Recipients = self.env["riverflow.mail.send.mixin"]
+        return (
+            (self.message_ids - self._riverflow_incoming_emails())
+            .filtered(
+                lambda m: m.message_type in ("email", "comment")
+                and m.subtype_id == discussions
+                and Recipients._riverflow_outside_contacts(m.partner_ids)
             )
             .sorted(lambda m: (m.date, m.id))
         )

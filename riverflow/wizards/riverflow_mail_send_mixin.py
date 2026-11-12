@@ -21,6 +21,13 @@ class RiverflowMailSendMixin(models.AbstractModel):
         message, so a "To" that holds only the writer reaches no one."""
         return partners - self._riverflow_writer_partner()
 
+    def _riverflow_outside_contacts(self, partners):
+        """The partners that are not staff: no internal user and no team contact. A colleague
+        gets a Log note with an @mention, not an e-mail (decision 5)."""
+        return partners.filtered(
+            lambda partner: not partner.user_ids.filtered(lambda user: not user.share) and not partner.team_ids
+        )
+
     def _riverflow_check_email_recipients(self, partners):
         """Refuse a send that reaches no one, a recipient without an e-mail address, and a
         recipient outside riverflow.restrict_email_recipients_to."""

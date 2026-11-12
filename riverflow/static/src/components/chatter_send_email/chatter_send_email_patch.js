@@ -23,6 +23,8 @@ patch(Thread.prototype, {
         this.riverflowEmailMode = undefined;
         /** @type {number[]} */
         this.riverflowIncomingEmailIds = [];
+        /** @type {number[]} the e-mails that went out from the record to an outside contact */
+        this.riverflowSentEmailIds = [];
     },
 });
 
@@ -88,12 +90,17 @@ patch(Chatter.prototype, {
     },
 });
 
-/** Reply on an incoming e-mail, where the record uses Send Email (§ 5 B). */
+/**
+ * Reply on an incoming e-mail (§ 5 B) or on an e-mail that went out (§ 10, as Reply All on a
+ * sent e-mail), where the record uses Send Email.
+ */
 registerMessageAction("riverflow-reply", {
     condition: ({ message, thread, owner }) =>
         Boolean(owner.env.inChatter?.riverflowReply) &&
         thread?.riverflowEmailMode === "send_email" &&
-        (thread.riverflowIncomingEmailIds || []).includes(message.id),
+        [...(thread.riverflowIncomingEmailIds || []), ...(thread.riverflowSentEmailIds || [])].includes(
+            message.id
+        ),
     icon: "fa fa-reply",
     name: _t("Reply"),
     onSelected: ({ message, owner }) => owner.env.inChatter.riverflowReply(message.id),
@@ -103,8 +110,9 @@ registerMessageAction("riverflow-reply", {
 /**
  * Odoo's Reply All and Forward open its own full composer: more doors for an e-mail beside
  * Send Email. On a record with Send Email they stay hidden; a follow-up before a reply goes
- * through the state's e-mail transition (Resend, Send Reminder), a reply through the reply
- * wizard, and a new e-mail through Send Email (one structure, decision 1).
+ * through the state's e-mail transition (Resend, Send Reminder), else through the reply
+ * wizard on the sent e-mail; a reply goes through the reply wizard, and a new e-mail through
+ * Send Email (one structure, decision 1).
  */
 for (const actionId of ["reply-all", "forward"]) {
     const odooAction = messageActionsRegistry.get(actionId, null);

@@ -7,6 +7,8 @@
   which is made only on send (decisions 2 and 3).
 - With an incoming e-mail, it opens the reply wizard, which answers the sender, keeps the
   state and marks the e-mails as reviewed (§ 5 B, decision 4).
+- Without an incoming e-mail and without an e-mail transition, an e-mail that went out from
+  the record gets the reply wizard with its recipients, as Reply All on a sent e-mail (§ 10).
 - The writer is never a recipient (decision 6).
 - A contact's Send Email service goes on its top-level contact (§ 5 D).
 """
@@ -101,6 +103,31 @@ class TestChatterSendEmail(TransactionCase):
                 )
             )
             .with_user(self.env.user)
+        )
+
+    def _staff(self, login):
+        return self.env["res.users"].create(
+            {"name": login.replace(".", " ").title(), "login": login, "email": f"{login}@company.example",
+             "group_ids": [(4, self.env.ref("base.group_user").id)]}
+        )
+
+    def _sent_email(self, record, author, recipients, **values):
+        """An e-mail that staff sent from the record, as a transition or the reply wizard
+        posts it: the recipients are its partner_ids."""
+        return self.env["mail.message"].create(
+            dict(
+                {
+                    "model": record._name,
+                    "res_id": record.id,
+                    "message_type": "email",
+                    "subtype_id": self.env.ref("mail.mt_comment").id,
+                    "author_id": author.id,
+                    "partner_ids": [(6, 0, recipients.ids)],
+                    "subject": "Taxi order",
+                    "body": "<p>Please pick him up at 08:30.</p>",
+                },
+                **values,
+            )
         )
 
     def _thread_values(self, record):
@@ -236,6 +263,54 @@ class TestChatterSendEmail(TransactionCase):
         self.assertEqual(sent.partner_ids, self.client | self.agent)
         self.assertEqual(service.state_id, self.state_one, "A reply is not a transition")
         self.assertEqual(service.unreviewed_message_count, 0, "The reply marks the e-mail as reviewed")
+
+    # ---- the reply to an e-mail that went out (§ 10) ---------------------------------
+
+    def test_sent_email_without_email_transition_opens_the_reply_to_its_recipients(self):
+        """Ka Sin's case (10-Nov-2026): the taxi order went out, the service is Registered,
+        and she sends a new pick-up time from the chatter."""
+        service = self._service(self.state_quiet)
+        operations = self._staff("operations.writer")
+        colleague = self._staff("colleague.copy")
+        sent = self._sent_email(service, operations.partner_id, self.client | self.agent | colleague.partner_id)
+        self.assertEqual(self._thread_values(service)["riverflowSentEmailIds"], [sent.id])
+
+        action = service.action_riverflow_send_email()
+        self.assertEqual(action["res_model"], "riverflow.mail.reply.wizard", "No fallback service")
+        reply = self.env["riverflow.mail.reply.wizard"].browse(action["res_id"])
+        self.assertEqual(reply.parent_message_id, sent)
+        self.assertEqual(reply.recipient_partner_ids, self.client | self.agent,
+                         "The recipients of the sent e-mail, without the writer and the colleague")
+        self.assertEqual(reply.subject, "Re: Taxi order")
+
+        reply.body = "<p>Pick-up at 09:45, not 08:30.</p>"
+        reply.action_send()
+        follow_up = service.message_ids.filtered(lambda m: m.parent_id == sent)
+        self.assertEqual(follow_up.message_type, "email")
+        self.assertEqual(follow_up.partner_ids, self.client | self.agent)
+        self.assertEqual(service.state_id, self.state_quiet, "A reply is not a transition")
+        self.assertFalse(service.child_ids, "The follow-up stays in the thread of the order")
+
+        self.assertEqual(service.action_riverflow_reply(sent.id)["res_model"], "riverflow.mail.reply.wizard",
+                         "The Reply arrow on the sent e-mail opens the reply too")
+
+    def test_email_transition_comes_before_the_reply_to_a_sent_email(self):
+        service = self._service(self.state_one)
+        self._sent_email(service, self._staff("operations.writer").partner_id, self.client)
+        action = service.action_riverflow_send_email()
+        self.assertEqual(action["context"]["transition_id"], self.trans_one.id,
+                         "The workflow records a resend (edge case 5)")
+
+    def test_note_or_message_to_a_colleague_keeps_the_fallback_service(self):
+        service = self._service(self.state_quiet)
+        operations = self._staff("operations.writer")
+        colleague = self._staff("colleague.copy")
+        service.message_post(body="A note", message_type="comment", subtype_xmlid="mail.mt_note",
+                             partner_ids=self.client.ids)
+        self._sent_email(service, operations.partner_id, colleague.partner_id)
+        self.assertEqual(self._thread_values(service)["riverflowSentEmailIds"], [])
+        action = service.action_riverflow_send_email()
+        self.assertEqual(action["context"]["transition_id"], self.env.ref("riverflow.trans_se_3").id)
 
     def test_reply_refuses_a_message_that_is_not_incoming(self):
         service = self._service(self.state_quiet)

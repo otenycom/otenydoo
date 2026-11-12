@@ -7,9 +7,9 @@ class RiverflowMailReplyWizard(models.TransientModel):
     riverflow/plans/chatter-send-message.md, § 5 B).
 
     It is not a transition: the state and the deadline of the record stay as they are. It
-    answers the sender and the known contacts in the To and Cc of the e-mail, posts the reply
+    answers the sender and the recipients of the e-mail, as Reply All does, posts the reply
     as an e-mail in the same thread, and marks the incoming e-mails up to the replied one as
-    reviewed (decision 4)."""
+    reviewed (decision 4). The e-mail may also be one that went out from the record (§ 10)."""
 
     _name = "riverflow.mail.reply.wizard"
     _inherit = ["riverflow.mail.send.mixin"]
@@ -54,9 +54,12 @@ class RiverflowMailReplyWizard(models.TransientModel):
             wizard.subject = subject
 
     def _riverflow_reply_recipients(self, message):
-        """The sender and the known contacts in the To and Cc of the e-mail. Staff, team
-        contacts and the writer are left out: a colleague gets a Log note with an @mention
-        (decision 5), and the writer is never a recipient (decision 6)."""
+        """The sender and the recipients of the e-mail, as Odoo's Reply All proposes them: the
+        author, the recipients (`partner_ids`; on an e-mail that went out these are the people
+        it went to, the template's Cc included) and the known contacts in the To and Cc of an
+        incoming e-mail. Staff, team contacts and the writer are left out: a colleague gets a
+        Log note with an @mention (decision 5), and the writer is never a recipient
+        (decision 6)."""
         Partner = self.env["res.partner"]
         if not message:
             return Partner
@@ -67,11 +70,7 @@ class RiverflowMailReplyWizard(models.TransientModel):
             for partner in Partner.search([("email_normalized", "in", list(normalized))], order="id"):
                 if partner.email_normalized not in known.mapped("email_normalized"):
                     known |= partner
-        candidates = message.author_id | known
-        candidates = candidates.filtered(
-            lambda partner: not partner.user_ids.filtered(lambda user: not user.share)
-            and not partner.team_ids
-        )
+        candidates = self._riverflow_outside_contacts(message.author_id | message.partner_ids | known)
         return self._riverflow_without_writer(candidates)
 
     def action_send(self):

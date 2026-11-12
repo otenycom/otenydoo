@@ -543,19 +543,14 @@ class IrAttachment(models.Model):
 
         A new file is often read soon, so a file that may enter the read
         cache stays as a cache copy with the "in bucket" mark (write-through,
-        D21). A larger file is removed. A name that a local-only file shares
-        stays without the mark: the local-only row needs it for good.
+        D21), written after the commit. A larger file is removed. A name that a
+        local-only file shares stays without the mark: the local-only row needs
+        it for good.
         """
         if self._cloud_filestore_local_only_uses(fname):
             return
         if self._cloud_filestore_may_cache(size):
-            try:
-                # A cache problem must never fail the save: the savepoint keeps the transaction usable.
-                with self.env.cr.savepoint():
-                    self.env["oteny.cloud.filestore.cache"].sudo()._cloud_filestore_cache_mark(fname, size)
-            except Exception as error:  # noqa: BLE001
-                # The local copy stays unmarked, so it waits for upload: the upload job marks it later.
-                _logger.warning("Cloud filestore: cache mark of %s not written: %s", fname, error)
+            self._cloud_filestore_cache_mark_after_commit(fname, size)
             return
         try:
             os.unlink(self._full_path(fname))
@@ -572,13 +567,42 @@ class IrAttachment(models.Model):
         A mark means "the bucket holds this file". When the content is saved
         again and the bucket does not confirm it (an outage, a refusal, or the
         object was deleted after its hold time), the local file must stay and
-        wait for upload, so it must not look like a cache copy.
+        wait for upload, so it must not look like a cache copy. Cleared after
+        the commit, as the mark is written.
         """
-        try:
-            with self.env.cr.savepoint():
-                self.env["oteny.cloud.filestore.cache"].sudo()._cloud_filestore_cache_unmark([fname])
-        except Exception as error:  # noqa: BLE001
-            _logger.warning("Cloud filestore: cache mark of %s not cleared: %s", fname, error)
+        self._cloud_filestore_cache_mark_after_commit(fname, None)
+
+    _CACHE_MARKS_AFTER_COMMIT = "oteny_cloud_filestore.cache_marks"
+
+    @api.model
+    def _cloud_filestore_cache_mark_after_commit(self, fname, size):
+        """Mark a name "in bucket" (a size) or clear its mark (None) once the save commits.
+
+        The save writes nothing to the cache table, so it needs no savepoint: a
+        savepoint flushes the caller's whole transaction in Odoo's default
+        environment, which has no context, and the caller's computes then run
+        without the context they rely on (radar, 12-Nov-2026: every Upload
+        Signed PoA failed). The last call for a name wins; a rollback drops the
+        calls. A write that fails after the commit only logs: an unmarked local
+        file waits for the upload job, which marks it, and the eviction clears
+        a mark whose object is missing.
+        """
+        postcommit = self.env.cr.postcommit
+        pending = postcommit.data.setdefault(self._CACHE_MARKS_AFTER_COMMIT, {})
+        if not pending:
+            postcommit.add(self._cloud_filestore_cache_write_marks)
+        pending[fname] = size
+
+    @api.model
+    def _cloud_filestore_cache_write_marks(self):
+        """Write the marks of a committed save, each in a transaction of its own."""
+        pending = self.env.cr.postcommit.data.pop(self._CACHE_MARKS_AFTER_COMMIT, {})
+        cleared = [name for name, size in pending.items() if size is None]
+        if cleared:
+            self._cloud_filestore_cache_in_own_transaction("_cloud_filestore_cache_unmark", cleared)
+        for name, size in pending.items():
+            if size is not None:
+                self._cloud_filestore_cache_in_own_transaction("_cloud_filestore_cache_mark", name, size)
 
     @api.model
     def _cloud_filestore_local_only_uses(self, fname):

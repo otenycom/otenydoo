@@ -164,7 +164,12 @@ attachment (for example `ab/ab12...`).
 - **The read cache** (D21): a cache copy is a normal file in the local
   filestore whose row in `oteny.cloud.filestore.cache` carries the mark
   "in bucket". A row is marked only after a confirmed upload or a verified
-  download; every other local file must stay. Read counts are kept in the
+  download; every other local file must stay. The mark of a save is written
+  after its commit, in a transaction of its own
+  (`_cloud_filestore_cache_mark_after_commit`). The save writes nothing to the
+  cache table and opens no savepoint, so it never flushes the caller's
+  transaction. A rollback drops the mark; a mark that is dropped leaves the
+  file waiting for the upload job. Read counts are kept in the
   memory of each worker and written at most once a minute. An hourly job
   removes the copies with the lowest keep value (GDSF) when the marked
   files pass the limit, down to 90 %, after a `head` confirms each object;

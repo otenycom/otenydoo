@@ -843,7 +843,8 @@ Odoo recomputes a stored field at any flush, in the environment that
 flushes, not in the environment that changed its dependencies. Every
 `cr.savepoint()` flushes in the transaction's default environment, which has
 no context, and savepoints come in the middle of a save: Odoo's own modules
-open them, and so does `oteny_cloud_filestore` after each upload. A context key
+open them, and `oteny_cloud_filestore` did it after each upload until 12-Nov-2026
+(it now writes its cache row after the commit). A context key
 that pauses the side effects of a compute (`with_context(skip_...=True)`) is
 then lost, and the side effect runs anyway.
 

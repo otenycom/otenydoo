@@ -43,6 +43,10 @@ class TestCloudFilestoreCache(CloudFilestoreReadMixin, TransactionCase):
     def _local(self, attachment):
         return os.path.exists(attachment._full_path(attachment.store_fname))
 
+    def _after_commit(self):
+        """Write the marks that a save left for after its commit; a test never commits."""
+        self.env["ir.attachment"]._cloud_filestore_cache_write_marks()
+
     def _buffer(self):
         return ir_attachment_module._CACHE_READS.get(self.env.cr.dbname, {})
 
@@ -67,12 +71,34 @@ class TestCloudFilestoreCache(CloudFilestoreReadMixin, TransactionCase):
         self.assertIn(large.store_fname, self.fake.objects)
         self.assertTrue(self._local(small), "a small file stays as a cache copy")
         self.assertFalse(self._local(large), "a large file is removed after the upload")
+        self._after_commit()
         row = self._row(small.store_fname)
         self.assertTrue(row.in_bucket)
         self.assertEqual(row.size, len(SMALL))
         self.assertEqual(row.reads, 1, "the insertion counts as the first read (M2)")
         self.assertTrue(row.last_read and row.reads_date)
         self.assertFalse(self._row(large.store_fname))
+
+    def test_write_through_does_not_flush_the_save(self):
+        """The save writes nothing to the cache table, so it opens no savepoint,
+        and a savepoint flushes the caller's whole transaction in Odoo's default
+        environment, which has no context. On 12-Nov-2026 that flush ran a radar
+        compute without the context of its save, and every Upload Signed PoA on
+        production failed. The mark is written after the commit; a rollback
+        drops it."""
+        cursor_type = type(self.env.cr)
+        with patch.object(cursor_type, "flush", autospec=True, side_effect=cursor_type.flush) as flush:
+            attachment = self.env["ir.attachment"].create({"name": "small.bin", "raw": SMALL})
+        flush.assert_not_called()
+        self.assertIn(attachment.store_fname, self.fake.objects)
+        self.assertFalse(self._row(attachment.store_fname), "no mark before the commit")
+        self._after_commit()
+        self.assertTrue(self._row(attachment.store_fname).in_bucket)
+
+        again = self.env["ir.attachment"].create({"name": "again.bin", "raw": LARGE})
+        self.env.cr.postcommit.clear()  # what a rollback does
+        self._after_commit()
+        self.assertFalse(self._row(again.store_fname), "a rolled-back save leaves no mark")
 
     def test_write_through_keeps_local_only_twin_without_mark(self):
         local_only = self.env["ir.attachment"].create(
@@ -93,6 +119,7 @@ class TestCloudFilestoreCache(CloudFilestoreReadMixin, TransactionCase):
         self.assertEqual(self.env["ir.attachment"]._cloud_filestore_upload_pending(), 2)
         self.assertTrue(self._local(small))
         self.assertFalse(self._local(large))
+        self._after_commit()
         self.assertTrue(self._row(small.store_fname).in_bucket)
         # The next sweep never asks the bucket for the cache copy again.
         with patch.object(self.fake, "head", wraps=self.fake.head) as head:
@@ -222,31 +249,35 @@ class TestCloudFilestoreCache(CloudFilestoreReadMixin, TransactionCase):
     def test_unconfirmed_save_clears_the_mark(self):
         """A mark means "the bucket holds it": a save that the bucket does not confirm waits for upload."""
         attachment = self.env["ir.attachment"].create({"name": "small.bin", "raw": SMALL})
+        self._after_commit()
         self.assertTrue(self._row(attachment.store_fname).in_bucket)
         self.fake.down = True
         with self.assertLogs(LOGGER, "WARNING"):
             again = self.env["ir.attachment"].create({"name": "again.bin", "raw": SMALL})
+        self._after_commit()
         self.assertEqual(again.store_fname, attachment.store_fname)
         self.assertFalse(self._row(attachment.store_fname).in_bucket)
         self.assertTrue(self._local(attachment))
         # The upload job sees it as waiting again, and marks it once the bucket confirms it.
         self.fake.down = False
         self.env["ir.attachment"]._cloud_filestore_upload_pending()
+        self._after_commit()
         self.assertTrue(self._row(attachment.store_fname).in_bucket)
 
     def test_failed_mark_never_fails_the_save(self):
-        model = type(self.cache)
-        missing_table = psycopg2.errors.UndefinedTable("gone")
-        broken = patch.object(model, "_cloud_filestore_cache_mark", side_effect=missing_table)
-        with broken, self.assertLogs(LOGGER, "WARNING") as logs:
-            attachment = self.env["ir.attachment"].create({"name": "small.bin", "raw": SMALL})
-        self.assertIn("cache mark", logs.output[0])
+        """The save writes no mark, so a mark can never fail it; a mark that is
+        dropped after the commit leaves the copy unmarked for the upload job."""
+        self.cache_write.side_effect = lambda *args: False
+        attachment = self.env["ir.attachment"].create({"name": "small.bin", "raw": SMALL})
+        self._after_commit()
+        self.cache_write.assert_any_call(ANY, "_cloud_filestore_cache_mark", attachment.store_fname, len(SMALL))
         self.assertTrue(self._local(attachment), "the copy stays unmarked and waits for the upload job")
         self.assertFalse(self._row(attachment.store_fname))
 
     def test_reverse_migration_clears_the_marks(self):
         """After the reverse migration every file stays local for good: none may be evicted (D2)."""
         cached = self.env["ir.attachment"].create({"name": "small.bin", "raw": SMALL})
+        self._after_commit()
         self.assertTrue(self._row(cached.store_fname).in_bucket)
         # The other files of the test database are in no bucket: the job logs them.
         with self.assertLogs(LOGGER, "WARNING"):
@@ -302,10 +333,12 @@ class TestCloudFilestoreCache(CloudFilestoreReadMixin, TransactionCase):
         """A name that a local-only file uses stays local for good: no path may mark it (I3)."""
         # Write-through, then a module installs the same content: the local-only save clears the mark.
         user_file = self.env["ir.attachment"].create({"name": "user.bin", "raw": SMALL})
+        self._after_commit()
         self.assertTrue(self._row(user_file.store_fname).in_bucket)
         local_only = self.env["ir.attachment"].create(
             {"name": "icon.bin", "raw": SMALL, "cloud_local_only": True}
         )
+        self._after_commit()
         self.assertEqual(local_only.store_fname, user_file.store_fname)
         self.assertFalse(self._row(user_file.store_fname).in_bucket)
         # The mark helper refuses it too, whoever calls it.

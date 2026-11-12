@@ -190,6 +190,10 @@ file goes to local disk instead (D14). Odoo's
 "skip the write when the file exists" is a local disk check today; in the
 bucket the module either asks first (`HEAD`) or uploads again, which is
 harmless because a name always has the same content (spec detail).
+*Amended 12-Nov-2026 (Ries):* the cache mark of the upload is written after the
+commit, not in the save. Its savepoint flushed the caller's whole transaction in
+Odoo's default environment, without the caller's context; in radar every Upload
+Signed PoA failed on production.
 
 **D14 — When the bucket cannot be reached, production falls back to local
 disk and alerts the admins loudly (answers Q10).** (Thijs, 8-Oct-2026: "go to

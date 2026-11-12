@@ -5,6 +5,7 @@ from markupsafe import Markup
 
 from odoo import Command, _, api, fields, models
 from odoo.exceptions import UserError, ValidationError
+from odoo.tools.misc import clean_context
 
 _logger = logging.getLogger(__name__)
 
@@ -1268,6 +1269,8 @@ class Service(models.Model):
                     )
                 )
             heal = self.filtered("subject_active")._single_open_heal_keys()
+        if "state_id" in vals or vals.get("active"):
+            self._single_open_make_room(vals)
         result = super(Service, self).write(vals)
         if heal:
             self._heal_single_open_removal(heal)
@@ -2431,6 +2434,76 @@ class Service(models.Model):
     # the workflow step made for that; the message below names it.
     # _single_open_removal_blocked keeps refusing the removal of a started task,
     # so only a task that heals can be removed.
+
+    def _single_open_make_room(self, vals):
+        """Make room for the services that this write reopens on a single-open
+        workflow: the transition Back or Restart from an end state, or an
+        unarchive.
+
+        The subject can hold another open service on that workflow, because the
+        auto-add made one when this service closed (in radar: a new main service
+        of the Golden Rule after Anmeldung Done). A service without started work
+        (_has_started_work) is retired, and the auto-add makes it again when this
+        service closes. A service with started work stays, and the write is
+        refused with its name, so the user continues on it. Before, the unique
+        index refused the write with a message that named no service (radar plan
+        application-processed-when-service-closes, 11-Nov-2026).
+        """
+        new_state = self.env["riverflow.state"].browse(vals["state_id"]) if vals.get("state_id") else None
+        for service in self:
+            if service.is_open or service.is_this_a_template or not service.workflow_id.enforce_single_open:
+                continue
+            if not (service.res_model and service.res_id):
+                continue
+            state = new_state if "state_id" in vals else service.state_id
+            if not (vals.get("active", service.active) and state and not state.is_end_state):
+                continue
+            others = self.search(
+                [
+                    ("workflow_id", "=", service.workflow_id.id),
+                    ("res_model", "=", service.res_model),
+                    ("res_id", "=", service.res_id),
+                    ("is_open", "=", True),
+                    ("id", "not in", self.ids),
+                ]
+            )
+            started = others.filtered(lambda other: other._has_started_work())
+            if started:
+                raise UserError(
+                    _(
+                        "Cannot reopen %(service)s: %(subject)s already has the open service %(open)s "
+                        "(%(state)s) on this workflow, and the workflow allows only one. Continue on "
+                        "%(open)s, or close it first.",
+                        service=service.display_name,
+                        subject=self.env[service.res_model].browse(service.res_id).display_name,
+                        open=started[:1].display_name,
+                        state=started[:1].state_id.name,
+                    )
+                )
+            if others:
+                # A transition wizard carries the values of its service as
+                # default_* keys; a record that a compute makes during the flush
+                # (a Radar row) must not take them (decision 87).
+                others = others.with_context(clean_context(self.env.context))
+                others._retire()
+                # The unique index checks each row: the retired service must
+                # be closed in the database before this one opens.
+                others.flush_recordset()
+
+    def _has_started_work(self):
+        """True when this service or an active service below it has left the
+        first state of its workflow. A review service does not count: it checks
+        work, it does not do work (riverflow.workflow.is_review). A new service
+        can hold child services from its template that were not started (in
+        radar: the AB Appointment service of a work permit main service)."""
+        self.ensure_one()
+        for service in self.search([("id", "child_of", self.id)]):
+            if service.workflow_id.is_review:
+                continue
+            first = service.workflow_id.state_ids.sorted("sequence")[:1]
+            if first and service.state_id.sequence > first.sequence:
+                return True
+        return False
 
     def _single_open_heal_keys(self):
         """(workflow id, subject model, subject id) of each OPEN service on a

@@ -312,3 +312,45 @@ class TestSingleOpenWorkflow(TransactionCase):
             service.action_archive()
         self.assertFalse(self._open_tasks(workflow=self.other_workflow))
         self.assertFalse(self._messages(mock_send))
+
+    # --- a transition that reopens a closed service ---------------------------
+
+    def test_back_retires_the_new_service_without_started_work(self):
+        """The service closes, and the auto-add makes the next one. The
+        transition back reopens the first service: the new one has no started
+        work, so it is retired, and the subject keeps one open service (radar:
+        Back after Anmeldung Done on the work permit main service)."""
+        service = self._new_task()
+        service.state_id = self.done
+        new_service = self._new_task()
+        service.state_id = self.in_progress
+        self.env.flush_all()
+        self.assertTrue(service.is_open)
+        self.assertTrue(new_service.to_be_deleted)
+        self.assertEqual(self._open_tasks(), service)
+
+    def test_back_is_refused_while_the_new_service_has_started_work(self):
+        """The new service left its first state: the transition back is refused
+        with its name, and nothing changes."""
+        service = self._new_task()
+        service.state_id = self.done
+        new_service = self._new_task()
+        new_service.state_id = self.in_progress
+        with self.assertRaisesRegex(UserError, "Continue on Renew Something"):
+            service.state_id = self.not_started
+        self.assertEqual(service.state_id, self.done)
+        self.assertEqual(self._open_tasks(), new_service)
+
+    def test_unarchive_retires_the_service_that_came_back(self):
+        """An archived open service comes back at once (decision 89).
+        Unarchiving the first service retires the one that came back, while it
+        has no started work."""
+        service = self._new_task()
+        with self._notifications():
+            service.action_archive()
+        came_back = self._open_tasks()
+        service.action_unarchive()
+        self.env.flush_all()
+        self.assertTrue(service.is_open)
+        self.assertTrue(came_back.to_be_deleted)
+        self.assertEqual(self._open_tasks(), service)

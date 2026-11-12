@@ -837,6 +837,46 @@ def _compute_generated_entries(self):
         ...
 ```
 
+### A context key cannot pause the side effects of a stored compute
+
+Odoo recomputes a stored field at any flush, in the environment that
+flushes, not in the environment that changed its dependencies. Every
+`cr.savepoint()` flushes in the transaction's default environment, which has
+no context, and savepoints come in the middle of a save: Odoo's own modules
+open them, and so does `oteny_cloud_filestore` after each upload. A context key
+that pauses the side effects of a compute (`with_context(skip_...=True)`) is
+then lost, and the side effect runs anyway.
+
+Keep such a pause on the cursor: `env.cr.cache` is shared by every
+environment of the transaction and cleared only when the cursor closes. End
+the block with a flush of the guarded field only (`flush_model([fname])`), so
+the field is computed while the pause holds; a flush of everything there
+changes the order of other pending work.
+
+```python
+@contextmanager
+def _pause_holder_auto_add(self):
+    cache = self.env.cr.cache
+    cache[KEY] = cache.get(KEY, 0) + 1
+    try:
+        yield
+        self.env["hr.employee"].flush_model(["credential_auto_add_trigger"])
+    finally:
+        cache[KEY] -= 1
+
+# In the compute:
+if not self.env.cr.cache.get(KEY):
+    ...  # the side effects
+```
+
+Example: radar `rivercreds.credential._pause_holder_auto_add`. On 12-Nov-2026
+every Upload Signed PoA on production failed with "Another user just updated
+this record": the cloud filestore's savepoint ran the employee's auto-add
+trigger without the save's context key, and it closed the service before the
+transition checked its state. The test reproduces it by opening a savepoint in
+`ir.attachment._file_write`. A local database without the cloud filestore
+never showed the fault.
+
 ### A Field Must Not Depend on the One2many Whose Compute Depends on It
 
 A One2many that a compute fills for its side effects (radar

@@ -347,7 +347,10 @@ class MailThreadReviewMixin(models.AbstractModel):
         if len(formatted_messages) > 0:
             summary = "\n".join(formatted_messages)
             self[field_name] = summary
-            self._update_user_write_date()
+            # A new message is a user change of the stored record. An onchange computes the
+            # summary again on its copy of the record (a NewId): that is no change.
+            if self.id:
+                self._update_user_write_date()
         else:
             self[field_name] = False  # needed for Odoo search
 

@@ -264,6 +264,27 @@ This pattern is used in `crewradar.log.entry._compute_check_result_ids()` and `h
 
 For more migration patterns including pre-migration scripts and view cache cleanup, see [Migrations](migrations.md).
 
+### A non-stored compute assigns every record, a form's copy too
+
+A bare `return` in a compute leaves the field without a value. Odoo then writes False for a
+stored field, but for a non-stored, read-only field it raises `ValueError: Compute method failed
+to assign ...` as soon as something reads it. An onchange reads it on its copy of the record (a
+NewId with the record as `_origin`), for example when the browser sends the values of the parent
+form with a line's onchange and those values hold a change of that field. So the `NewId` guard
+above never belongs in a non-stored compute: give every record a value, and read the copy's data
+through `_origin` (`record._origin.id`; a new record without an origin gets the empty value).
+
+A stored, read-only compute also runs again on that copy. A side effect in it (a write of another
+field) lands on the copy, and the onchange reports it to the browser as a change. Guard the side
+effect with `if record.id:` (a NewId is falsy).
+
+Example: radar Oops Log 18 (12-Nov-2026). The riverflow message summary compute set
+`user_write_date` on the copy of each service, so every tick in the contact table of a ship
+reported a changed service (`highlight_row`). The browser sent that change back with the next
+tick, and the ship's `_compute_service_ids` returned without a value for the copy. Tests:
+riverflow `test_highlight_row.py`, crewradar `test_service_ids_form_copy.py` and
+`test_ship_contacts.py`.
+
 ### _register_hook() for Post-Upgrade Actions
 
 To run code automatically after every module upgrade (not on plain restarts), use `_register_hook()` on `ir.module.module`. This hook is called once per registry load (STEP 9 in `odoo/modules/loading.py`). Check `registry.updated_modules` to gate execution:

@@ -1,6 +1,6 @@
 {
     "name": "Oteny Knowledge Sync",
-    "version": "19.0.2.130",
+    "version": "19.0.2.131",
     "summary": "Publish every repository's agent skills (.claude/skills) as locked articles, one tree per root.",
     "description": """
 Walks the ``.claude/skills`` folder of every configured root and mirrors it into

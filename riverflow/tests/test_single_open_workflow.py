@@ -341,6 +341,16 @@ class TestSingleOpenWorkflow(TransactionCase):
         self.assertEqual(service.state_id, self.done)
         self.assertEqual(self._open_tasks(), new_service)
 
+    def test_is_started_is_the_service_itself_past_its_first_state(self):
+        """_is_started reads the state of the service itself: false in the
+        first state, true in any later state, a cancelled state included."""
+        service = self._service(self.other_workflow, self.other_open)
+        self.assertFalse(service._is_started())
+        service.state_id = self.other_next
+        self.assertTrue(service._is_started())
+        cancelled = self._service(self.workflow, self.not_needed, name="Cancelled one")
+        self.assertTrue(cancelled._is_started())
+
     def test_unarchive_retires_the_service_that_came_back(self):
         """An archived open service comes back at once (decision 89).
         Unarchiving the first service retires the one that came back, while it

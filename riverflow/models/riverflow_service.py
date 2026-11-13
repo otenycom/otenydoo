@@ -2500,10 +2500,18 @@ class Service(models.Model):
         for service in self.search([("id", "child_of", self.id)]):
             if service.workflow_id.is_review:
                 continue
-            first = service.workflow_id.state_ids.sorted("sequence")[:1]
-            if first and service.state_id.sequence > first.sequence:
+            if service._is_started():
                 return True
         return False
+
+    def _is_started(self):
+        """True when this service itself has left the first state of its
+        workflow. Services below it do not count (that is _has_started_work).
+        A cancelled state comes after the first state as well, so a caller
+        that needs work that still counts also checks is_cancelled_state."""
+        self.ensure_one()
+        first = self.workflow_id.state_ids.sorted("sequence")[:1]
+        return bool(first) and self.state_id.sequence > first.sequence
 
     def _single_open_heal_keys(self):
         """(workflow id, subject model, subject id) of each OPEN service on a

@@ -127,3 +127,37 @@ appointment and the deadline.
   no deadline (12 of 12 open services on the copy of 3-Nov-2026).
 - Main services 29172 and 35244, which keep the old appointment date: the
   migration of radar's Change Appointment (question to Ries, 3-Nov-2026).
+
+## Change of 16-Nov-2026: only a deadline on the appointment day hides
+
+Thijs, 16-Nov-2026 (Ries still has to agree, because this narrows decision 1).
+AB Arrange Transport is due 2 days before the appointment, and Operations NL
+must be able to move that date: the hidden deadline blocked it. A deadline that
+is days before or after the appointment is not the appointment date, so the form
+does not show the same date twice there.
+
+- **The rule.** The form hides the deadline and its settings only when the
+  service follows an appointment and its *template* puts the deadline on the
+  appointment day (day 0). A template with days before or after the appointment
+  keeps the fields editable, also when a user sets the service itself to day 0.
+- **The template.** `template_service_id`; a service cloned before that link
+  existed falls back to the service of the same name and workflow in a template
+  tree (`is_root_a_template`). On the production copy of 16-Nov-2026 most open
+  AB child services have no link (for example 252 of 266 AB Arrange Transport).
+  A template, a service without a template, or a service whose template does not
+  follow an appointment ("Arrange Work Permit at AB" is a renewal marker; a state
+  rule gives the main service "Credential appointment") uses its own days.
+- **The flag** is renamed `is_deadline_on_appointment` ("Deadline On Appointment
+  Day"), because it is false for a deadline that follows the appointment at an
+  offset. Code: `_compute_is_deadline_on_appointment` and
+  `_template_days_relative_to_project` in `riverflow/models/riverflow_service.py`
+  (riverflow 19.0.1.1437).
+- **Effect on `crmain` (copy of 16-Nov-2026):** hidden on AB Appointment (268)
+  and Arrange Work Permit at AB (15); editable on AB Arrange Transport (266, of
+  which 25 at day 0), Inform Employee Travel Plan (178), AB Appointment Inform
+  Client (85), Review AB Appointment (193) and Arrange SAB appointment (1).
+- **Cost.** A typed deadline on these child services switches them to "Self",
+  so Change Appointment no longer moves them (the fault of "Why").
+- **Tests:** `test_deadline_follows_appointment` (10), rivercreds
+  `test_appointment_of_open_service` renamed flag; focused run on `cr-test`:
+  0 failed of 51.

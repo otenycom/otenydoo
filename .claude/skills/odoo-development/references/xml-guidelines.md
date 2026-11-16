@@ -309,8 +309,8 @@ twin with `groups="base.group_no_one"` right after it, as Odoo's own
 `mail_template_views.xml` does:
 
 ```xml
-<field name="daily_prio" invisible="is_deadline_from_appointment" />
-<field name="daily_prio" groups="base.group_no_one" invisible="not is_deadline_from_appointment" />
+<field name="daily_prio" invisible="is_deadline_on_appointment" />
+<field name="daily_prio" groups="base.group_no_one" invisible="not is_deadline_on_appointment" />
 ```
 
 - `base.group_no_one` counts only in debug mode (`res.users.has_group`), so

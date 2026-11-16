@@ -302,13 +302,15 @@ class Service(models.Model):
         help="Whether this service should use relative days to calculate its deadline",
         store=True,
     )
-    # A deadline that follows an appointment moves only with the appointment, so
-    # the form hides the deadline and its settings outside debug mode and shows
-    # the appointment (plan riverflow/plans/deadline-follows-appointment.md).
-    is_deadline_from_appointment = fields.Boolean(
-        "Deadline From Appointment",
-        compute="_compute_is_deadline_from_appointment",
-        help="The deadline follows an appointment. Change the appointment, not the deadline.",
+    # A deadline that its template puts on the day of an appointment is that
+    # appointment, so the form hides the deadline and its settings outside debug
+    # mode and shows the appointment. A template with days before or after the
+    # appointment keeps them editable, also when the service is set to day 0
+    # (plan riverflow/plans/deadline-follows-appointment.md).
+    is_deadline_on_appointment = fields.Boolean(
+        "Deadline On Appointment Day",
+        compute="_compute_is_deadline_on_appointment",
+        help="The deadline is the day of an appointment. Change the appointment, not the deadline.",
     )
 
     weekend_deadline_rule = fields.Selection(
@@ -906,11 +908,56 @@ class Service(models.Model):
         adds such a mode adds it here."""
         return ("root_appointment",)
 
-    @api.depends("use_project_deadline_from")
-    def _compute_is_deadline_from_appointment(self):
+    @api.depends(
+        "use_project_deadline_from",
+        "days_relative_to_project",
+        "template_service_id.days_relative_to_project",
+        "name",
+        "workflow_id",
+    )
+    def _compute_is_deadline_on_appointment(self):
         modes = self._appointment_deadline_modes()
+        template_days = self._template_days_relative_to_project()
         for service in self:
-            service.is_deadline_from_appointment = service.use_project_deadline_from in modes
+            service.is_deadline_on_appointment = (
+                service.use_project_deadline_from in modes and not template_days[service]
+            )
+
+    def _template_days_relative_to_project(self):
+        """The days before or after the appointment that the template of each
+        service gives, as {service: days}. The template is template_service_id; a
+        service cloned before that link existed falls back to the service of the
+        same name and workflow in a template tree. A template, a service without
+        one, or a service whose template does not follow an appointment (a state
+        rule gave the service its appointment mode) gives its own days."""
+        modes = self._appointment_deadline_modes()
+        unlinked = self.filtered(lambda s: not s.template_service_id and not s.is_root_a_template)
+        templates_by_key = {}
+        if unlinked:
+            templates = self.search(
+                [
+                    ("is_root_a_template", "=", True),
+                    ("name", "in", list(set(unlinked.mapped("name")))),
+                    ("workflow_id", "in", unlinked.workflow_id.ids),
+                ],
+                order="id",
+            )
+            for template in templates:
+                templates_by_key.setdefault((template.name, template.workflow_id), template)
+        template_days = {}
+        for service in self:
+            if service.is_root_a_template:
+                template = service
+            else:
+                template = (
+                    service.template_service_id
+                    or templates_by_key.get((service.name, service.workflow_id))
+                    or service
+                )
+                if template.use_project_deadline_from not in modes:
+                    template = service
+            template_days[service] = template.days_relative_to_project
+        return template_days
 
     @api.depends(
         "project_deadline",

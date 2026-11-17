@@ -285,6 +285,18 @@ tick, and the ship's `_compute_service_ids` returned without a value for the cop
 riverflow `test_highlight_row.py`, crewradar `test_service_ids_form_copy.py` and
 `test_ship_contacts.py`.
 
+A compute that creates or deletes records must not run its sync on the copy. The onchange
+reaches copies of records that are not on the form, through the dependents of the changed field:
+a change of a name walks to every stored field that depends on it, and reads the inverse one2many
+of each record on the way, which computes it on the copy. Give the copy the value of its stored
+record (`record.item_ids = record._origin.item_ids`) and sync only the records with an id; the
+save syncs the stored record. Example: radar 17-Nov-2026. Since rivercreds stored the holder name
+on plan items, a rename of a ship or an employee in its form ran
+`rivercreds.plan.slot._compute_item_ids` on copies of the plan rows, which created items without
+a plan row ("Missing required value for the field 'Slot'"). Tests: rivercreds
+`test_rename_holder_in_form_keeps_plan_items`, crewradar_creds
+`test_rename_ship_in_form_keeps_plan_items`.
+
 ### _register_hook() for Post-Upgrade Actions
 
 To run code automatically after every module upgrade (not on plain restarts), use `_register_hook()` on `ir.module.module`. This hook is called once per registry load (STEP 9 in `odoo/modules/loading.py`). Check `registry.updated_modules` to gate execution:

@@ -200,4 +200,18 @@ Built on `feat/audit-insert-id-only` in otenydoo and radar; oteny_audit 19.0.1.7
   "Crewradar Timesheet Log Entry 7498 on Tyda Kyra | Pinero, Melchor Jay T. | October 2026".
   oteny_audit 142 tests, full suite 0 failed, 0 errors of 6,164 tests. Old rows keep their
   stored names.
-- **Not done:** the release check on `test1`.
+- **Read check against test1** (18-Nov-2026, asked by Ries): the audit log view of 8 log
+  entries and 8 employees (the 3 busiest of each, 5 random of each), read with the domain of
+  the Action menu's Audit Log, on test1 over SSH (old code, its own production copy) and on
+  `crmain` (new code, after the purge). In the history that both copies share, 6,252 log rows:
+  5,435 give the same view rows, field for field and with the same view id; 816 are insert
+  snapshots that became one id row, with the same record name, parent name, user, time and
+  transaction; 1 (log row 3831202, an attachment insert of 21-May-2026 under employee 102) is
+  only on test1, because the 180-day retention deleted it on production on 17-Nov, after
+  test1's copy; the control (test1 against the same backup with the old code) shows the same
+  difference. Nothing else differs. View rows per record drop by 0 % (log entry 610) to 80 %
+  (employee 128). The first page is now newest first; on test1 it mixed child rows back to
+  July into the first page of log entry 8780. On `crmain` the ORM read with the action's domain
+  (the new `_search` and order) returned the same rows and values as the SQL view for all 16
+  records.
+- **Not done:** the release check on `test1` with the new code.

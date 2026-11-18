@@ -258,4 +258,8 @@ Built on `feat/audit-insert-id-only` in otenydoo and radar; oteny_audit 19.0.1.7
   holds such a snapshot, retrying every minute until 05:00 UTC; checked on a copy of the backup
   with a `psql` session holding a snapshot: the step waited, and ran (240 MB → 110 MB) once the
   session was gone.
+- **test1 with the VACUUM wait** (radar `test1` `95f546eca`, oteny_audit 19.0.1.750): the update log
+  has no WARNING or ERROR line. Through the API: the ship form has the Audit page; the tab's read
+  of log entry 8780 gives 160 of 2,036 rows, newest first, in 240 ms including the network from
+  the laptop (employee 102: 160 of 303 rows, 149 ms); the captions leave the user out.
 - **Not done:** production (`test1-to-main`).

@@ -30,7 +30,7 @@ class TestAuditLogChatterPreservation(TransactionCase):
         self.assertFalse(self.log_model._is_audit_ignored("mail.message"))
 
     def test_mail_message_body_is_html_stripped(self):
-        """mail.message creates an audit row whose body is plain text, not HTML."""
+        """A deleted mail.message leaves an audit row whose body is plain text, not HTML."""
         partner = self.env["res.partner"].create({"name": "Chatter probe parent"})
         message = self.env["mail.message"].create(
             {
@@ -42,18 +42,23 @@ class TestAuditLogChatterPreservation(TransactionCase):
             }
         )
         message.flush_recordset()
+        message_id = message.id
+        message.unlink()
+        self.env.flush_all()
 
+        # Since 19.0.1.747 an insert holds only the id: the body is in the message itself,
+        # and in the delete snapshot once the message is gone.
         snapshot_logs = self.log_model.search(
             [
                 ("model_name", "=", "mail.message"),
-                ("record_id", "=", message.id),
-                ("change_type", "=", "i"),
+                ("record_id", "=", message_id),
+                ("change_type", "=", "d"),
                 ("field_name", "=", "__snapshot__"),
             ]
         )
         self.assertEqual(len(snapshot_logs), 1)
         body_entry = (snapshot_logs.snapshot or {}).get("body")
-        self.assertIsNotNone(body_entry, "body must be in the create snapshot")
+        self.assertIsNotNone(body_entry, "body must be in the delete snapshot")
         # Tags removed, prose preserved.
         self.assertNotIn("<", body_entry["raw"])
         self.assertNotIn(">", body_entry["raw"])

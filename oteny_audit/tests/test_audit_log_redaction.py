@@ -2,7 +2,7 @@
 #
 # Coverage for secret redaction: a credential must never reach an audit row, on any change
 # type, in either storage shape (the flat old_value/new_value columns of an update, and the
-# `snapshot` jsonb of an insert or a delete). The audit log is readable and value-searchable
+# `snapshot` jsonb of a delete; an insert holds the record's id only since 19.0.1.747). The audit log is readable and value-searchable
 # by every internal user, so this is a security boundary, not a storage optimisation.
 #
 # Three levers are exercised:
@@ -43,6 +43,14 @@ class TestAuditLogRedaction(TransactionCase):
         self.assertEqual(len(rows), 1, f"expected one {change_type} snapshot row")
         return rows.snapshot or {}
 
+    def _delete_snapshot(self, record):
+        """Delete `record` and return its delete snapshot. Since 19.0.1.747 an insert holds
+        the id only, so the delete snapshot is the one snapshot that holds field values."""
+        record.flush_recordset()
+        model_name, record_id = record._name, record.id
+        record.unlink()
+        return self._snapshot(model_name, record_id, "d")
+
     def _update_rows(self, model_name, record_id, field_name):
         return self.log_model.search(
             [
@@ -67,37 +75,46 @@ class TestAuditLogRedaction(TransactionCase):
             }
         )
 
-    # --- inserts --------------------------------------------------------------------- #
+    # --- snapshots ------------------------------------------------------------------ #
 
-    def test_insert_redacts_name_shaped_field(self):
+    def test_an_insert_stores_no_value(self):
+        """Since 19.0.1.747 an insert row holds the record's id only: no credential can
+        reach it."""
         record = self._make()
-        entry = self._snapshot(self.model._name, record.id, "i")["access_token"]
+        record.flush_recordset()
+        insert = self.log_model.search(
+            [("model_name", "=", self.model._name), ("record_id", "=", record.id), ("change_type", "=", "i")]
+        )
+        self.assertEqual((insert.field_name, insert.new_value, insert.snapshot), ("id", str(record.id), False))
+
+    def test_snapshot_redacts_name_shaped_field(self):
+        snapshot = self._delete_snapshot(self._make())
+        entry = snapshot["access_token"]
         self.assertEqual(entry["raw"], AUDIT_REDACTED)
         self.assertEqual(entry["display"], AUDIT_REDACTED)
-        self.assertNotIn(self.SECRET, str(self._snapshot(self.model._name, record.id, "i")))
+        self.assertNotIn(self.SECRET, str(snapshot))
 
-    def test_insert_redacts_declared_field(self):
+    def test_snapshot_redacts_declared_field(self):
         """`vault_handle` matches no shape at all — only the class declaration reaches it."""
-        record = self._make()
-        snapshot = self._snapshot(self.model._name, record.id, "i")
+        snapshot = self._delete_snapshot(self._make())
         self.assertEqual(snapshot["vault_handle"]["raw"], AUDIT_REDACTED)
 
-    def test_insert_redacts_a_marker_word_inside_the_name(self):
+    def test_snapshot_redacts_a_marker_word_inside_the_name(self):
         """`stripe_secret_key` has its marker in the middle. The exact-name-plus-suffix rule
         this replaced missed the whole `*_secret_*` / `*_key` family."""
-        snapshot = self._snapshot(self.model._name, self._make().id, "i")
+        snapshot = self._delete_snapshot(self._make())
         self.assertEqual(snapshot["stripe_secret_key"]["raw"], AUDIT_REDACTED)
 
-    def test_insert_redacts_a_binary_field(self):
+    def test_snapshot_redacts_a_binary_field(self):
         """The regression that motivated the type DENY list. An allow-list of char/text/html
         let `ir.mail_server.smtp_ssl_private_key` — a Binary bytea column — write a full PEM
         into the audit log on every mail-server edit."""
-        snapshot = self._snapshot(self.model._name, self._make().id, "i")
+        snapshot = self._delete_snapshot(self._make())
         self.assertEqual(snapshot["ssl_private_key"]["raw"], AUDIT_REDACTED)
         self.assertNotIn("PRIVATE KEY", str(snapshot))
 
-    def test_insert_redacts_a_json_field(self):
-        snapshot = self._snapshot(self.model._name, self._make().id, "i")
+    def test_snapshot_redacts_a_json_field(self):
+        snapshot = self._delete_snapshot(self._make())
         self.assertEqual(snapshot["token_payload"]["raw"], AUDIT_REDACTED)
         self.assertNotIn(self.SECRET, str(snapshot))
 
@@ -112,24 +129,23 @@ class TestAuditLogRedaction(TransactionCase):
                 f"ir.mail_server.{field_name} must be redacted",
             )
 
-    def test_insert_keeps_the_field_key_so_the_change_is_still_visible(self):
+    def test_snapshot_keeps_the_field_key_so_the_value_is_still_visible(self):
         """A redacted field must stay IN the snapshot with a placeholder. Dropping the key
         would hide that the field changed at all, and would shift the row count the
         aggregated view unnests."""
-        snapshot = self._snapshot(self.model._name, self._make().id, "i")
+        snapshot = self._delete_snapshot(self._make())
         self.assertIn("access_token", snapshot)
         self.assertEqual(snapshot["access_token"]["label"], "Access Token")
 
-    def test_insert_does_not_redact_a_non_secret_field(self):
-        record = self._make()
-        snapshot = self._snapshot(self.model._name, record.id, "i")
+    def test_snapshot_does_not_redact_a_non_secret_field(self):
+        snapshot = self._delete_snapshot(self._make())
         self.assertEqual(snapshot["cache_key"]["raw"], "places:schiphol")
         self.assertEqual(snapshot["name"]["raw"], "Redaction probe")
 
-    def test_insert_does_not_redact_a_non_text_field(self):
+    def test_snapshot_does_not_redact_a_non_text_field(self):
         """`retry_token` matches the name shape but is an Integer. A counter is not a
         credential, and the field-type gate is what keeps `tokens_in` readable."""
-        snapshot = self._snapshot(self.model._name, self._make().id, "i")
+        snapshot = self._delete_snapshot(self._make())
         self.assertEqual(snapshot["retry_token"]["raw"], "7")
 
     # --- updates --------------------------------------------------------------------- #
@@ -174,8 +190,7 @@ class TestAuditLogRedaction(TransactionCase):
         param = self.env["ir.config_parameter"].create(
             {"key": "oteny.audit.probe_api_key", "value": self.SECRET}
         )
-        param.flush_recordset()
-        snapshot = self._snapshot("ir.config_parameter", param.id, "i")
+        snapshot = self._delete_snapshot(param)
         self.assertEqual(snapshot["value"]["raw"], AUDIT_REDACTED)
 
     def test_secret_system_parameter_key_stays_readable(self):
@@ -184,8 +199,7 @@ class TestAuditLogRedaction(TransactionCase):
         param = self.env["ir.config_parameter"].create(
             {"key": "oteny.audit.probe_api_key", "value": self.SECRET}
         )
-        param.flush_recordset()
-        snapshot = self._snapshot("ir.config_parameter", param.id, "i")
+        snapshot = self._delete_snapshot(param)
         self.assertEqual(snapshot["key"]["raw"], "oteny.audit.probe_api_key")
         row = self.log_model.search(
             [("model_name", "=", "ir.config_parameter"), ("record_id", "=", param.id)], limit=1
@@ -221,8 +235,7 @@ class TestAuditLogRedaction(TransactionCase):
         param = self.env["ir.config_parameter"].create(
             {"key": "oteny.audit.probe_base_url", "value": "https://example.test"}
         )
-        param.flush_recordset()
-        snapshot = self._snapshot("ir.config_parameter", param.id, "i")
+        snapshot = self._delete_snapshot(param)
         self.assertEqual(snapshot["value"]["raw"], "https://example.test")
 
     def test_param_key_shape(self):
@@ -259,8 +272,7 @@ class TestAuditLogRedaction(TransactionCase):
         param = self.env["ir.config_parameter"].create(
             {"key": "oteny.audit.probe_password_minlength", "value": "8"}
         )
-        param.flush_recordset()
-        snapshot = self._snapshot("ir.config_parameter", param.id, "i")
+        snapshot = self._delete_snapshot(param)
         self.assertEqual(snapshot["value"]["raw"], "8")
 
     def test_field_name_shape(self):

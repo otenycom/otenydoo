@@ -111,7 +111,8 @@ class OtenyAuditTestCoverage(models.Model):
     cut I (`code_state`, read-only without a compute, is logged; `name_upper`, a read-only
     compute, is not), the read-only `active`, `parent_path`, rule N1 (`flag`, `count` without
     a default; `flag_on` with one) and `_oteny_audit_ignore_fields` (`skipped_note`, and the
-    mixin's `mixin_note`)."""
+    mixin's `mixin_note`). `holder_id` (ON DELETE CASCADE) and `parent_id` (SET NULL) test the
+    rows that a database cascade writes (19.0.1.747)."""
 
     _name = "oteny.audit.test.coverage"
     _description = "Oteny Audit Test Coverage Model"
@@ -132,6 +133,7 @@ class OtenyAuditTestCoverage(models.Model):
     parent_path = fields.Char(index=True)
     tag_ids = fields.Many2many("oteny.audit.test.child")
     kind = fields.Selection([("alpha", "Alpha kind"), ("beta", "Beta kind")])
+    holder_id = fields.Many2one("oteny.audit.test.child", ondelete="cascade")
 
     @api.depends("name")
     def _compute_name_upper(self):

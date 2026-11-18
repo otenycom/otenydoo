@@ -32,20 +32,15 @@ class TestAuditLog(TransactionCase):
         self.addCleanup(restore)
 
     def test_create_logs_insert(self):
-        """Test that creating a record logs an insert as a single tombstone snapshot row.
-
-        Measure 3: an insert produces ONE log row with field_name='__snapshot__'
-        and a `snapshot` dict containing every captured non-default field value.
-        """
-        # Create a test partner
+        """Creating a record logs one insert row that holds the record's id and no field
+        value (19.0.1.747): the values are in the record itself."""
         partner = self.env["res.partner"].create(
             {
                 "name": "Test Partner for Audit",
                 "email": "test@example.com",
             }
         )
-
-        # Check that one insert snapshot log was created
+        partner.flush_recordset()
         insert_logs = self.env["oteny.audit.log"].search(
             [
                 ("model_name", "=", "res.partner"),
@@ -53,20 +48,12 @@ class TestAuditLog(TransactionCase):
                 ("change_type", "=", "i"),
             ]
         )
-
-        self.assertTrue(insert_logs, "Insert log should be created")
-        # All insert rows are snapshots (no per-field rows for create).
-        self.assertTrue(all(l.field_name == "__snapshot__" for l in insert_logs))
-
-        # Snapshot of one of the rows should carry the non-default fields.
-        merged_snapshot = {}
-        for l in insert_logs:
-            merged_snapshot.update(l.snapshot or {})
-
-        self.assertIn("name", merged_snapshot, "Name field should be in the snapshot")
-        self.assertEqual(merged_snapshot["name"]["raw"], "Test Partner for Audit")
-        self.assertIn("email", merged_snapshot, "Email field should be in the snapshot")
-        self.assertEqual(merged_snapshot["email"]["raw"], "test@example.com")
+        self.assertEqual(len(insert_logs), 1, "Insert log should be created")
+        self.assertEqual(
+            (insert_logs.field_name, insert_logs.new_value, insert_logs.snapshot),
+            ("id", str(partner.id), False),
+        )
+        self.assertEqual(insert_logs.record_display_name, partner.display_name)
 
     def test_write_logs_update(self):
         """Test that updating a record logs an update"""
@@ -584,48 +571,6 @@ class TestAuditLog(TransactionCase):
             "Grandparent display name should match",
         )
 
-    def test_create_no_blank_values_logged(self):
-        """Test that the insert snapshot only contains non-blank field values."""
-        partner = self.env["res.partner"].create(
-            {
-                "name": "Test Partner With Blanks",
-                "email": "",  # Explicitly blank
-                "phone": "",  # Explicitly blank
-                "street": "Some Street",  # Non-blank
-            }
-        )
-
-        insert_logs = self.env["oteny.audit.log"].search(
-            [
-                ("model_name", "=", "res.partner"),
-                ("record_id", "=", partner.id),
-                ("change_type", "=", "i"),
-            ]
-        )
-
-        merged_snapshot = {}
-        for l in insert_logs:
-            merged_snapshot.update(l.snapshot or {})
-
-        # Name and street should be in the snapshot (they have values)
-        self.assertIn("name", merged_snapshot, "Name should be in snapshot (has value)")
-        self.assertEqual(merged_snapshot["name"]["raw"], "Test Partner With Blanks")
-        self.assertIn("street", merged_snapshot, "Street should be in snapshot (has value)")
-        self.assertEqual(merged_snapshot["street"]["raw"], "Some Street")
-
-        # Blank fields should NOT appear in the snapshot.
-        self.assertNotIn("email", merged_snapshot, "Email should not be in snapshot (blank)")
-        self.assertNotIn("phone", merged_snapshot, "Phone should not be in snapshot (blank)")
-
-        # Optional fields not provided should not appear in the snapshot.
-        for field_name in ["mobile", "city", "zip", "country_id", "state_id"]:
-            if field_name in merged_snapshot:
-                self.assertNotEqual(
-                    merged_snapshot[field_name]["raw"],
-                    "",
-                    f"Field {field_name} should not be snapshotted with blank value",
-                )
-
     def test_unlink_no_blank_values_logged(self):
         """The delete tombstone only contains non-blank fields, but every non-blank
         field at the time of deletion is captured (full reconstructability)."""
@@ -713,15 +658,10 @@ class TestAuditLog(TransactionCase):
             log._audit_log_action_xml_id(m1).startswith("oteny_audit.action_audit_log_"),
         )
 
-    def test_create_all_defaults_or_empty_logs_snapshot(self):
-        """Even when a record has only default/empty values, an insert tombstone snapshot is recorded.
-
-        Measure 3: a snapshot row is always emitted for a create event, with
-        an empty `snapshot` dict when there are no non-default values to
-        capture. The row itself is the tombstone proof of the create.
-        """
+    def test_create_all_defaults_or_empty_logs_insert(self):
+        """Even when a record has only default/empty values, its insert row is recorded."""
         test_parent = self.env["oteny.audit.test.parent"].create({})
-
+        test_parent.flush_recordset()
         logs = self.env["oteny.audit.log"].search(
             [
                 ("model_name", "=", "oteny.audit.test.parent"),
@@ -729,13 +669,7 @@ class TestAuditLog(TransactionCase):
                 ("change_type", "=", "i"),
             ]
         )
-
-        # Exactly one snapshot row is emitted per created record.
-        self.assertGreaterEqual(len(logs), 1, "Should create at least one snapshot log row")
-        snapshot_logs = logs.filtered(lambda l: l.field_name == "__snapshot__")
-        self.assertTrue(snapshot_logs, "Should have a tombstone snapshot row")
-        # Snapshot may be empty (no non-default values) but the row exists.
-        self.assertIsNotNone(snapshot_logs[0].snapshot)
+        self.assertEqual(logs.mapped("field_name"), ["id"])
 
     def test_unlink_all_defaults_or_empty_logs_snapshot(self):
         """Even a delete of a record with only defaults emits a tombstone snapshot row."""

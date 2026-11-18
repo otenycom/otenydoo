@@ -3,7 +3,8 @@
 Status: built on 18-Nov-2026 on `feat/audit-insert-id-only` (otenydoo and radar), on `crmain`
 restored from `~/Downloads/cr.zip` (production backup of 18-Nov-2026). Merged on 19-Nov-2026 into
 otenydoo `main` (`11580d9`) and radar `dev` (`0e9bd7974`); the merge renumbered the migration
-from 19.0.1.747 to 19.0.1.748 (oteny_audit 19.0.1.748). Deployed to test1 for the release check.
+from 19.0.1.747 to 19.0.1.748 (oteny_audit 19.0.1.748). On production since 19-Nov-2026 (radar
+`main` `95f546eca`, oteny_audit 19.0.1.750); the purge runs on the night of 19-Nov-2026 at 01:00 UTC.
 Asked by Ries on 18-Nov-2026, with two goals:
 
 1. The first page of the audit log opens at once from every Action menu that shows it (the
@@ -262,4 +263,11 @@ Built on `feat/audit-insert-id-only` in otenydoo and radar; oteny_audit 19.0.1.7
   has no WARNING or ERROR line. Through the API: the ship form has the Audit page; the tab's read
   of log entry 8780 gives 160 of 2,036 rows, newest first, in 240 ms including the network from
   the laptop (employee 102: 160 of 303 rows, 149 ms); the captions leave the user out.
-- **Not done:** production (`test1-to-main`).
+- **Production** (19-Nov-2026, radar `main` `95f546eca`, oteny_audit 19.0.1.750): the update log has
+  no WARNING or ERROR line; the migration set the purge phase to `inserts` and the action runs at
+  01:00 UTC. Before the purge: `oteny_audit_log` 221 MB, the database 1,155 MB, 87,659 insert
+  snapshots. Read only, over SSH: the log entry form has the Audit page; the tab's read of log
+  entry 8780 takes 103 ms (160 of 3,293 rows), of employee 102 44 ms (160 of 651 rows). The API
+  (`/json/2/`) answered with the odoo.sh "Access Denied" page the same evening, also for a plain
+  read; test1 answered the same key.
+- **Not done:** the result of the night run on production (sizes after the purge and the VACUUM).

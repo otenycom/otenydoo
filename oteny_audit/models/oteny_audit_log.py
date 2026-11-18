@@ -598,6 +598,8 @@ action = {
     #   done    - a later run does nothing but switch the action off again.
     _PURGE_PHASE_PARAM = "oteny_audit.purge_phase"
     _PURGE_NEXT_ID_PARAM = "oteny_audit.purge_next_id"
+    _PURGE_VACUUM_AFTER_XID_PARAM = "oteny_audit.purge_vacuum_after_xid"
+    _PURGE_VACUUM_LAST_HOUR_UTC = 5
     _PURGE_BATCH = 20000
     _EMPTY_RAW_VALUES = ("", "False", "0", "0.0", "[]", "()")
 
@@ -620,9 +622,19 @@ action = {
             return
         if phase == "vacuum":
             self.env.cr.commit()  # hold no lock on the audit tables while VACUUM waits for one
+            if self._purge_vacuum_blocked():
+                # Another connection still sees the rows that the purge made dead, so VACUUM
+                # FULL would lock both tables and give nothing back (test1, 19-Nov-2026: the log
+                # table grew from 213 MB to 237 MB). Try again in a minute, at night only: a
+                # retry after 05:00 UTC waits for the next night's run.
+                if fields.Datetime.now().hour < self._PURGE_VACUUM_LAST_HOUR_UTC:
+                    self._purge_trigger_again()
+                Cron._commit_progress(1, remaining=0)
+                return
             if self._purge_vacuum():
                 params.set_param(self._PURGE_PHASE_PARAM, "done")
                 params.set_param(self._PURGE_NEXT_ID_PARAM, False)
+                params.set_param(self._PURGE_VACUUM_AFTER_XID_PARAM, False)
                 self._purge_switch_off()
                 Cron._commit_progress(1, remaining=0, deactivate=True)
             else:
@@ -639,12 +651,47 @@ action = {
             # its snapshot is older than the batches of this job, and VACUUM must keep every
             # row version that snapshot can see: on crmain on 18-Nov-2026 the log table grew
             # from 212 MB to 234 MB instead of shrinking. Reporting no work left ends the job.
-            cron = self.env.ref("oteny_audit.ir_cron_audit_log_purge", raise_if_not_found=False)
-            if cron:
-                cron._trigger(fields.Datetime.now() + timedelta(minutes=1))
+            # The transaction number of this point lets the VACUUM step wait until no other
+            # connection has a snapshot from before it (_purge_vacuum_blocked).
+            self.env.cr.execute("SELECT txid_current()")
+            params.set_param(self._PURGE_VACUUM_AFTER_XID_PARAM, self.env.cr.fetchone()[0])
+            self._purge_trigger_again()
             Cron._commit_progress(max(done, 1), remaining=0)
             return
         Cron._commit_progress(max(done, 1), remaining=1)
+
+    def _purge_trigger_again(self):
+        """Run the purge action again in a minute, as a new job."""
+        cron = self.env.ref("oteny_audit.ir_cron_audit_log_purge", raise_if_not_found=False)
+        if cron:
+            cron._trigger(fields.Datetime.now() + timedelta(minutes=1))
+
+    def _purge_vacuum_blocked(self):
+        """True while another connection of this database holds a snapshot from before the last
+        batch of the purge. VACUUM FULL must keep every row version that such a snapshot can
+        see, so it would lock both tables and give no space back. A web request, another cron
+        job or a shell can hold one; on test1 on 19-Nov-2026 one did, and a VACUUM FULL by hand
+        a few minutes later took the log table from 237 MB to 113 MB."""
+        return bool(self._purge_snapshot_holders())
+
+    def _purge_snapshot_holders(self):
+        """The process ids of the other connections of this database whose snapshot is older
+        than the last batch of the purge (empty when no batch point is stored)."""
+        after_xid = self._purge_params().get_param(self._PURGE_VACUUM_AFTER_XID_PARAM)
+        if not after_xid:
+            return []
+        # Within one transaction PostgreSQL returns the first reading of pg_stat_activity
+        # again; clear it, so a second call sees the connections as they are now.
+        self.env.cr.execute("SELECT pg_stat_clear_snapshot()")
+        # backend_xmin is a 32-bit transaction number; txid_current() is 64-bit (epoch above).
+        self.env.cr.execute(
+            """SELECT pid FROM pg_stat_activity
+                WHERE datname = current_database() AND pid <> pg_backend_pid()
+                  AND backend_xmin IS NOT NULL
+                  AND age(backend_xmin) >= age((%s::bigint %% 4294967296)::text::xid)""",
+            [int(after_xid)],
+        )
+        return [row[0] for row in self.env.cr.fetchall()]
 
     def _purge_switch_off(self):
         """Switch the purge action off outside a cron run (a shell). Inside a cron run, also

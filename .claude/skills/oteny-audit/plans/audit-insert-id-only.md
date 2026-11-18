@@ -124,6 +124,10 @@ An insert snapshot repeats the current record, except in three cases:
    212 MB to 234 MB. So when the last batch is done, the action reports no work left (the job
    ends) and triggers itself one minute later; that new job runs `VACUUM FULL`. This also
    applies to the purge of 19.0.1.723, which ran its VACUUM in the job of its last batches.
+   And it runs only when no other connection holds a snapshot from before the last batch
+   (`_purge_vacuum_blocked`): on test1 a web request or cron of the live server held one, and
+   the VACUUM gave nothing back. While one is open, the step tries again every minute until
+   05:00 UTC, then the next night.
 
 9. **Every audit row names its record as "<what> on <where>"** (asked by Ries on 18-Nov-2026,
    after a walk of Audit > Log on `crmain` showed "Insert Message by Fred van Rookhuijzen" with
@@ -243,4 +247,15 @@ Built on `feat/audit-insert-id-only` in otenydoo and radar; oteny_audit 19.0.1.7
   July into the first page of log entry 8780. On `crmain` the ORM read with the action's domain
   (the new `_search` and order) returned the same rows and values as the SQL view for all 16
   records.
-- **Not done:** the release check on `test1` with the new code.
+- **Release check on test1** (19-Nov-2026, radar `test1` `07065d6e1`, oteny_audit 19.0.1.749 after
+  the deploy bump): the update log has no WARNING or ERROR line; the migration 19.0.1.748 set the
+  phase to `inserts`. The purge, run by hand through the cron runner: the batches 4.0 s (86,896
+  insert snapshots became id rows, 940 stayed), 536 MB of WAL; the first page of log entry 8780
+  70 ms with 3,307 rows before, 77 ms with 2,036 rows after (server time). The `VACUUM FULL` gave
+  no space back (213 MB → 237 MB): another connection of the test1 server held a snapshot from
+  before the batches. By hand a few minutes later: `oteny_audit_log` 237 MB → 113 MB, the
+  database 1,058 MB → 933 MB. Fix (decision 8): the VACUUM step waits until no other connection
+  holds such a snapshot, retrying every minute until 05:00 UTC; checked on a copy of the backup
+  with a `psql` session holding a snapshot: the step waited, and ran (240 MB → 110 MB) once the
+  session was gone.
+- **Not done:** production (`test1-to-main`).

@@ -5,6 +5,7 @@
 # cut F and § 11). The old rows are made with SQL, in the shape the old code wrote them.
 import json
 
+from odoo.sql_db import db_connect
 from odoo.tests import TransactionCase, tagged
 from odoo.tools import SQL
 
@@ -150,3 +151,31 @@ class TestAuditPurge(TransactionCase):
         self.assertTrue(cron.active, "no write on the running cron")
         self.log_model._purge_switch_off()
         self.assertFalse(cron.active, "outside a cron run the purge switches the action off")
+
+    def test_vacuum_waits_while_another_connection_holds_an_older_snapshot(self):
+        """VACUUM FULL keeps every row version that another connection's snapshot can see, so
+        it waits until no connection has a snapshot from before the purge's last batch (test1,
+        19-Nov-2026: a VACUUM FULL during such a snapshot gave no space back)."""
+        Log = self.log_model
+        params = Log._purge_params()
+        other = db_connect(self.env.cr.dbname).cursor()
+        try:
+            other.execute("SELECT pg_backend_pid()")
+            other_pid = other.fetchone()[0]
+            other.execute("SELECT count(*) FROM oteny_audit_log")  # holds its snapshot
+            # The batch point: a transaction that starts after that snapshot.
+            fresh = db_connect(self.env.cr.dbname).cursor()
+            try:
+                fresh.execute("SELECT txid_current()")
+                params.set_param(Log._PURGE_VACUUM_AFTER_XID_PARAM, fresh.fetchone()[0])
+                fresh.commit()
+            finally:
+                fresh.close()
+            self.assertIn(other_pid, Log._purge_snapshot_holders(), "an older snapshot blocks VACUUM FULL")
+            self.assertTrue(Log._purge_vacuum_blocked())
+            other.rollback()
+            self.assertNotIn(other_pid, Log._purge_snapshot_holders(), "after its rollback it blocks no more")
+        finally:
+            other.close()
+        params.set_param(Log._PURGE_VACUUM_AFTER_XID_PARAM, False)
+        self.assertEqual(Log._purge_snapshot_holders(), [], "no stored point, no wait")

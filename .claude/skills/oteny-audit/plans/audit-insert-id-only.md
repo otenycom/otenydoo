@@ -123,6 +123,29 @@ An insert snapshot repeats the current record, except in three cases:
    ends) and triggers itself one minute later; that new job runs `VACUUM FULL`. This also
    applies to the purge of 19.0.1.723, which ran its VACUUM in the job of its last batches.
 
+9. **Every audit row names its record as "<what> on <where>"** (asked by Ries on 18-Nov-2026,
+   after a walk of Audit > Log on `crmain` showed "Insert Message by Fred van Rookhuijzen" with
+   no hint of what was posted). Since an insert holds the id only, the record name is what says
+   which record a row is about. On the backup, about 19,000 insert rows had no readable name:
+   15,132 messages (Odoo's display name of a message is its subject), and every row of four
+   models without a name field, which showed Odoo's fallback "model,id"
+   (`crewradar.entry.billing.line` 1,568, `crewradar.timesheet.log.entry` 905,
+   `rivercreds.document.import.job` 1,732, `crewradar.medical.expense` 49). And 16,511
+   attachment inserts named only a file, often the timestamp of a scan. `_audit_record_name` in
+   `base_patch.py` builds the name at all six places that write a row:
+   - a model may declare `_oteny_audit_display_name(record)`: `mail.message` gives the subject,
+     else the first 80 characters of the body, else the subtype, on its document;
+     `ir.attachment` gives the file name on its record;
+   - else the display name; when that is empty or the fallback "model,id", the model's label
+     and the id, on the record's audit parent ("Log Entry Billing Line 8934 on － Philipskercke I
+     | Tan | DU | Working | 27-Nov-26").
+   A name is not a field value: every audit row already stores one. Cost: 1 to 3 ms per row of
+   these models (one read of the parent's name). `account.move` keeps "Draft Invoice": that is
+   its true name at the insert, and the posting row shows the number. Not in this change: real
+   display names for the four models (they also show "model,id" in the rest of the screens);
+   `crewradar.medical.expense` and `rivercreds.document.import.job` have no audit parent, so
+   their audit name is the label and the id only.
+
 ## 3. Build and checks
 
 - `oteny_audit/models/base_patch.py`: decisions 1 to 3.
@@ -171,5 +194,10 @@ Built on `feat/audit-insert-id-only` in otenydoo and radar; oteny_audit 19.0.1.7
   direct and child rows, the read by id); tests that read an insert snapshot now read the delete
   snapshot or the update row. Full suite on `cr-test`, the 20 modules of `odoo.installModules`:
   0 failed, 0 errors of 6,157 tests.
-- **Not done:** the skill text (`oteny-audit/SKILL.md`), the commit, the release check on
-  `test1`.
+- **Record names (decision 9):** on `crmain` a message on a service reads "'Flight booked : KL
+  808, MNL → AMS, …' on Adelaide | Book Flight ON | Labacana Cruz | CS"; an attachment
+  "image004.png on Integro | Arrange Sign OFF transport | …"; a timesheet log entry
+  "Crewradar Timesheet Log Entry 7498 on Tyda Kyra | Pinero, Melchor Jay T. | October 2026".
+  oteny_audit 142 tests, full suite 0 failed, 0 errors of 6,164 tests. Old rows keep their
+  stored names.
+- **Not done:** the release check on `test1`.

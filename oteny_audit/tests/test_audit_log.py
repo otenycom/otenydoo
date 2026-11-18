@@ -290,8 +290,8 @@ class TestAuditLog(TransactionCase):
         # For parent references from child logs (mail.message), target_display_name should be the child's display name
         self.assertEqual(
             partner_parent_refs[0].target_display_name,
-            message.display_name,
-            "Target display name should be the message's display name for child logs",
+            self.env["mail.message"]._oteny_audit_display_name(message),
+            "Target display name should be the message's audit name for child logs",
         )
         # And parent_display_name should be the parent's display name
         self.assertEqual(
@@ -549,8 +549,8 @@ class TestAuditLog(TransactionCase):
         # For parent references from child logs (mail.message), target_display_name should be the child's display name
         self.assertEqual(
             immediate_parent_refs[0].target_display_name,
-            message.display_name,
-            "Target display name should be the message's display name for child logs",
+            self.env["mail.message"]._oteny_audit_display_name(message),
+            "Target display name should be the message's audit name for child logs",
         )
         # And parent_display_name should be the parent's display name
         self.assertEqual(
@@ -561,8 +561,8 @@ class TestAuditLog(TransactionCase):
         # For grandparent references, target_display_name should also be the child's display name
         self.assertEqual(
             grandparent_refs[0].target_display_name,
-            message.display_name,
-            "Target display name should be the message's display name for child logs",
+            self.env["mail.message"]._oteny_audit_display_name(message),
+            "Target display name should be the message's audit name for child logs",
         )
         # And parent_display_name should be the grandparent's display name
         self.assertEqual(

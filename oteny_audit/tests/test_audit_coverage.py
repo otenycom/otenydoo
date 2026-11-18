@@ -167,6 +167,33 @@ class TestAuditCoverage(TransactionCase):
         Child.browse(child_id).unlink()
         self.assertEqual(len(self._rows(Child, child_id, "d")), 1)
 
+    # --- the name of a record in its audit rows ---------------------------------------- #
+
+    def test_a_record_without_a_name_is_named_by_its_model_label_on_its_parent(self):
+        """Odoo's fallback "model,id" says nothing; the audit name is the model's label and
+        the id, on the record's audit parent."""
+        parent = self.env["oteny.audit.test.parent"].create({"name": "Named parent"})
+        child = self.env["oteny.audit.test.child"].create({"parent_id": parent.id})
+        self.assertEqual(
+            self._rows(child, change_type="i").record_display_name,
+            f"Oteny Audit Test Child Model {child.id} on Named parent",
+        )
+        orphan = self.env["oteny.audit.test.child"].create({})
+        self.assertEqual(self._rows(orphan, change_type="i").record_display_name, f"Oteny Audit Test Child Model {orphan.id}")
+
+    def test_a_record_with_a_name_keeps_it(self):
+        child = self.env["oteny.audit.test.child"].create({"name": "Own name"})
+        self.assertEqual(self._rows(child, change_type="i").record_display_name, "Own name")
+
+    def test_an_attachment_is_named_by_its_file_on_its_record(self):
+        partner = self.env["res.partner"].create({"name": "File holder"})
+        on_record = self.env["ir.attachment"].create(
+            {"name": "scan.pdf", "raw": b"%PDF", "res_model": "res.partner", "res_id": partner.id}
+        )
+        loose = self.env["ir.attachment"].create({"name": "loose.pdf", "raw": b"%PDF"})
+        self.assertEqual(self._rows(on_record, change_type="i").record_display_name, f"scan.pdf on {partner.display_name}")
+        self.assertEqual(self._rows(loose, change_type="i").record_display_name, "loose.pdf")
+
     # --- which records and models ----------------------------------------------------- #
 
     def test_generated_images_and_asset_bundles_write_no_rows(self):

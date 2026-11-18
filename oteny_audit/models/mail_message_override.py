@@ -36,6 +36,27 @@ class MailMessage(models.Model):
         "message_id",
     }
 
+    _OTENY_AUDIT_NAME_TEXT_LENGTH = 80
+
+    def _oteny_audit_display_name(self, record):
+        """The name of a message in its audit rows: what was posted, and where.
+
+        Odoo's display name of a message is its subject, and most messages have none: on the
+        production backup of 18-Nov-2026, 15,132 of 23,533 message inserts had an empty name,
+        and since an insert holds the id only (19.0.1.747) such a row said "Insert Message by
+        Fred" and nothing more (Ries, 18-Nov-2026). So the name is the subject, else the start
+        of the body as plain text (80 characters), else the subtype ("Note"), and then the
+        document the message is on: "'Flight booked KL 808 …' on Sardius | Book Flight ON".
+        """
+        from .base_patch import _audit_parent_name, _strip_html_for_audit
+
+        text = record.subject or _strip_html_for_audit(str(record.body or "")) or ""
+        if len(text) > self._OTENY_AUDIT_NAME_TEXT_LENGTH:
+            text = text[: self._OTENY_AUDIT_NAME_TEXT_LENGTH].rstrip() + "…"
+        text = f"'{text}'" if text else (record.subtype_id.name or "")
+        document = _audit_parent_name(record)
+        return f"{text} on {document}".strip() if document else text
+
     def _oteny_audit_ignore_record(self, record):
         """Skip a message posted into a container that is itself audit-ignored.
 

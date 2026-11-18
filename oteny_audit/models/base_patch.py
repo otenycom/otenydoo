@@ -200,6 +200,45 @@ def _is_audited_field(model, field):
     return name not in _ignored_field_names(model)
 
 
+def _audit_record_name(model, record):
+    """The name of `record` in its audit rows (`record_display_name`, the header of a row).
+
+    One structure, "<what> on <where>" (19.0.1.747, plan oteny-audit/plans/audit-insert-id-only.md):
+    - a model may declare `_oteny_audit_display_name(record)` for a better name than its
+      display name: a `mail.message` (its display name is the subject, which most messages
+      lack) and an `ir.attachment` (a file name does not say which record it belongs to);
+    - else the record's `display_name`;
+    - when that is empty or Odoo's technical fallback "model,id" (a model without a name
+      field: billing lines, timesheet log entries, medical expenses, document import jobs),
+      the model's label and the id, on the record's audit parent:
+      "Log Entry Billing Line 7714 on ＋ Rallos, Grenelle | CS | Vacation Planned | 03-Aug-26".
+    Since an insert holds the id only, the name is what says which record a row is about; on
+    the production backup of 18-Nov-2026 about 19,000 insert rows had no readable name. A name
+    is not a field value: every audit row already stores one. Fails over to the id.
+    """
+    hook = getattr(model, "_oteny_audit_display_name", None)
+    try:
+        if hook is not None:
+            name = hook(record)
+            if name:
+                return name
+        name = record.display_name
+        if name and name != f"{record._name},{record.id}":
+            return name
+        label = f"{model._description or model._name} {record.id}"
+        parent = _audit_parent_name(record)
+        return f"{label} on {parent}" if parent else label
+    except Exception:
+        return f"ID: {record.id}"
+
+
+def _audit_parent_name(record):
+    """The display name of the record's immediate audit parent (`_oteny_audit_parent_field`,
+    `_model_parent_keys`), or "" when it has none."""
+    parents = _resolve_parent_reference_unified(record.env, record, max_depth=1)
+    return parents[0]["parent_display_name"] if parents else ""
+
+
 def _record_audit_ignored(model, record):
     """Per-RECORD skip, for a model that is audited in general.
 
@@ -717,10 +756,7 @@ def patched_create(self, vals_list):
     for record in records:
         if _record_audit_ignored(self, record):
             continue
-        try:
-            record_display_name = record.display_name
-        except Exception:
-            record_display_name = f"ID: {record.id}"
+        record_display_name = _audit_record_name(self, record)
         logs.append(
             {
                 "model_name": self._name,
@@ -797,10 +833,7 @@ def _log_deletes(self):
     for record in self:
         if record.id not in old_values or _record_audit_ignored(self, record):
             continue
-        try:
-            record_display_name = record.display_name
-        except Exception:
-            record_display_name = f"ID: {record.id}"
+        record_display_name = _audit_record_name(self, record)
 
         snapshot = {}
         for col in columns:
@@ -966,10 +999,7 @@ def _log_set_null(children, field, parents):
         if _record_audit_ignored(model, child):
             continue
         old_id = old_ids.get(child.id)
-        try:
-            record_display_name = child.display_name
-        except Exception:
-            record_display_name = f"ID: {child.id}"
+        record_display_name = _audit_record_name(model, child)
         logs.append(
             {
                 "model_name": model._name,
@@ -1077,10 +1107,7 @@ def patched_write(self, vals):
                 continue
             old_rec_vals = old_values_map.get(record.id, {})
             new_rec_vals = new_values_map.get(record.id, {})
-            try:
-                record_display_name = record.display_name
-            except Exception:
-                record_display_name = f"ID: {record.id}"
+            record_display_name = _audit_record_name(self, record)
 
             for name, field in relational_fields.items():
                 old_ids = old_rec_vals.get(name, [])
@@ -1217,10 +1244,7 @@ def patched_flush(self, fnames=None):
     # Get display names for all affected records
     display_names = {}
     for rec in self.sudo().browse(all_ids):
-        try:
-            display_names[rec.id] = rec.display_name
-        except Exception:
-            display_names[rec.id] = f"ID: {rec.id}"
+        display_names[rec.id] = _audit_record_name(self, rec)
 
     # Collect old values
     old_values = {}

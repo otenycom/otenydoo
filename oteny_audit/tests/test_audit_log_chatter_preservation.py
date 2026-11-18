@@ -6,6 +6,8 @@
 # - Parent ref still resolves when the parent was unlinked earlier in the
 #   same transaction (cascade-unlink case), so the chatter trail remains
 #   visible under the parent's audit filter even after the parent is gone.
+from markupsafe import Markup
+
 from odoo.tests import TransactionCase, tagged
 
 
@@ -230,3 +232,47 @@ class TestAuditLogChatterPreservation(TransactionCase):
         self.assertEqual(len(msg_delete), 1)
         body = (msg_delete.snapshot or {}).get("body", {}).get("raw", "")
         self.assertIn("must survive cascade", body)
+
+    # --- the name of a message in its audit rows (19.0.1.747) -------------------------- #
+
+    def _insert_name(self, message):
+        message.flush_recordset()
+        return self.log_model.search(
+            [("model_name", "=", "mail.message"), ("record_id", "=", message.id), ("change_type", "=", "i")]
+        ).record_display_name
+
+    def test_message_name_is_the_start_of_its_body_on_its_document(self):
+        """Odoo's display name of a message is its subject, which most messages lack; the
+        audit name says what was posted, and where."""
+        partner = self.env["res.partner"].create({"name": "Name probe"})
+        message = partner.message_post(body=Markup("<p>Flight <b>booked</b> KL 808</p>"), message_type="comment")
+        self.assertEqual(self._insert_name(message), f"'Flight booked KL 808' on {partner.display_name}")
+
+    def test_message_name_prefers_the_subject_and_shortens_a_long_body(self):
+        partner = self.env["res.partner"].create({"name": "Name probe 2"})
+        with_subject = partner.message_post(subject="Review AB Appointment", body=Markup("<p>x</p>"))
+        self.assertEqual(self._insert_name(with_subject), f"'Review AB Appointment' on {partner.display_name}")
+        long_body = partner.message_post(body=Markup("<p>%s</p>") % ("word " * 40))
+        name = self._insert_name(long_body)
+        self.assertTrue(name.startswith("'word word"), name)
+        self.assertIn(f"…' on {partner.display_name}", name)
+
+    def test_message_without_text_or_document_is_named_by_its_subtype(self):
+        message = self.env["mail.message"].create({
+            "model": "res.partner", "res_id": 0, "body": "", "message_type": "notification",
+            "subtype_id": self.env.ref("mail.mt_note").id,
+        })
+        self.assertEqual(self._insert_name(message), "Note")
+
+    def test_message_delete_row_has_the_same_name(self):
+        partner = self.env["res.partner"].create({"name": "Name probe 3"})
+        message = partner.message_post(body=Markup("<p>Gone soon</p>"))
+        message.flush_recordset()
+        self.env.cr.precommit.data.pop("oteny_audit", None)  # a later transaction
+        message_id = message.id
+        message.unlink()
+        self.env.flush_all()
+        delete = self.log_model.search(
+            [("model_name", "=", "mail.message"), ("record_id", "=", message_id), ("change_type", "=", "d")]
+        )
+        self.assertEqual(delete.record_display_name, f"'Gone soon' on {partner.display_name}")

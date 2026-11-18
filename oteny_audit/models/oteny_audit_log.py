@@ -257,7 +257,9 @@ class OtenyAuditLog(models.Model):
         references) and follows the same skip rules. A skip writes nothing and raises
         nothing."""
         # Imported here: base_patch patches the ORM on import, after this module (see __init__).
-        from .base_patch import _create_audit_logs, _record_audit_ignored, _should_skip_audit_logging
+        from .base_patch import (
+            _audit_record_name, _create_audit_logs, _record_audit_ignored, _should_skip_audit_logging,
+        )
 
         if (
             not records
@@ -271,10 +273,7 @@ class OtenyAuditLog(models.Model):
         for record in records:
             if _record_audit_ignored(records, record):
                 continue
-            try:
-                record_display_name = record.display_name
-            except Exception:
-                record_display_name = f"ID: {record.id}"
+            record_display_name = _audit_record_name(records, record)
             logs.append(
                 {
                     "model_name": records._name,

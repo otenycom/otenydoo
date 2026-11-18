@@ -90,6 +90,18 @@ When a child model declares a parent field, its audit log entries are linked to 
 
 The caption shows an insert as its header line only ("Insert Service X by Kirsten on …"), and expands a delete snapshot into one indented line per field. **Use `field_name == '__snapshot__'` (not `change_type`) as the discriminator** for a snapshot row.
 
+### The name of a record in its audit rows
+
+Every audit row stores the name of its record (`record_display_name`, the header of the row in **Audit > Log**; a child row under its parent shows the same name). Since an insert holds the id only (19.0.1.747), this name is what says which record a row is about. The rule is one structure, "<what> on <where>", built by `base_patch._audit_record_name` at all six places that write a row (19.0.1.747, plan `plans/audit-insert-id-only.md`, decision 9; asked by Ries on 18-Nov-2026):
+
+1. A model may declare `_oteny_audit_display_name(record)` when its display name does not say what the record is. Two do:
+   - `mail.message` (`mail_message_override.py`): the subject, else the first 80 characters of the body as plain text, else the subtype ("Note"), then "on <document>": "'Flight booked : KL 808, MNL → AMS, …' on Adelaide | Book Flight ON | Labacana Cruz | CS". Odoo's display name of a message is its subject, and 64 % of the message inserts on the production backup of 18-Nov-2026 had none.
+   - `ir.attachment` (`ir_attachment_override.py`): the file name on its record ("image004.png on Integro | Arrange Sign OFF transport | …"); a file name alone, often the timestamp of a scan, does not say which record the file belongs to.
+2. Else the record's `display_name`.
+3. When that is empty or Odoo's technical fallback "model,id" (a model without a name field), the model's label and the id, on the record's audit parent (`_oteny_audit_parent_field`, `_model_parent_keys`): "Log Entry Billing Line 8934 on － Philipskercke I | Tan | DU | Working | 27-Nov-26". Without an audit parent only the label and the id remain ("Medical Expense 85", "Document Import Job 9810"); a real display name in the model's own module is the better fix there, and it also mends the breadcrumbs and links that show "model,id".
+
+A name is not a field value: it costs one read of the parent's name per row (1 to 3 ms). Rows stored before 19.0.1.747 keep their old names. `account.move` keeps "Draft Invoice": that is its true name at the insert, and the update row of the posting shows the number.
+
 ### Remarks (change type `r`)
 
 The audit log records changed values. It cannot say which action made a change: two buttons that write the same values look the same, and an action that changes nothing leaves no row. A **remark** is a line of text that says what a person or a process did (19.0.1.687; plan `riverflow/plans/transition-in-audit-log.md`, from live service 33239, where only an elimination showed that Kirsten pressed Received already and not Upload Ship A1):
@@ -656,8 +668,8 @@ Virtual rows use `(log.id * 1000 + idx) * 2` for direct rows and `(ref.id * 1000
 | `oteny_audit/models/oteny_audit_log_aggregated.py` | DB view model with HTML caption generation |
 | `oteny_audit/models/oteny_audit_mixin.py` | Optional mixin adding audit_log_ids to models |
 | `oteny_audit/models/mail_thread_override.py` | Disables Odoo's MailThread tracking |
-| `oteny_audit/models/mail_message_override.py` | `mail.message`: HTML strip on `body`, the per-record skip for a message in an audit-ignored container, the ignored delivery fields |
-| `oteny_audit/models/ir_attachment_override.py` | `ir.attachment`: the per-record skip of generated images and asset bundles, the ignored technical fields |
+| `oteny_audit/models/mail_message_override.py` | `mail.message`: HTML strip on `body`, the per-record skip for a message in an audit-ignored container, the ignored delivery fields, the audit name (`_oteny_audit_display_name`) |
+| `oteny_audit/models/ir_attachment_override.py` | `ir.attachment`: the per-record skip of generated images and asset bundles, the ignored technical fields, the audit name (`_oteny_audit_display_name`) |
 | `oteny_audit/models/res_users_override.py` | `res.users`: the ignored fields that Odoo writes by itself |
 | `oteny_audit/models/ir_config_parameter_override.py` | `ir.config_parameter`: redact `value` when the parameter `key` names a credential |
 | `oteny_audit/migrations/19.0.1.519/post-migrate.py` | One-off scrub of credentials already stored in the audit log |
@@ -691,7 +703,7 @@ Virtual rows use `(log.id * 1000 + idx) * 2` for direct rows and `(ref.id * 1000
 
 ### Completed
 
-- [x] 2026-11-18: an insert writes only the record's id, and the first page of the audit log opens at once (19.0.1.747, plan `plans/audit-insert-id-only.md`; built on `feat/audit-insert-id-only`, not merged yet). The rows of a database cascade (delete and SET NULL) are written; the view sorts by time and reads by id through an index; the purge phase `inserts` turns the stored insert snapshots into id rows, and `VACUUM FULL` runs in a job of its own. On the production backup of 18-Nov-2026: `oteny_audit_log` 212 MB → 110 MB, the first page of a busy log entry 1,339 ms → 79 ms.
+- [x] 2026-11-18: an insert writes only the record's id, and the first page of the audit log opens at once (19.0.1.747, plan `plans/audit-insert-id-only.md`; built on `feat/audit-insert-id-only`, not merged yet). The rows of a database cascade (delete and SET NULL) are written; the view sorts by time and reads by id through an index; the purge phase `inserts` turns the stored insert snapshots into id rows, and `VACUUM FULL` runs in a job of its own. Every audit row names its record as "<what> on <where>" (messages, attachments, models without a name field). On the production backup of 18-Nov-2026: `oteny_audit_log` 212 MB → 110 MB, the first page of a busy log entry 1,339 ms → 79 ms.
 - [x] 2026-11-07: fewer audit rows, the same clarity (19.0.1.723, plan `plans/audit-storage-reduction.md`). Cuts A to I and rules N1 to N4: credential plan items, the calendar end date, generated images and asset bundles, cron triggers, the fold of changes in the transaction of the create, no direct refs, the error log and reconciliation salary timelines leave the log; fields that code writes but users cannot edit (invoice links, salary links, the invoice state, the timeline type) enter it. A selection shows its label, and the fields of an insert read in label order. The one-shot night purge makes the stored rows match: on the production backup of 27-Oct-2026 the audit tables went from 1,065 MB to 289 MB.
 
 - [x] Legacy residue of the already-ignored models: the retention cleanup removed it. On `crmain` restored from the production backup of 27-Oct-2026, no row of a model on `_DEFAULT_IGNORED_MODEL_NAMES` remains, and the oldest row is from 29-Apr-2026 (plan `plans/audit-storage-reduction.md`).

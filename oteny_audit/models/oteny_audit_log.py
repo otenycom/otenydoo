@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 from collections import defaultdict
+from datetime import timedelta
 
 from odoo import Command, api, fields, models
 from odoo.sql_db import db_connect
@@ -57,18 +58,17 @@ class OtenyAuditLog(models.Model):
     change_type = fields.Selection(
         [("i", "Insert"), ("u", "Update"), ("d", "Delete"), ("r", "Remark")], required=True
     )
-    # Measure 3: tombstone-style snapshot for inserts and deletes.
-    # Holds the full set of non-default field values for the record event in
-    # the shape {field_name: {"raw": str, "display": str}}. Together with the
-    # per-field update rows that remain unchanged, this makes the record state
-    # fully reconstructable from log + (current record if still present),
-    # while collapsing the row count of inserts/deletes by ~5-8x.
+    # Tombstone snapshot of a delete: every non-blank audited field value at the delete, in
+    # the shape {field_name: {"raw": str, "display": str, "label": str}}. An insert holds the
+    # record's id only since 19.0.1.747 (field_name "id"; older inserts and a record that is
+    # gone without a delete row keep their snapshot). With the per-field update rows and the
+    # current record, the state of a record is rebuilt at any time until log expiry.
     snapshot = fields.Json(
         string="Snapshot",
         help=(
-            "For tombstone insert/delete rows: full non-default field values "
+            "For a delete row (and an insert row written before 19.0.1.747): the field values "
             "at the time of the event, structured as "
-            "{field_name: {'raw': ..., 'display': ...}}. NULL on per-field rows."
+            "{field_name: {'raw': ..., 'display': ..., 'label': ...}}. Empty on other rows."
         ),
     )
 
@@ -257,7 +257,9 @@ class OtenyAuditLog(models.Model):
         references) and follows the same skip rules. A skip writes nothing and raises
         nothing."""
         # Imported here: base_patch patches the ORM on import, after this module (see __init__).
-        from .base_patch import _create_audit_logs, _record_audit_ignored, _should_skip_audit_logging
+        from .base_patch import (
+            _audit_record_name, _create_audit_logs, _record_audit_ignored, _should_skip_audit_logging,
+        )
 
         if (
             not records
@@ -271,10 +273,7 @@ class OtenyAuditLog(models.Model):
         for record in records:
             if _record_audit_ignored(records, record):
                 continue
-            try:
-                record_display_name = record.display_name
-            except Exception:
-                record_display_name = f"ID: {record.id}"
+            record_display_name = _audit_record_name(records, record)
             logs.append(
                 {
                     "model_name": records._name,
@@ -592,6 +591,9 @@ action = {
     #             snapshot; every snapshot loses the keys of fields that are not audited, and
     #             an insert snapshot its empty values of fields without a default;
     #   refs    - the direct references (cut F);
+    #   inserts - an insert snapshot becomes a row with the record's id only, when the record
+    #             still exists or has a delete row (19.0.1.747, plan audit-insert-id-only.md;
+    #             the 19.0.1.747 migration starts the purge at this phase);
     #   vacuum  - VACUUM (FULL, ANALYZE) of the two tables, then the action switches off;
     #   done    - a later run does nothing but switch the action off again.
     _PURGE_PHASE_PARAM = "oteny_audit.purge_phase"
@@ -628,9 +630,20 @@ action = {
             return
         done, phase_done = self._purge_step(phase)
         if phase_done:
-            phase = {"deletes": "fold", "fold": "refs", "refs": "vacuum"}[phase]
+            phase = {"deletes": "fold", "fold": "refs", "refs": "inserts", "inserts": "vacuum"}[phase]
             params.set_param(self._PURGE_PHASE_PARAM, phase)
             params.set_param(self._PURGE_NEXT_ID_PARAM, False)
+        if phase == "vacuum":
+            # VACUUM FULL runs as the first call of a NEW job, a minute later. Odoo keeps the
+            # job's own cursor (the one that locked the cron row) open for the whole job, so
+            # its snapshot is older than the batches of this job, and VACUUM must keep every
+            # row version that snapshot can see: on crmain on 18-Nov-2026 the log table grew
+            # from 212 MB to 234 MB instead of shrinking. Reporting no work left ends the job.
+            cron = self.env.ref("oteny_audit.ir_cron_audit_log_purge", raise_if_not_found=False)
+            if cron:
+                cron._trigger(fields.Datetime.now() + timedelta(minutes=1))
+            Cron._commit_progress(max(done, 1), remaining=0)
+            return
         Cron._commit_progress(max(done, 1), remaining=1)
 
     def _purge_switch_off(self):
@@ -645,7 +658,7 @@ action = {
 
     def _purge_all_now(self):
         """Run every phase but VACUUM in this transaction, without a commit (tests, a shell)."""
-        for phase in ("deletes", "fold", "refs"):
+        for phase in ("deletes", "fold", "refs", "inserts"):
             self._purge_params().set_param(self._PURGE_NEXT_ID_PARAM, False)
             while not self._purge_step(phase)[1]:
                 pass
@@ -820,6 +833,52 @@ action = {
         count = self.env.cr.rowcount
         _logger.info("Audit purge: deleted %d direct references", count)
         return count, count < self._PURGE_BATCH * 5
+
+    def _purge_step_inserts(self):
+        """Turn the insert snapshots with an id in the next range into rows with the record's id
+        only, the shape that an insert writes since 19.0.1.747: the current values of the
+        fields are in the record, a later change has its update row, and a delete its snapshot.
+
+        A snapshot stays when its record is gone without a delete row (a database cascade or a
+        delete with audit off before 19.0.1.747, 926 records on the production backup of
+        18-Nov-2026): it is the only copy of that record. The snapshot of a model that is not in
+        the registry stays too; the `deletes` phase removes such rows.
+        """
+        cr = self.env.cr
+        params = self._purge_params()
+        cr.execute("SELECT min(id), max(id) FROM oteny_audit_log")
+        min_id, max_id = cr.fetchone()
+        start = max(int(params.get_param(self._PURGE_NEXT_ID_PARAM) or 0), min_id or 0)
+        end = start + self._PURGE_BATCH * 5
+        cr.execute(SQL(
+            """SELECT DISTINCT model_name FROM oteny_audit_log
+                WHERE id >= %s AND id < %s AND change_type = 'i' AND field_name = '__snapshot__'""",
+            start, end,
+        ))
+        handled = 0
+        for (model_name,) in cr.fetchall():
+            model = self.env.get(model_name)
+            if model is None or model._abstract or not model._auto:
+                continue
+            cr.execute(SQL(
+                """UPDATE oteny_audit_log log
+                      SET field_name = 'id', field_display_name = 'ID',
+                          new_value = log.record_id::text,
+                          new_value_display_name = log.record_id::text,
+                          snapshot = NULL
+                    WHERE log.id >= %s AND log.id < %s AND log.model_name = %s
+                      AND log.change_type = 'i' AND log.field_name = '__snapshot__'
+                      AND (EXISTS (SELECT 1 FROM %s rec WHERE rec.id = log.record_id)
+                           OR EXISTS (SELECT 1 FROM oteny_audit_log del
+                                       WHERE del.model_name = log.model_name
+                                         AND del.record_id = log.record_id
+                                         AND del.change_type = 'd'))""",
+                start, end, model_name, SQL.identifier(model._table),
+            ))
+            handled += cr.rowcount
+        params.set_param(self._PURGE_NEXT_ID_PARAM, end)
+        _logger.info("Audit purge: ids %d-%d, %d insert snapshots now hold the id only", start, end, handled)
+        return max(handled, 1), end > (max_id or 0)
 
     def _purge_vacuum(self):
         """VACUUM FULL gives the space of the deleted rows back to the disk. It takes an

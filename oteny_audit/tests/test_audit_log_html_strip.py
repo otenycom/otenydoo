@@ -26,35 +26,31 @@ class TestAuditLogHtmlStrip(TransactionCase):
             domain.append(("change_type", "=", change_type))
         return self.log_model.search(domain)
 
-    def _snapshot_value(self, record, change_type, field_name):
-        """Helper: extract a field's snapshot entry from the create/delete tombstone row."""
-        snap_logs = self._logs_for(record, field_name="__snapshot__", change_type=change_type)
-        self.assertEqual(len(snap_logs), 1, f"Expected one snapshot row for change_type={change_type}")
+    def _snapshot_value(self, record, field_name):
+        """Helper: delete `record` and return a field's entry of its delete snapshot. Since
+        19.0.1.747 the delete snapshot is the only snapshot (an insert holds the id only)."""
+        record_id = record.id
+        record.unlink()
+        self.env.flush_all()
+        snap_logs = self.log_model.search([
+            ("model_name", "=", self.model._name), ("record_id", "=", record_id),
+            ("field_name", "=", "__snapshot__"), ("change_type", "=", "d"),
+        ])
+        self.assertEqual(len(snap_logs), 1, "Expected one delete snapshot row")
         return (snap_logs.snapshot or {}).get(field_name)
 
-    def test_html_field_stripped_on_insert(self):
-        """An HTML body in _oteny_audit_html_strip_fields is stripped at insert time.
-
-        With Measure 3, inserts are recorded as a single snapshot row whose
-        `snapshot` JSON holds per-field values. The strip happens during
-        snapshot construction.
-        """
+    def test_an_insert_holds_no_html(self):
+        """Since 19.0.1.747 an insert row holds the record's id and no field value, so no
+        HTML reaches it at all."""
         record = self.model.create(
             {
                 "name": "Insert probe",
                 "body": "<p>Hello <b>world</b></p><div>Second line</div>",
             }
         )
-        body_entry = self._snapshot_value(record, "i", "body")
-        self.assertIsNotNone(body_entry, "body must be in the insert snapshot")
-        # No remaining tags, prose preserved.
-        self.assertNotIn("<", body_entry["raw"])
-        self.assertNotIn(">", body_entry["raw"])
-        self.assertIn("Hello", body_entry["raw"])
-        self.assertIn("world", body_entry["raw"])
-        self.assertIn("Second line", body_entry["raw"])
-        # Display value also stripped.
-        self.assertNotIn("<", body_entry["display"])
+        record.flush_recordset()
+        insert = self._logs_for(record, change_type="i")
+        self.assertEqual((insert.field_name, insert.new_value, insert.snapshot), ("id", str(record.id), False))
 
     def test_html_field_stripped_on_update(self):
         """Update logs strip both old and new HTML values."""
@@ -115,7 +111,7 @@ class TestAuditLogHtmlStrip(TransactionCase):
                 "note": "<p>Keep <b>tags</b></p>",
             }
         )
-        note_entry = self._snapshot_value(record, "i", "note")
+        note_entry = self._snapshot_value(record, "note")
         self.assertIsNotNone(note_entry)
         self.assertIn("<p>", note_entry["raw"])
         self.assertIn("<b>", note_entry["raw"])
@@ -128,7 +124,7 @@ class TestAuditLogHtmlStrip(TransactionCase):
                 "body": "<p>Mr. Smith said &quot;hello&quot; &amp; goodbye&nbsp;to all.</p>",
             }
         )
-        body_entry = self._snapshot_value(record, "i", "body")
+        body_entry = self._snapshot_value(record, "body")
         self.assertIsNotNone(body_entry)
         # Entities decoded.
         self.assertIn('"hello"', body_entry["raw"])
@@ -145,7 +141,7 @@ class TestAuditLogHtmlStrip(TransactionCase):
                 "body": "<div>   <p>  Hello  </p>\n\n\n<p>  World  </p>   </div>",
             }
         )
-        body_entry = self._snapshot_value(record, "i", "body")
+        body_entry = self._snapshot_value(record, "body")
         self.assertIsNotNone(body_entry)
         # No multi-space runs.
         self.assertNotIn("  ", body_entry["raw"])
@@ -182,7 +178,7 @@ class TestAuditLogHtmlStrip(TransactionCase):
         )
         record = self.model.create({"name": "Size probe", "body": big_html})
 
-        body_entry = self._snapshot_value(record, "i", "body")
+        body_entry = self._snapshot_value(record, "body")
         self.assertIsNotNone(body_entry)
         # Be conservative on the lower bound for synthetic fixtures: 50%+ is
         # plenty to prove the win; production bodies average ~90%.

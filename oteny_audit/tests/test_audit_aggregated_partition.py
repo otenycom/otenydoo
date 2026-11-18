@@ -60,8 +60,7 @@ class TestAuditAggregatedPartition(TransactionCase):
         p_del = self.parent_model.create({"name": "Partition del"})
         del_id = p_del.id
         p_del.unlink()
-        # Branch A: empty-snapshot create (no non-default fields captured), which
-        # must still surface as a single row carrying the '__snapshot__' sentinel.
+        # Branch A: an insert, which since 19.0.1.747 is one plain row with the id.
         p_empty = self.parent_model.create({})
         empty_id = p_empty.id
 
@@ -94,26 +93,23 @@ class TestAuditAggregatedPartition(TransactionCase):
         ids = rows.mapped("id")
         self.assertEqual(len(ids), len(set(ids)), "All aggregated row ids must be unique")
 
-        # The '__snapshot__' sentinel may surface only for the empty-snapshot row
-        # (branch A). Non-empty snapshots (branch B) expand to real field names.
-        sentinel_record_ids = set(
-            rows.filtered(lambda r: r.field_name == "__snapshot__").mapped("record_id")
-        )
-        self.assertEqual(
-            sentinel_record_ids,
-            {empty_id},
-            "field_name='__snapshot__' may surface only for empty-snapshot rows",
-        )
+        # The '__snapshot__' sentinel never surfaces for these rows: the inserts are id
+        # rows (branch A), and the non-empty delete snapshot expands to real field names.
+        self.assertFalse(rows.filtered(lambda r: r.field_name == "__snapshot__"))
+        empty_rows = rows.filtered(lambda r: r.record_id == empty_id)
+        self.assertEqual(empty_rows.mapped("field_name"), ["id"])
 
     def test_value_search_matches_old_semantics(self):
-        """A value search on new_value_display_name must find both a plain-update
-        value (branch A) and a snapshot-captured value (branch B)."""
+        """A value search must find both a plain-update value (branch A, new value) and a
+        snapshot-captured value (branch B, the old value of a delete snapshot)."""
         # Branch A: the new value lives directly on the update log row.
         p_plain = self.parent_model.create({"name": "Zphirae_Init"})
         end_transaction(self.env)
         p_plain.name = "Zphirae_Plainval_8471"
-        # Branch B: the value is captured inside the insert snapshot.
+        # Branch B: the value is captured inside the delete snapshot.
         p_snap = self.parent_model.create({"name": "Zphirae_Snapval_9352"})
+        snap_id = p_snap.id
+        p_snap.unlink()
 
         self.env.flush_all()
 
@@ -126,21 +122,54 @@ class TestAuditAggregatedPartition(TransactionCase):
         self.assertIn(p_plain.id, plain_rows.mapped("record_id"))
 
         snap_rows = self.aggregated_model.search(
-            [("new_value_display_name", "ilike", "Zphirae_Snapval_9352")]
+            [("old_value_display_name", "ilike", "Zphirae_Snapval_9352")]
         )
         self.assertTrue(
-            snap_rows, "Snapshot-captured value must be findable via new_value_display_name (branch B)"
+            snap_rows, "Snapshot-captured value must be findable via old_value_display_name (branch B)"
         )
-        self.assertIn(p_snap.id, snap_rows.mapped("record_id"))
+        self.assertIn(snap_id, snap_rows.mapped("record_id"))
 
-    def test_default_load_ordered_descending(self):
-        """The synthetic id ordering (_order = 'id DESC') stays a strict global
-        order across the UNION ALL."""
-        self.parent_model.create({"name": "Order probe A"})
-        p = self.parent_model.create({"name": "Order probe B"})
-        p.name = "Order probe B2"  # adds branch-A update rows
+    def test_default_order_is_by_time_over_direct_and_child_rows(self):
+        """The list sorts by time. A direct row takes its id from the log sequence and a child
+        row from the reference sequence; an order by id put every child row above every direct
+        row, whatever its time (log entry 8780 on the production backup of 18-Nov-2026)."""
+        parent = self.parent_model.create({"name": "Order parent"})
+        child = self.env["oteny.audit.test.child"].create({"name": "Order child", "parent_id": parent.id})
+        end_transaction(self.env)
+        # Push the reference sequence far above the log sequence, as on production.
+        self.env.cr.execute("SELECT setval('oteny_audit_log_ref_id_seq', nextval('oteny_audit_log_ref_id_seq') + 1000000)")
+        child.name = "Order child 2"  # a child row, older than the next change
+        end_transaction(self.env)
+        self.env.cr.execute(
+            "UPDATE oteny_audit_log SET create_date = create_date - interval '1 hour' "
+            "WHERE model_name = 'oteny.audit.test.child' AND record_id = %s",
+            [child.id],
+        )
+        parent.name = "Order parent 2"  # a direct row, the newest
         self.env.flush_all()
+        rows = self.aggregated_model.search(
+            [("model_name", "=", parent._name), ("record_id", "=", parent.id)]
+        )
+        self.assertFalse(rows[0].is_child_log, "the newest change comes first")
+        keys = [(row.create_date, row.log_id) for row in rows]
+        self.assertEqual(keys, sorted(keys, reverse=True))
 
-        rows = self.aggregated_model.search([], order="id DESC", limit=10)
-        ids = rows.mapped("id")
-        self.assertEqual(ids, sorted(ids, reverse=True), "Aggregated rows must be ordered by id DESC")
+    def test_a_read_by_id_returns_the_rows_of_the_search(self):
+        """A read by id is narrowed by the log row ids (`_search`); it must give the same
+        rows and values as the search, for direct and child rows, plain and snapshot."""
+        parent = self.parent_model.create({"name": "Read parent"})
+        child = self.env["oteny.audit.test.child"].create({"name": "Read child", "parent_id": parent.id})
+        end_transaction(self.env)
+        child.name = "Read child 2"
+        end_transaction(self.env)
+        child.unlink()
+        self.env.flush_all()
+        domain = [("model_name", "=", parent._name), ("record_id", "=", parent.id)]
+        fields = ["is_child_log", "field_name", "old_value", "new_value", "change_type", "audit_log_id"]
+        searched = self.aggregated_model.search_read(domain, fields)
+        self.assertTrue({row["is_child_log"] for row in searched} == {True, False})
+        self.assertTrue(any(row["change_type"] == "d" for row in searched))
+        self.env.invalidate_all()
+        ids = [row["id"] for row in searched]
+        read = self.aggregated_model.browse(ids).read(fields)
+        self.assertEqual(read, searched)

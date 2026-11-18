@@ -1,4 +1,7 @@
 from odoo import api, fields, models, tools
+from odoo.fields import Domain
+from odoo.orm.domains import DomainAnd, DomainCondition
+from odoo.tools import SQL
 
 from .oteny_audit_fields import BigInteger
 import markupsafe
@@ -25,9 +28,16 @@ class OtenyAuditLogAggregated(models.Model):
     _name = "oteny.audit.log.aggregated"
     _description = "Aggregated Audit Log (including children)"
     _auto = False
-    _order = "id DESC"
+    # Newest first, by time. A direct row takes its id from oteny_audit_log.id and a child row
+    # from oteny_audit_log_ref.id, two unrelated sequences, so `id` alone put every child row
+    # above every direct row. Rows of one transaction share their create_date; the log row id
+    # orders them, and the view id orders the fields of one snapshot. `log_id` repeats
+    # `audit_log_id` as a plain integer: an order on a many2one sorts by the comodel's own
+    # _order through a join.
+    _order = "create_date DESC, log_id DESC, id DESC"
 
     audit_log_id = fields.Many2one("oteny.audit.log", string="Audit Log", readonly=True)
+    log_id = fields.Integer(string="Audit Log ID", readonly=True)
     parent_record_display_name = fields.Char(string="Parent Record", readonly=True)
 
     # --- Fields from oteny.audit.log ---
@@ -101,12 +111,16 @@ class OtenyAuditLogAggregated(models.Model):
         except KeyError:
             return self._DEFAULT_DATE_FORMAT
 
+    @api.depends_context("oteny_audit_caption_without_user")
     def _compute_caption(self):
         """Render one caption per virtual row; rows for the same record-event
         share a header and emit only their own field-change line, mirroring
         the legacy per-field UX."""
         log_list = list(self)
         change_type_verbs = {"i": "Insert", "u": "Update", "d": "Delete", "r": "Remark"}
+        # The Audit tab of a form shows the user and the time once per transaction, in its own
+        # header (static/src/widgets/audit_log_tab), so the record headers leave them out.
+        without_user = self.env.context.get("oteny_audit_caption_without_user")
         date_format = self._audit_datetime_format()
         for i, log in enumerate(log_list):
             caption_parts = []
@@ -136,7 +150,9 @@ class OtenyAuditLogAggregated(models.Model):
                 user_display = markupsafe.escape(log.create_uid.name if log.create_uid else "")
                 date_display = fields.Datetime.context_timestamp(self, log.create_date).strftime(date_format)
                 styled_record_display = f'<span class="oteny-audit-record-header">{record_display}</span>'
-                header_str = f"{verb} {model_display} {styled_record_display} by <b>{user_display}</b> on {date_display}"
+                header_str = f"{verb} {model_display} {styled_record_display}"
+                if not without_user:
+                    header_str += f" by <b>{user_display}</b> on {date_display}"
                 caption_parts.append(f"<div>{header_str}</div>")
 
             change_type = log.change_type
@@ -144,7 +160,10 @@ class OtenyAuditLogAggregated(models.Model):
             is_html_field = self._is_html_field(log)
             old_display, new_display = self._caption_values(log)
 
-            if change_type == "i":
+            if change_type == "i" and log.field_name == "id":
+                # An insert since 19.0.1.747 holds only the record's id: the header says it all.
+                field_change_str = ""
+            elif change_type == "i":
                 new_val = self._format_field_value(new_display, is_html_field)
                 field_change_str = f"Set <b>{field_name}</b> to <b>{new_val}</b>"
             elif change_type == "u":
@@ -249,6 +268,53 @@ class OtenyAuditLogAggregated(models.Model):
         except Exception:
             pass
         return value
+
+    def _search(self, domain, *args, **kwargs):
+        """Narrow a search on `id` with the log rows of those ids.
+
+        Odoo reads the fields of known records with `_search([('id', 'in', ids)])` (`fetch`).
+        The id of this view is an expression, so PostgreSQL cannot use an index for it and
+        builds the whole view first: 1.8 s on the production backup of 18-Nov-2026 for every
+        page of a record's audit log, because the caption reads fields that the list does not
+        show. `audit_log_id` is `log.id` in every branch, so a condition on it pushes into each
+        branch as an index lookup. (Odoo's docstring of `_search` names this use: an override
+        that changes the domain.)
+        """
+        domain = Domain(domain)
+        log_ids = self._log_ids_of_id_domain(domain)
+        if log_ids is not None:
+            domain &= Domain("audit_log_id", "in", log_ids)
+        return super()._search(domain, *args, **kwargs)
+
+    def _log_ids_of_id_domain(self, domain):
+        """The log row ids of the view ids that `domain` requires (an `id` condition at its
+        top level, alone or ANDed), or None. The ids encode the log row (direct rows, even) or
+        the reference row (child rows, odd): see the comment above the CREATE VIEW in init()."""
+        if isinstance(domain, DomainAnd):
+            conditions = domain.children
+        else:
+            conditions = [domain]
+        for condition in conditions:
+            if not (
+                isinstance(condition, DomainCondition)
+                and condition.field_expr == "id"
+                and condition.operator in ("in", "=")
+            ):
+                continue
+            value = condition.value
+            ids = [value] if isinstance(value, int) else list(value) if isinstance(value, (list, tuple, set)) else []
+            ids = [id_ for id_ in ids if isinstance(id_, int)]
+            if not ids:
+                continue
+            log_ids = {id_ // 2000 for id_ in ids if id_ % 2 == 0}
+            ref_ids = tuple({id_ // 2000 for id_ in ids if id_ % 2 == 1})
+            if ref_ids:
+                self.env.cr.execute(
+                    SQL("SELECT audit_log_id FROM oteny_audit_log_ref WHERE id IN %s", ref_ids)
+                )
+                log_ids.update(row[0] for row in self.env.cr.fetchall())
+            return sorted(log_ids)
+        return None
 
     def _selection_record_ref(self):
         return self.env["oteny.audit.log"]._selection_record_ref()
@@ -417,6 +483,7 @@ class OtenyAuditLogAggregated(models.Model):
                 SELECT
                     {row_id} AS id,
                     log.id AS audit_log_id,
+                    log.id AS log_id,
                     log.create_date,
                     log.create_uid,
                     log.transaction_id,

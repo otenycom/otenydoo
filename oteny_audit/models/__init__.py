@@ -4,6 +4,7 @@ from . import oteny_audit_log_ref
 from . import oteny_audit_log_aggregated
 from . import oteny_audit_mixin
 from . import base_patch
+from . import base_audit_tab
 from . import oteny_audit_test_models as test_models
 from . import mail_thread_override
 from . import mail_message_override

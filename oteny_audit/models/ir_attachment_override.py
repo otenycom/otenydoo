@@ -21,6 +21,16 @@ class IrAttachment(models.Model):
     # the full text of a document (11.8 MB in 180 days on production); the file is the source.
     _oteny_audit_ignore_fields = {"index_content", "checksum", "mimetype", "file_size"}
 
+    def _oteny_audit_display_name(self, record):
+        """The name of an attachment in its audit rows: the file, and the record it is on
+        ("20260910135034.pdf on Sardius | Arrange A1 Application"). A file name alone, often
+        the timestamp of a scan, does not say in the global audit log which record the file
+        belongs to (19.0.1.747)."""
+        from .base_patch import _audit_parent_name
+
+        document = _audit_parent_name(record)
+        return f"{record.name} on {document}" if record.name and document else record.name
+
     def _oteny_audit_ignore_record(self, record):
         """Skip a generated image and a web asset bundle. Neither `res_field` nor `url` of
         such an attachment changes after the create, so the answer is the same at create and

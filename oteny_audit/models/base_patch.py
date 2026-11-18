@@ -200,15 +200,43 @@ def _is_audited_field(model, field):
     return name not in _ignored_field_names(model)
 
 
-def _is_empty_without_default(field, value):
-    """True for an empty value (False, 0, empty x2many) of a field that has no default.
+def _audit_record_name(model, record):
+    """The name of `record` in its audit rows (`record_display_name`, the header of a row).
 
-    For such a field, "absent from the insert snapshot" already means "empty", and Odoo
-    reads a NULL number or boolean as 0 or False, so the rebuild of the record gives the
-    same values. An empty value of a field WITH a default is information (the default was
-    overridden), so it stays.
+    One structure, "<what> on <where>" (19.0.1.747, plan oteny-audit/plans/audit-insert-id-only.md):
+    - a model may declare `_oteny_audit_display_name(record)` for a better name than its
+      display name: a `mail.message` (its display name is the subject, which most messages
+      lack) and an `ir.attachment` (a file name does not say which record it belongs to);
+    - else the record's `display_name`;
+    - when that is empty or Odoo's technical fallback "model,id" (a model without a name
+      field: billing lines, timesheet log entries, medical expenses, document import jobs),
+      the model's label and the id, on the record's audit parent:
+      "Log Entry Billing Line 7714 on ＋ Rallos, Grenelle | CS | Vacation Planned | 03-Aug-26".
+    Since an insert holds the id only, the name is what says which record a row is about; on
+    the production backup of 18-Nov-2026 about 19,000 insert rows had no readable name. A name
+    is not a field value: every audit row already stores one. Fails over to the id.
     """
-    return not field.default and not value
+    hook = getattr(model, "_oteny_audit_display_name", None)
+    try:
+        if hook is not None:
+            name = hook(record)
+            if name:
+                return name
+        name = record.display_name
+        if name and name != f"{record._name},{record.id}":
+            return name
+        label = f"{model._description or model._name} {record.id}"
+        parent = _audit_parent_name(record)
+        return f"{label} on {parent}" if parent else label
+    except Exception:
+        return f"ID: {record.id}"
+
+
+def _audit_parent_name(record):
+    """The display name of the record's immediate audit parent (`_oteny_audit_parent_field`,
+    `_model_parent_keys`), or "" when it has none."""
+    parents = _resolve_parent_reference_unified(record.env, record, max_depth=1)
+    return parents[0]["parent_display_name"] if parents else ""
 
 
 def _record_audit_ignored(model, record):
@@ -588,55 +616,28 @@ def _live_insert_log_ids(env, model, record_ids):
     return {rid: insert_log_ids[rid] for rid in record_ids if rid in insert_log_ids}
 
 
-def _fold_into_insert_snapshots(env, model, entries):
-    """Write field changes of records created in THIS transaction into their insert snapshot.
+def _parent_refs_for_insert_transaction(env, model, insert_log_ids, changes):
+    """A change of a record created in THIS transaction writes no row (see patched_flush and
+    patched_write): nobody else could see the value before the commit, and the value at the
+    commit is the record itself, which its insert row points to. Stored computes and code that
+    writes right after the create (the computes of a new service, the salary timeline builder)
+    gave one to seven update rows per new record until 19.0.1.723, then a fold into the insert
+    snapshot until 19.0.1.747 (plan oteny-audit/plans/audit-insert-id-only.md).
 
-    `entries` is a list of (record, field, new_cache_value). A value that changes inside the
-    transaction of the create was never visible to another user or process: the insert
-    snapshot with the value at the end of the transaction says everything anybody could see.
-    Stored computes and code that writes right after the create (the salary timeline builder,
-    the computes of a new service) used to give one to seven update rows per new record
-    (plan oteny-audit/plans/audit-storage-reduction.md, cut E).
+    One thing such a change still does: when it sets the field that decides the parent, the
+    insert row gets the parent refs it does not have yet, so a service that is linked to its
+    log entry after the create still shows under that log entry.
 
-    Returns the entries that could not be folded (no insert row of this transaction), which
-    the caller logs as update rows as before.
+    `insert_log_ids` is {record id: insert log id} (_live_insert_log_ids); `changes` is
+    {record: set of changed field names} for those records.
     """
-    insert_log_ids = _live_insert_log_ids(env, model, [record.id for record, _field, _value in entries])
-    alive = set(insert_log_ids.values())
-    rest = []
-    patches = defaultdict(dict)  # insert log id -> {field name: entry or None (drop the key)}
-    records_by_log = {}
-    for record, field, value in entries:
-        log_id = insert_log_ids.get(record.id)
-        if log_id not in alive:
-            rest.append((record, field, value))
-            continue
-        records_by_log[log_id] = record
-        if value is None or value == "" or (
-            field.default
-            and field.convert_to_cache(field.default(record), record) == value
-        ) or _is_empty_without_default(field, value):
-            patches[log_id][field.name] = None
-            continue
-        raw = str(value)
-        display = _get_display_value(field, value, record.env)
-        raw = _maybe_redact(model, field, _maybe_strip_html(model, field.name, raw), record)
-        display = _maybe_redact(model, field, _maybe_strip_html(model, field.name, display), record)
-        patches[log_id][field.name] = {"raw": raw, "display": display or "", "label": field.string or field.name}
-    if not patches:
-        return rest
     parent_fields = _parent_config_fields(env, model)
-    for log in env["oteny.audit.log"].sudo().browse(list(patches)):
-        snapshot = dict(log.snapshot or {})
-        for name, entry in patches[log.id].items():
-            if entry is None:
-                snapshot.pop(name, None)
-            else:
-                snapshot[name] = entry
-        log.snapshot = snapshot
-        if parent_fields & set(patches[log.id]):
-            _add_missing_parent_refs(env, log, records_by_log[log.id])
-    return rest
+    if not parent_fields:
+        return
+    for record, names in changes.items():
+        if parent_fields & names:
+            log = env["oteny.audit.log"].sudo().browse(insert_log_ids[record.id])
+            _add_missing_parent_refs(env, log, record)
 
 
 def _add_missing_parent_refs(env, log, record):
@@ -737,12 +738,9 @@ def patched_create(self, vals_list):
     records = original_create(self, vals_list)
 
     # Track newly created records in transaction scope
-    # Also track which fields have been initially logged for each record
     audit_data = self.env.cr.precommit.data.setdefault("oteny_audit", {})
     if "newly_created_records" not in audit_data:
         audit_data["newly_created_records"] = defaultdict(set)
-    if "initially_logged_fields" not in audit_data:
-        audit_data["initially_logged_fields"] = defaultdict(lambda: defaultdict(set))
     newly_created = audit_data["newly_created_records"]
     newly_created[self._name].update(records.ids)
 
@@ -750,114 +748,38 @@ def patched_create(self, vals_list):
     if not records:
         return records
 
-    # The stored columns that the audit log covers (see _is_audited_field)
-    columns = [
-        name
-        for name, field in self._fields.items()
-        if field.column_type and _is_audited_field(self, field)
-    ]
-
-    if columns:
-        query = SQL(
-            "SELECT id, %s FROM %s WHERE id IN %s",
-            SQL(", ").join(SQL.identifier(col) for col in columns),
-            SQL.identifier(self._table),
-            tuple(records.ids),
+    # One row per created record, with its id and nothing more: the current values of the
+    # other fields are in the record itself, a later change writes an update row with its old
+    # value, and a delete writes a snapshot (plan oteny-audit/plans/audit-insert-id-only.md).
+    # Until 19.0.1.747 this row held a snapshot of every field, 63 % of the bytes of the log.
+    logs = []
+    for record in records:
+        if _record_audit_ignored(self, record):
+            continue
+        record_display_name = _audit_record_name(self, record)
+        logs.append(
+            {
+                "model_name": self._name,
+                "record_id": record.id,
+                "record_display_name": record_display_name,
+                "field_name": "id",
+                "field_display_name": "ID",
+                "old_value": "",
+                "new_value": str(record.id),
+                "old_value_display_name": "",
+                "new_value_display_name": str(record.id),
+                "change_type": "i",
+            }
         )
-        self.env.cr.execute(query)
-        new_data = self.env.cr.dictfetchall()
-        new_values = {row["id"]: {col: row[col] for col in columns} for row in new_data}
 
-        # Measure 3: emit ONE snapshot row per created record, capturing every
-        # non-default field value. This both compresses storage (~5-8x fewer
-        # log rows for inserts) and aligns with the "tombstone" mental model
-        # for record-level events. Per-field rows still apply to subsequent
-        # updates (see patched_flush).
-        from .oteny_audit_log import SNAPSHOT_FIELD_NAME
-
-        logs = []
-        snapshot_field_names = defaultdict(set)  # record_id -> {field_name, ...}
-        model_fields = self._fields
-        for record in records:
-            if _record_audit_ignored(self, record):
-                continue
-            if hasattr(record, "display_name"):
-                record_display_name = record.display_name
-            else:
-                record_display_name = f"ID: {record.id}"
-
-            snapshot = {}
-            for col in columns:
-                field = model_fields[col]
-                raw_val = new_values.get(record.id, {}).get(col)
-                new_val_cached = _safe_convert_to_cache(field, raw_val, record)
-
-                if new_val_cached is None:
-                    continue
-
-                if field.default:
-                    default_value = field.default(record)
-                    default_value_cached = field.convert_to_cache(default_value, record)
-                    if new_val_cached == default_value_cached:
-                        continue
-                elif _is_empty_without_default(field, new_val_cached):
-                    # "Absent" already means "empty" for a field without a default.
-                    continue
-
-                new_val_display = _get_display_value(field, new_val_cached, record.env)
-
-                new_value_raw = str(new_val_cached) if new_val_cached is not None else ""
-                # Measure 2: HTML-strip raw + display values for marked fields.
-                new_value_raw = _maybe_strip_html(self, col, new_value_raw)
-                new_val_display = _maybe_strip_html(self, col, new_val_display)
-                # Never store a credential. The snapshot KEEPS the field, with a placeholder
-                # value, so the change is still recorded and the aggregated view still unnests
-                # one row for it.
-                new_value_raw = _maybe_redact(self, field, new_value_raw, record)
-                new_val_display = _maybe_redact(self, field, new_val_display, record)
-
-                snapshot[col] = {
-                    "raw": new_value_raw,
-                    "display": new_val_display or "",
-                    "label": field.string or col,
-                }
-                snapshot_field_names[record.id].add(col)
-
-            # Even when no fields produced content (all defaults), emit a
-            # snapshot row so the create operation is recorded. The snapshot
-            # is just an empty dict in that case.
-            logs.append(
-                {
-                    "model_name": self._name,
-                    "record_id": record.id,
-                    "record_display_name": record_display_name,
-                    "field_name": SNAPSHOT_FIELD_NAME,
-                    "field_display_name": f"{self._description or self._name} (snapshot)",
-                    "old_value": "",
-                    "new_value": "",
-                    "old_value_display_name": "",
-                    "new_value_display_name": "",
-                    "change_type": "i",
-                    "snapshot": snapshot,
-                }
-            )
-
-        if logs:
-            log_records = _create_audit_logs(self.env, self, logs)
-            # Remember the insert row of each new record: a change later in this
-            # transaction goes into that snapshot (_fold_into_insert_snapshots).
-            if log_records:
-                insert_log_ids = audit_data.setdefault("insert_log_ids", defaultdict(dict))
-                for log in log_records:
-                    insert_log_ids[self._name][log.record_id] = log.id
-
-            # Mark all snapshot fields as initially logged for newly created
-            # records so patched_flush won't double-log them as updates if a
-            # subsequent flush in the same transaction touches the same fields.
-            initially_logged = audit_data["initially_logged_fields"]
-            for record_id, fnames in snapshot_field_names.items():
-                if record_id in newly_created[self._name]:
-                    initially_logged[self._name][record_id].update(fnames)
+    if logs:
+        log_records = _create_audit_logs(self.env, self, logs)
+        # Remember the insert row of each new record: a change later in this transaction
+        # writes no update row (_skip_insert_transaction_changes).
+        if log_records:
+            insert_log_ids = audit_data.setdefault("insert_log_ids", defaultdict(dict))
+            for log in log_records:
+                insert_log_ids[self._name][log.record_id] = log.id
 
     return records
 
@@ -875,23 +797,29 @@ def patched_unlink(self):
     if not self:
         return True
 
+    _log_deletes(self)
+    _log_database_cascades(self)
+    return original_unlink(self)
+
+
+def _log_deletes(self):
+    """Write one delete snapshot row per record of `self` (a recordset of an audited model)."""
     columns = [
         name
         for name, field in self._fields.items()
         if field.column_type and _is_audited_field(self, field)
     ]
 
-    old_values = {}
-    if columns:
-        query = SQL(
-            "SELECT id, %s FROM %s WHERE id IN %s",
-            SQL(", ").join(SQL.identifier(col) for col in columns),
-            SQL.identifier(self._table),
-            tuple(self.ids),
-        )
-        self.env.cr.execute(query)
-        old_data = self.env.cr.dictfetchall()
-        old_values = {row["id"]: {col: row[col] for col in columns} for row in old_data}
+    # Also the records without an audited column: a record that is no longer in its table (a
+    # database cascade deleted it, and _log_database_cascades wrote its row) gets no second row.
+    query = SQL(
+        "SELECT %s FROM %s WHERE id IN %s",
+        SQL(", ").join(SQL.identifier(col) for col in ["id", *columns]),
+        SQL.identifier(self._table),
+        tuple(self.ids),
+    )
+    self.env.cr.execute(query)
+    old_values = {row["id"]: {col: row[col] for col in columns} for row in self.env.cr.dictfetchall()}
 
     # Measure 3: emit ONE snapshot row per deleted record. The snapshot must
     # contain every non-default field value so that the deleted record can be
@@ -903,12 +831,9 @@ def patched_unlink(self):
     logs = []
     model_fields = self._fields
     for record in self:
-        if _record_audit_ignored(self, record):
+        if record.id not in old_values or _record_audit_ignored(self, record):
             continue
-        try:
-            record_display_name = record.display_name
-        except Exception:
-            record_display_name = f"ID: {record.id}"
+        record_display_name = _audit_record_name(self, record)
 
         snapshot = {}
         for col in columns:
@@ -958,7 +883,139 @@ def patched_unlink(self):
     if logs:
         _create_audit_logs(self.env, self, logs)
 
-    return original_unlink(self)
+
+
+def _inbound_foreign_keys(env):
+    """{table: [(model name, column, 'c' or 'n')]}: the foreign keys with ON DELETE CASCADE
+    ('c') or SET NULL ('n') that point to `table`, from a table of a regular model.
+
+    Read from pg_constraint, not from the field definitions: the foreign key is what makes
+    PostgreSQL delete or change the row, so it is the truth. Keys of many2many relation tables
+    and of wizard tables are left out (no audited model). Cached per registry; a module install
+    builds a new registry.
+    """
+    registry = env.registry
+    cached = registry.__dict__.get("_oteny_audit_inbound_foreign_keys")
+    if cached is not None:
+        return cached
+    model_of_table = {}
+    for name, cls in registry.models.items():
+        if cls._auto and not cls._abstract and not cls._transient and cls._table not in model_of_table:
+            model_of_table[cls._table] = name
+    env.cr.execute(
+        """
+        SELECT ref.relname, cl.relname, att.attname, con.confdeltype
+          FROM pg_constraint con
+          JOIN pg_class cl ON cl.oid = con.conrelid
+          JOIN pg_class ref ON ref.oid = con.confrelid
+          JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
+         WHERE con.contype = 'f' AND con.confdeltype IN ('c', 'n')
+           AND array_length(con.conkey, 1) = 1
+           AND cl.relnamespace = current_schema()::regnamespace
+        """
+    )
+    cached = defaultdict(list)
+    for target_table, table, column, deltype in env.cr.fetchall():
+        model_name = model_of_table.get(table)
+        if model_name and column in registry[model_name]._fields:
+            cached[target_table].append((model_name, column, deltype))
+    registry._oteny_audit_inbound_foreign_keys = cached
+    return cached
+
+
+def _referencing_ids(env, model_name, column, ids):
+    """Ids of `model_name` whose `column` points to one of `ids` (pending writes flushed)."""
+    if not ids:
+        return set()
+    model = env[model_name]
+    model.flush_model([column])
+    env.cr.execute(SQL(
+        "SELECT id FROM %s WHERE %s IN %s",
+        SQL.identifier(model._table), SQL.identifier(column), tuple(ids),
+    ))
+    return {row[0] for row in env.cr.fetchall()}
+
+
+def _log_database_cascades(records):
+    """Write the rows of the changes that PostgreSQL makes when `records` are deleted.
+
+    Odoo deletes a record with SQL. A row of another table that points to it through a
+    foreign key with ON DELETE CASCADE is then deleted by PostgreSQL, and one with SET NULL
+    is changed by PostgreSQL; the ORM, and so the audit patch, never sees either. On the
+    production backup of 18-Nov-2026, 453 crew planning items went with their log entry and
+    29 services with their parent service, without a delete row. Since an insert writes only
+    the record's id (19.0.1.747), such a record would leave no trace of its content.
+
+    So before the delete: a delete snapshot for each record that a cascade deletes (and
+    recursively for what points to those), and an update row (old value: the deleted record,
+    new value: empty) for each audited field that a SET NULL clears. Only audited models
+    and records count; a cascade is not followed through an audit-ignored model. Cost: one
+    SELECT per inbound foreign key and delete batch, of the same kind as the scan PostgreSQL
+    makes for the key itself.
+    """
+    env = records.env
+    Log = env["oteny.audit.log"]
+    inbound = _inbound_foreign_keys(env)
+    deleted = defaultdict(set)
+    deleted[records._name].update(records.ids)
+    todo = [records]
+    while todo:
+        parents = todo.pop()
+        for model_name, column, deltype in inbound.get(parents._table, ()):
+            if deltype != "c" or Log._is_audit_ignored(model_name):
+                continue
+            ids = _referencing_ids(env, model_name, column, parents.ids) - deleted[model_name]
+            if ids:
+                deleted[model_name].update(ids)
+                children = env[model_name].sudo().with_context(active_test=False).browse(sorted(ids))
+                _log_deletes(children)
+                todo.append(children)
+    for parent_model, parent_ids in list(deleted.items()):
+        parents = env[parent_model].sudo().with_context(active_test=False).browse(sorted(parent_ids))
+        for model_name, column, deltype in inbound.get(parents._table, ()):
+            if deltype != "n" or Log._is_audit_ignored(model_name):
+                continue
+            model = env[model_name].sudo().with_context(active_test=False)
+            field = model._fields[column]
+            if not _is_audited_field(model, field):
+                continue
+            ids = _referencing_ids(env, model_name, column, parents.ids) - deleted[model_name]
+            if ids:
+                _log_set_null(model.browse(sorted(ids)), field, parents)
+
+
+def _log_set_null(children, field, parents):
+    """Update rows for `field` of `children`, which PostgreSQL sets to NULL because the
+    record it points to (one of `parents`) is deleted."""
+    model = children.with_context(active_test=False)
+    model.env.cr.execute(SQL(
+        "SELECT id, %s FROM %s WHERE id IN %s",
+        SQL.identifier(field.name), SQL.identifier(model._table), tuple(children.ids),
+    ))
+    old_ids = dict(model.env.cr.fetchall())
+    names = {parent.id: parent.display_name for parent in parents}
+    logs = []
+    for child in model:
+        if _record_audit_ignored(model, child):
+            continue
+        old_id = old_ids.get(child.id)
+        record_display_name = _audit_record_name(model, child)
+        logs.append(
+            {
+                "model_name": model._name,
+                "record_id": child.id,
+                "record_display_name": record_display_name,
+                "field_name": field.name,
+                "field_display_name": field.string,
+                "old_value": str(old_id),
+                "new_value": "",
+                "old_value_display_name": names.get(old_id, str(old_id)),
+                "new_value_display_name": "",
+                "change_type": "u",
+            }
+        )
+    if logs:
+        _create_audit_logs(model.env, model, logs)
 
 
 def patched_write(self, vals):
@@ -1043,25 +1100,23 @@ def patched_write(self, vals):
         new_values_map = {rec["id"]: rec for rec in new_values_list}
 
         logs = []
-        fold_entries = []
+        insert_changes = defaultdict(set)
         insert_log_ids = _live_insert_log_ids(self.env, self, self.ids)
         for record in self:
             if _record_audit_ignored(self, record):
                 continue
             old_rec_vals = old_values_map.get(record.id, {})
             new_rec_vals = new_values_map.get(record.id, {})
-            try:
-                record_display_name = record.display_name
-            except Exception:
-                record_display_name = f"ID: {record.id}"
+            record_display_name = _audit_record_name(self, record)
 
             for name, field in relational_fields.items():
                 old_ids = old_rec_vals.get(name, [])
                 new_ids = new_rec_vals.get(name, [])
 
-                if record.id in insert_log_ids and set(old_ids) != set(new_ids):
-                    # Created in this transaction: the change goes into its insert snapshot.
-                    fold_entries.append((record, field, tuple(new_ids)))
+                if record.id in insert_log_ids:
+                    # Created in this transaction: no row (_parent_refs_for_insert_transaction).
+                    if set(old_ids) != set(new_ids):
+                        insert_changes[record].add(name)
                     continue
 
                 # Odoo's read() returns a list of IDs for m2m.
@@ -1101,8 +1156,8 @@ def patched_write(self, vals):
                             "change_type": "u",
                         }
                     )
-        if fold_entries:
-            _fold_into_insert_snapshots(self.env, self, fold_entries)
+        if insert_changes:
+            _parent_refs_for_insert_transaction(self.env, self, insert_log_ids, insert_changes)
         if logs:
             _create_audit_logs(self.env, self, logs)
 
@@ -1189,10 +1244,7 @@ def patched_flush(self, fnames=None):
     # Get display names for all affected records
     display_names = {}
     for rec in self.sudo().browse(all_ids):
-        try:
-            display_names[rec.id] = rec.display_name
-        except Exception:
-            display_names[rec.id] = f"ID: {rec.id}"
+        display_names[rec.id] = _audit_record_name(self, rec)
 
     # Collect old values
     old_values = {}
@@ -1212,7 +1264,6 @@ def patched_flush(self, fnames=None):
 
     # Check which records are newly created in this transaction
     newly_created = audit_data.get("newly_created_records", {}).get(self._name, set())
-    initially_logged = audit_data.get("initially_logged_fields", {}).get(self._name, {})
 
     # Query database for missing old values in a single batch
     if missing_queries:
@@ -1266,7 +1317,7 @@ def patched_flush(self, fnames=None):
     most_recent_logs = audit_data["most_recent_logs"]
 
     insert_log_ids = _live_insert_log_ids(self.env, self, all_ids)
-    fold_entries = []
+    insert_changes = defaultdict(set)
     for name, field in loggable_fields_dict.items():
         for rid in batches.get(name, []):
             if rid in skipped_ids:
@@ -1278,10 +1329,10 @@ def patched_flush(self, fnames=None):
             new_val = _safe_convert_to_cache(field, new_val_raw, record)
 
             if rid in insert_log_ids:
-                # Created in this transaction: the value goes into its insert snapshot
-                # (cut E). The snapshot keeps the value at the end of the transaction.
+                # Created in this transaction: no row; the record holds the value at the
+                # commit (_parent_refs_for_insert_transaction).
                 if old_val != new_val:
-                    fold_entries.append((record, field, new_val))
+                    insert_changes[record].add(name)
                 logged_changes[field].add(rid)
                 continue
 
@@ -1294,14 +1345,8 @@ def patched_flush(self, fnames=None):
                 ):
                     continue
 
-                # Measure 3: the create event is captured atomically by the
-                # tombstone snapshot emitted in patched_create. Any field
-                # change that surfaces later via flush (e.g. a computed field
-                # whose recompute happens after the create read, or a write
-                # that targets a freshly created record) is conceptually a
-                # post-create update, so we always log it as 'u'. The legacy
-                # "second 'i' row for late fields" pattern is no longer
-                # needed and would produce double inserts per record event.
+                # The insert row of the record holds its id only; a change after the
+                # transaction of the create is always an update row.
                 change_type = "u"
 
                 old_val_display = _get_display_value(field, old_val, record.env)
@@ -1337,8 +1382,8 @@ def patched_flush(self, fnames=None):
                 )
                 most_recent_logs[field][rid] = {"old_value": old_val, "new_value": new_val}
 
-    if fold_entries:
-        _fold_into_insert_snapshots(self.env, self, fold_entries)
+    if insert_changes:
+        _parent_refs_for_insert_transaction(self.env, self, insert_log_ids, insert_changes)
     if logs:
         _create_audit_logs(self.env, self, logs)
         # Mark these changes as logged to prevent duplicates in the same transaction.

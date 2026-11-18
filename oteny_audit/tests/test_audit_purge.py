@@ -1,5 +1,6 @@
 # test_audit_purge.py
-# The purge of the stored rows that the coverage of 19.0.1.723 would not write, and the
+# The purge of the stored rows that the coverage of 19.0.1.723 would not write (and, since
+# 19.0.1.747, the insert snapshots that become id rows), and the
 # aggregated view without direct references (plan oteny-audit/plans/audit-storage-reduction.md,
 # cut F and § 11). The old rows are made with SQL, in the shape the old code wrote them.
 import json
@@ -59,29 +60,43 @@ class TestAuditPurge(TransactionCase):
         # A per-record rule: an asset bundle.
         bundle = self._old_row("ir.attachment", 777001, "__snapshot__", "i", 903,
                                {"url": {"raw": "/web/assets/1/x.js", "display": "", "label": "Url"}})
-        # An insert with an update in its transaction, a parent ref on the update, and a
-        # direct ref; keys that the rules now leave out (N1, N2, an ignored field).
+        # An insert snapshot of a live record, with an update in its transaction, a parent ref
+        # on the update and a direct ref: the update folds, and then the insert holds the id
+        # only (phase `inserts`, 19.0.1.747).
         insert = self._old_row("oteny.audit.test.coverage", rid, "__snapshot__", "i", 904, {
             "name": {"raw": "Old name", "display": "Old name", "label": "Name"},
-            "count": {"raw": "0", "display": "0", "label": "Count"},
-            "flag_on": {"raw": "False", "display": "False", "label": "Flag On"},
-            "parent_path": {"raw": "1/", "display": "1/", "label": "Parent Path"},
-            "skipped_note": entry,
         })
         self._old_ref(insert, "oteny.audit.test.coverage", rid, True)
         update = self._old_row("oteny.audit.test.coverage", rid, "name", "u", 904, new_value="Folded name", label="Name")
         self._old_ref(update, "res.partner", 1, False)
         later = self._old_row("oteny.audit.test.coverage", rid, "name", "u", 905, new_value="Later name", label="Name")
         self._old_ref(later, "oteny.audit.test.coverage", rid, True)
+        # An insert of a record that is gone, with a delete row: the id only too.
+        deleted = self._old_row("oteny.audit.test.coverage", 999001, "__snapshot__", "i", 906, {"name": entry})
+        self._old_row("oteny.audit.test.coverage", 999001, "__snapshot__", "d", 907, {"name": entry})
+        # An insert of a record that is gone without a delete row (a database cascade before
+        # 19.0.1.747): its snapshot is the only copy and stays, cleaned by the rules of the
+        # fold (N1, N2, an ignored field).
+        orphan = self._old_row("oteny.audit.test.coverage", 999002, "__snapshot__", "i", 908, {
+            "name": {"raw": "Orphan", "display": "Orphan", "label": "Name"},
+            "count": {"raw": "0", "display": "0", "label": "Count"},
+            "flag_on": {"raw": "False", "display": "False", "label": "Flag On"},
+            "parent_path": {"raw": "1/", "display": "1/", "label": "Parent Path"},
+            "skipped_note": entry,
+        })
 
         self.log_model._purge_all_now()
 
         for gone in (ignored, removed, ignored_field, bundle, update):
             self.assertFalse(self._exists(gone)[0], gone)
         self.assertTrue(self._exists(later)[0], "an update in a later transaction stays")
-        found, snapshot = self._exists(insert)
+        for id_only in (insert, deleted):
+            row = self.log_model.browse(id_only)
+            self.assertEqual((row.field_name, row.snapshot), ("id", False))
+        self.assertEqual(self.log_model.browse(insert).new_value, str(rid))
+        found, snapshot = self._exists(orphan)
         self.assertTrue(found)
-        self.assertEqual(snapshot["name"]["raw"], "Folded name", "the update of its transaction folds in")
+        self.assertEqual(snapshot["name"]["raw"], "Orphan", "the only copy of a lost record stays")
         self.assertNotIn("count", snapshot, "N1: an empty value without a default leaves")
         self.assertEqual(snapshot["flag_on"]["raw"], "False", "an empty value with a default stays")
         self.assertNotIn("parent_path", snapshot)
@@ -99,7 +114,7 @@ class TestAuditPurge(TransactionCase):
         self.log_model._purge_all_now()
         self.env.cr.execute("SELECT count(*) FROM oteny_audit_log")
         self.assertEqual(self.env.cr.fetchone()[0], count)
-        self.assertEqual(self._exists(insert)[1], snapshot)
+        self.assertEqual(self._exists(orphan)[1], snapshot)
 
     def test_view_reads_direct_rows_from_the_log_and_ignores_old_direct_refs(self):
         """Cut F: one view row per change, also while an old direct ref still exists."""

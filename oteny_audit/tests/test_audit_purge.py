@@ -1,6 +1,6 @@
 # test_audit_purge.py
 # The purge of the stored rows that the coverage of 19.0.1.723 would not write (and, since
-# 19.0.1.747, the insert snapshots that become id rows), and the
+# 19.0.1.748, the insert snapshots that become id rows), and the
 # aggregated view without direct references (plan oteny-audit/plans/audit-storage-reduction.md,
 # cut F and § 11). The old rows are made with SQL, in the shape the old code wrote them.
 import json
@@ -62,7 +62,7 @@ class TestAuditPurge(TransactionCase):
                                {"url": {"raw": "/web/assets/1/x.js", "display": "", "label": "Url"}})
         # An insert snapshot of a live record, with an update in its transaction, a parent ref
         # on the update and a direct ref: the update folds, and then the insert holds the id
-        # only (phase `inserts`, 19.0.1.747).
+        # only (phase `inserts`, 19.0.1.748).
         insert = self._old_row("oteny.audit.test.coverage", rid, "__snapshot__", "i", 904, {
             "name": {"raw": "Old name", "display": "Old name", "label": "Name"},
         })
@@ -75,7 +75,7 @@ class TestAuditPurge(TransactionCase):
         deleted = self._old_row("oteny.audit.test.coverage", 999001, "__snapshot__", "i", 906, {"name": entry})
         self._old_row("oteny.audit.test.coverage", 999001, "__snapshot__", "d", 907, {"name": entry})
         # An insert of a record that is gone without a delete row (a database cascade before
-        # 19.0.1.747): its snapshot is the only copy and stays, cleaned by the rules of the
+        # 19.0.1.748): its snapshot is the only copy and stays, cleaned by the rules of the
         # fold (N1, N2, an ignored field).
         orphan = self._old_row("oteny.audit.test.coverage", 999002, "__snapshot__", "i", 908, {
             "name": {"raw": "Orphan", "display": "Orphan", "label": "Name"},

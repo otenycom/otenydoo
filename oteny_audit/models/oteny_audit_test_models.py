@@ -112,7 +112,7 @@ class OtenyAuditTestCoverage(models.Model):
     compute, is not), the read-only `active`, `parent_path`, rule N1 (`flag`, `count` without
     a default; `flag_on` with one) and `_oteny_audit_ignore_fields` (`skipped_note`, and the
     mixin's `mixin_note`). `holder_id` (ON DELETE CASCADE) and `parent_id` (SET NULL) test the
-    rows that a database cascade writes (19.0.1.747)."""
+    rows that a database cascade writes (19.0.1.748)."""
 
     _name = "oteny.audit.test.coverage"
     _description = "Oteny Audit Test Coverage Model"

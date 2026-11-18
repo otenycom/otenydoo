@@ -1,5 +1,5 @@
 # test_audit_log_tombstone.py
-# Insert and delete events are one log row per record. Since 19.0.1.747 an insert row holds
+# Insert and delete events are one log row per record. Since 19.0.1.748 an insert row holds
 # the record's id only (plan oteny-audit/plans/audit-insert-id-only.md); a delete row holds a
 # tombstone snapshot of every non-blank field in its `snapshot` JSON. Updates remain per-field,
 # with the old and the new value. Together with the current record this allows to rebuild the

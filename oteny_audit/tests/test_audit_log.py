@@ -33,7 +33,7 @@ class TestAuditLog(TransactionCase):
 
     def test_create_logs_insert(self):
         """Creating a record logs one insert row that holds the record's id and no field
-        value (19.0.1.747): the values are in the record itself."""
+        value (19.0.1.748): the values are in the record itself."""
         partner = self.env["res.partner"].create(
             {
                 "name": "Test Partner for Audit",

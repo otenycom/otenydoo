@@ -60,7 +60,7 @@ class TestAuditAggregatedPartition(TransactionCase):
         p_del = self.parent_model.create({"name": "Partition del"})
         del_id = p_del.id
         p_del.unlink()
-        # Branch A: an insert, which since 19.0.1.747 is one plain row with the id.
+        # Branch A: an insert, which since 19.0.1.748 is one plain row with the id.
         p_empty = self.parent_model.create({})
         empty_id = p_empty.id
 

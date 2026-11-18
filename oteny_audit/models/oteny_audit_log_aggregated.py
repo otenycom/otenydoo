@@ -161,7 +161,7 @@ class OtenyAuditLogAggregated(models.Model):
             old_display, new_display = self._caption_values(log)
 
             if change_type == "i" and log.field_name == "id":
-                # An insert since 19.0.1.747 holds only the record's id: the header says it all.
+                # An insert since 19.0.1.748 holds only the record's id: the header says it all.
                 field_change_str = ""
             elif change_type == "i":
                 new_val = self._format_field_value(new_display, is_html_field)

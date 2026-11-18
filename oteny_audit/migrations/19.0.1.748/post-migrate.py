@@ -1,6 +1,6 @@
-"""Post-migration 19.0.1.747 — switch on the purge phase that strips the stored insert snapshots.
+"""Post-migration 19.0.1.748 — switch on the purge phase that strips the stored insert snapshots.
 
-Since 19.0.1.747 an insert writes one audit row with the id of the new record, and no snapshot of
+Since 19.0.1.748 an insert writes one audit row with the id of the new record, and no snapshot of
 its fields (plan oteny-audit/plans/audit-insert-id-only.md). The insert snapshots written before
 stay until the phase `inserts` of the scheduled action "Audit Log: Purge Rows Outside Coverage"
 turns them into id rows; the phase `vacuum` then gives the space back with VACUUM FULL, which

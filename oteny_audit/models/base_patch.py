@@ -203,7 +203,7 @@ def _is_audited_field(model, field):
 def _audit_record_name(model, record):
     """The name of `record` in its audit rows (`record_display_name`, the header of a row).
 
-    One structure, "<what> on <where>" (19.0.1.747, plan oteny-audit/plans/audit-insert-id-only.md):
+    One structure, "<what> on <where>" (19.0.1.748, plan oteny-audit/plans/audit-insert-id-only.md):
     - a model may declare `_oteny_audit_display_name(record)` for a better name than its
       display name: a `mail.message` (its display name is the subject, which most messages
       lack) and an `ir.attachment` (a file name does not say which record it belongs to);
@@ -622,7 +622,7 @@ def _parent_refs_for_insert_transaction(env, model, insert_log_ids, changes):
     commit is the record itself, which its insert row points to. Stored computes and code that
     writes right after the create (the computes of a new service, the salary timeline builder)
     gave one to seven update rows per new record until 19.0.1.723, then a fold into the insert
-    snapshot until 19.0.1.747 (plan oteny-audit/plans/audit-insert-id-only.md).
+    snapshot until 19.0.1.748 (plan oteny-audit/plans/audit-insert-id-only.md).
 
     One thing such a change still does: when it sets the field that decides the parent, the
     insert row gets the parent refs it does not have yet, so a service that is linked to its
@@ -751,7 +751,7 @@ def patched_create(self, vals_list):
     # One row per created record, with its id and nothing more: the current values of the
     # other fields are in the record itself, a later change writes an update row with its old
     # value, and a delete writes a snapshot (plan oteny-audit/plans/audit-insert-id-only.md).
-    # Until 19.0.1.747 this row held a snapshot of every field, 63 % of the bytes of the log.
+    # Until 19.0.1.748 this row held a snapshot of every field, 63 % of the bytes of the log.
     logs = []
     for record in records:
         if _record_audit_ignored(self, record):
@@ -944,7 +944,7 @@ def _log_database_cascades(records):
     is changed by PostgreSQL; the ORM, and so the audit patch, never sees either. On the
     production backup of 18-Nov-2026, 453 crew planning items went with their log entry and
     29 services with their parent service, without a delete row. Since an insert writes only
-    the record's id (19.0.1.747), such a record would leave no trace of its content.
+    the record's id (19.0.1.748), such a record would leave no trace of its content.
 
     So before the delete: a delete snapshot for each record that a cascade deletes (and
     recursively for what points to those), and an update row (old value: the deleted record,

@@ -1,7 +1,9 @@
 # Plan: an insert writes only the record's id, and the first page of the audit log opens at once
 
-Status: analysed and built on 18-Nov-2026 on `feat/audit-insert-id-only` (otenydoo and radar), on
-`crmain` restored from `~/Downloads/cr.zip` (production backup of 18-Nov-2026). Not merged.
+Status: built on 18-Nov-2026 on `feat/audit-insert-id-only` (otenydoo and radar), on `crmain`
+restored from `~/Downloads/cr.zip` (production backup of 18-Nov-2026). Merged on 19-Nov-2026 into
+otenydoo `main` (`11580d9`) and radar `dev` (`0e9bd7974`); the merge renumbered the migration
+from 19.0.1.747 to 19.0.1.748 (oteny_audit 19.0.1.748). Deployed to test1 for the release check.
 Asked by Ries on 18-Nov-2026, with two goals:
 
 1. The first page of the audit log opens at once from every Action menu that shows it (the
@@ -178,7 +180,7 @@ An insert snapshot repeats the current record, except in three cases:
 - `oteny_audit/models/base_patch.py`: decisions 1 to 3.
 - `oteny_audit/models/oteny_audit_log_aggregated.py`: decisions 5 and 6; the caption shows only
   the header for an id row.
-- `oteny_audit/models/oteny_audit_log.py`: the `inserts` phase; migration `19.0.1.747`.
+- `oteny_audit/models/oteny_audit_log.py`: the `inserts` phase; migration `19.0.1.748`.
 - radar: `crewradar/tests/salary/test_salary_timeline_audit.py` (read the type from the record,
   not from the insert snapshot); the Wilma data analyst's description of the audit shape
   (`crewradar_wilma/models/riverflow_service_analysis.py`).
@@ -193,7 +195,7 @@ An insert snapshot repeats the current record, except in three cases:
 
 ## 4. Outcome (18-Nov-2026, local; not merged)
 
-Built on `feat/audit-insert-id-only` in otenydoo and radar; oteny_audit 19.0.1.747.
+Built on `feat/audit-insert-id-only` in otenydoo and radar; oteny_audit 19.0.1.748.
 
 - **Measured on `crmain`** (production backup of 18-Nov-2026), purge run at once by the cron
   runner (`method_direct_trigger`, as Run Manually): first job 3.1 s (86,379 insert snapshots

@@ -25,7 +25,7 @@ class IrAttachment(models.Model):
         """The name of an attachment in its audit rows: the file, and the record it is on
         ("20260910135034.pdf on Sardius | Arrange A1 Application"). A file name alone, often
         the timestamp of a scan, does not say in the global audit log which record the file
-        belongs to (19.0.1.747)."""
+        belongs to (19.0.1.748)."""
         from .base_patch import _audit_parent_name
 
         document = _audit_parent_name(record)

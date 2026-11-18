@@ -60,13 +60,13 @@ class OtenyAuditLog(models.Model):
     )
     # Tombstone snapshot of a delete: every non-blank audited field value at the delete, in
     # the shape {field_name: {"raw": str, "display": str, "label": str}}. An insert holds the
-    # record's id only since 19.0.1.747 (field_name "id"; older inserts and a record that is
+    # record's id only since 19.0.1.748 (field_name "id"; older inserts and a record that is
     # gone without a delete row keep their snapshot). With the per-field update rows and the
     # current record, the state of a record is rebuilt at any time until log expiry.
     snapshot = fields.Json(
         string="Snapshot",
         help=(
-            "For a delete row (and an insert row written before 19.0.1.747): the field values "
+            "For a delete row (and an insert row written before 19.0.1.748): the field values "
             "at the time of the event, structured as "
             "{field_name: {'raw': ..., 'display': ..., 'label': ...}}. Empty on other rows."
         ),
@@ -592,8 +592,8 @@ action = {
     #             an insert snapshot its empty values of fields without a default;
     #   refs    - the direct references (cut F);
     #   inserts - an insert snapshot becomes a row with the record's id only, when the record
-    #             still exists or has a delete row (19.0.1.747, plan audit-insert-id-only.md;
-    #             the 19.0.1.747 migration starts the purge at this phase);
+    #             still exists or has a delete row (19.0.1.748, plan audit-insert-id-only.md;
+    #             the 19.0.1.748 migration starts the purge at this phase);
     #   vacuum  - VACUUM (FULL, ANALYZE) of the two tables, then the action switches off;
     #   done    - a later run does nothing but switch the action off again.
     _PURGE_PHASE_PARAM = "oteny_audit.purge_phase"
@@ -836,11 +836,11 @@ action = {
 
     def _purge_step_inserts(self):
         """Turn the insert snapshots with an id in the next range into rows with the record's id
-        only, the shape that an insert writes since 19.0.1.747: the current values of the
+        only, the shape that an insert writes since 19.0.1.748: the current values of the
         fields are in the record, a later change has its update row, and a delete its snapshot.
 
         A snapshot stays when its record is gone without a delete row (a database cascade or a
-        delete with audit off before 19.0.1.747, 926 records on the production backup of
+        delete with audit off before 19.0.1.748, 926 records on the production backup of
         18-Nov-2026): it is the only copy of that record. The snapshot of a model that is not in
         the registry stays too; the `deletes` phase removes such rows.
         """

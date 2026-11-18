@@ -35,7 +35,7 @@ class TestAuditLogOrdering(TransactionCase):
         insert_logs = logs.filtered(lambda l: l.change_type == "i")
         update_logs = logs.filtered(lambda l: l.change_type == "u")
 
-        # One id row for the create (19.0.1.747: an insert holds the record's id only).
+        # One id row for the create (19.0.1.748: an insert holds the record's id only).
         self.assertEqual(len(insert_logs), 1, "Should have a single insert row")
         self.assertEqual(insert_logs.field_name, "id")
 
@@ -160,7 +160,7 @@ class TestAuditLogOrdering(TransactionCase):
 
     def test_computed_field_during_create_ordering(self):
         """A compute that writes back during the create writes no row: the insert row holds
-        the id, and the record holds the value at the commit (19.0.1.747). A later write is
+        the id, and the record holds the value at the commit (19.0.1.748). A later write is
         an update row, with the computed value as its old value."""
         parent = self.parent_model.create({"name": "Test Name"})
         parent.flush_recordset()

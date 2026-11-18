@@ -2,7 +2,7 @@
 # The coverage rules: which fields and records the audit log writes (19.0.1.723, plan
 # oteny-audit/plans/audit-storage-reduction.md), and the insert that writes only the record's id,
 # the changes in the transaction of the create that write nothing, and the rows of a database
-# cascade (19.0.1.747, plan oteny-audit/plans/audit-insert-id-only.md).
+# cascade (19.0.1.748, plan oteny-audit/plans/audit-insert-id-only.md).
 from odoo.tests import TransactionCase, tagged
 
 from .common import end_transaction
@@ -80,7 +80,7 @@ class TestAuditCoverage(TransactionCase):
         self.assertTrue(self._rows(record, change_type="u").filtered(lambda row: row.field_name == "name"))
 
     def test_the_value_at_the_insert_is_the_old_value_of_the_first_update(self):
-        """The reconstruction rule of 19.0.1.747: a field's value at the insert is the old value
+        """The reconstruction rule of 19.0.1.748: a field's value at the insert is the old value
         of its first update row after the insert, else the current value."""
         record = self.coverage.create({"name": "Original", "count": 1})
         end_transaction(self.env)

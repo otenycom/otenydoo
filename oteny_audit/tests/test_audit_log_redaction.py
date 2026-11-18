@@ -2,7 +2,7 @@
 #
 # Coverage for secret redaction: a credential must never reach an audit row, on any change
 # type, in either storage shape (the flat old_value/new_value columns of an update, and the
-# `snapshot` jsonb of a delete; an insert holds the record's id only since 19.0.1.747). The audit log is readable and value-searchable
+# `snapshot` jsonb of a delete; an insert holds the record's id only since 19.0.1.748). The audit log is readable and value-searchable
 # by every internal user, so this is a security boundary, not a storage optimisation.
 #
 # Three levers are exercised:
@@ -44,7 +44,7 @@ class TestAuditLogRedaction(TransactionCase):
         return rows.snapshot or {}
 
     def _delete_snapshot(self, record):
-        """Delete `record` and return its delete snapshot. Since 19.0.1.747 an insert holds
+        """Delete `record` and return its delete snapshot. Since 19.0.1.748 an insert holds
         the id only, so the delete snapshot is the one snapshot that holds field values."""
         record.flush_recordset()
         model_name, record_id = record._name, record.id
@@ -78,7 +78,7 @@ class TestAuditLogRedaction(TransactionCase):
     # --- snapshots ------------------------------------------------------------------ #
 
     def test_an_insert_stores_no_value(self):
-        """Since 19.0.1.747 an insert row holds the record's id only: no credential can
+        """Since 19.0.1.748 an insert row holds the record's id only: no credential can
         reach it."""
         record = self._make()
         record.flush_recordset()

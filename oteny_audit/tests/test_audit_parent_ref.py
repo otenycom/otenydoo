@@ -44,7 +44,7 @@ class TestAuditParentRef(TransactionCase):
         """Changes to a child record create parent references in the audit log.
 
         A child create produces ONE insert row for the child, with its id only
-        (19.0.1.747). The row shows under the child itself without a reference (the view
+        (19.0.1.748). The row shows under the child itself without a reference (the view
         reads it from the log), and it gets one parent ref (to the parent). Later
         updates remain per-field and get their own parent ref.
         """

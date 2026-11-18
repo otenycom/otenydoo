@@ -43,7 +43,7 @@ class MailMessage(models.Model):
 
         Odoo's display name of a message is its subject, and most messages have none: on the
         production backup of 18-Nov-2026, 15,132 of 23,533 message inserts had an empty name,
-        and since an insert holds the id only (19.0.1.747) such a row said "Insert Message by
+        and since an insert holds the id only (19.0.1.748) such a row said "Insert Message by
         Fred" and nothing more (Ries, 18-Nov-2026). So the name is the subject, else the start
         of the body as plain text (80 characters), else the subtype ("Note"), and then the
         document the message is on: "'Flight booked KL 808 …' on Sardius | Book Flight ON".

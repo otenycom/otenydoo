@@ -48,7 +48,7 @@ class TestAuditLogChatterPreservation(TransactionCase):
         message.unlink()
         self.env.flush_all()
 
-        # Since 19.0.1.747 an insert holds only the id: the body is in the message itself,
+        # Since 19.0.1.748 an insert holds only the id: the body is in the message itself,
         # and in the delete snapshot once the message is gone.
         snapshot_logs = self.log_model.search(
             [
@@ -233,7 +233,7 @@ class TestAuditLogChatterPreservation(TransactionCase):
         body = (msg_delete.snapshot or {}).get("body", {}).get("raw", "")
         self.assertIn("must survive cascade", body)
 
-    # --- the name of a message in its audit rows (19.0.1.747) -------------------------- #
+    # --- the name of a message in its audit rows (19.0.1.748) -------------------------- #
 
     def _insert_name(self, message):
         message.flush_recordset()

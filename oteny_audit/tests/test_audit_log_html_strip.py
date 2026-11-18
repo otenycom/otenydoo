@@ -28,7 +28,7 @@ class TestAuditLogHtmlStrip(TransactionCase):
 
     def _snapshot_value(self, record, field_name):
         """Helper: delete `record` and return a field's entry of its delete snapshot. Since
-        19.0.1.747 the delete snapshot is the only snapshot (an insert holds the id only)."""
+        19.0.1.748 the delete snapshot is the only snapshot (an insert holds the id only)."""
         record_id = record.id
         record.unlink()
         self.env.flush_all()
@@ -40,7 +40,7 @@ class TestAuditLogHtmlStrip(TransactionCase):
         return (snap_logs.snapshot or {}).get(field_name)
 
     def test_an_insert_holds_no_html(self):
-        """Since 19.0.1.747 an insert row holds the record's id and no field value, so no
+        """Since 19.0.1.748 an insert row holds the record's id and no field value, so no
         HTML reaches it at all."""
         record = self.model.create(
             {

@@ -4,7 +4,8 @@ Status: built on 18-Nov-2026 on `feat/audit-insert-id-only` (otenydoo and radar)
 restored from `~/Downloads/cr.zip` (production backup of 18-Nov-2026). Merged on 19-Nov-2026 into
 otenydoo `main` (`11580d9`) and radar `dev` (`0e9bd7974`); the merge renumbered the migration
 from 19.0.1.747 to 19.0.1.748 (oteny_audit 19.0.1.748). On production since 19-Nov-2026 (radar
-`main` `95f546eca`, oteny_audit 19.0.1.750); the purge runs on the night of 19-Nov-2026 at 01:00 UTC.
+`main` `95f546eca`, oteny_audit 19.0.1.750); the purge ran on production on 19-Nov-2026 (`oteny_audit_log`
+221 MB → 112 MB, the database 1,155 MB → 1,045 MB).
 Asked by Ries on 18-Nov-2026, with two goals:
 
 1. The first page of the audit log opens at once from every Action menu that shows it (the
@@ -270,4 +271,12 @@ Built on `feat/audit-insert-id-only` in otenydoo and radar; oteny_audit 19.0.1.7
   entry 8780 takes 103 ms (160 of 3,293 rows), of employee 102 44 ms (160 of 651 rows). The API
   (`/json/2/`) answered with the odoo.sh "Access Denied" page the same evening, also for a plain
   read; test1 answered the same key.
-- **Not done:** the result of the night run on production (sizes after the purge and the VACUUM).
+- **Purge on production** (19-Nov-2026, run at once on Ries's request instead of the night run, by
+  hand through the cron runner over SSH): the batches 3.9 s (86,786 insert snapshots became id
+  rows; 873 stayed, records gone without a delete row); then the VACUUM step waited about 4.5
+  minutes for a connection with an older snapshot (one sample showed a connection of another
+  database role, its query hidden as `<insufficient privilege>`, probably an odoo.sh job), and
+  `VACUUM FULL` took 3.5 s. 833 MB of WAL. `oteny_audit_log` 221 MB → 112 MB,
+  `oteny_audit_log_ref` 89 MB → 87 MB, the database 1,155 MB → 1,045 MB. The phase is `done` and
+  the action is off. The Audit tab: log entry 8780 100 ms (160 of 2,022 rows), employee 102 44 ms
+  (160 of 302 rows).

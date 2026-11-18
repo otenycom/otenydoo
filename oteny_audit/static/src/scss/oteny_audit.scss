@@ -19,3 +19,17 @@
     padding: 4px;
     border-radius: 3px;
 }
+
+// The Audit tab of a form (widget oteny_audit_log): one block per database transaction, with a
+// line between the blocks and an alternating background. Both colours come from Bootstrap
+// variables, so the dark bundle (web.assets_web_dark compiles this file again with the dark
+// variables) gets its own colours without a .dark.scss rule.
+.o_oteny_audit_log_tab {
+    .o_oteny_audit_tx {
+        border-bottom: 1px solid $border-color;
+    }
+
+    .o_oteny_audit_tx_alt {
+        background-color: rgba($body-color, 0.04);
+    }
+}

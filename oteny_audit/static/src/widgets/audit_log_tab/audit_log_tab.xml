@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="oteny_audit.AuditLogTab">
+        <div class="o_oteny_audit_log_tab">
+            <t t-if="state.loaded and !state.transactions.length">
+                <p class="text-muted o_oteny_audit_empty">No audit rows for this record.</p>
+            </t>
+            <div t-foreach="state.transactions" t-as="transaction" t-key="transaction.key"
+                 t-attf-class="o_oteny_audit_tx px-2 py-1 {{ transaction_index % 2 ? 'o_oteny_audit_tx_alt' : '' }}">
+                <div class="o_oteny_audit_tx_header fw-bold">
+                    <t t-esc="transaction.user"/>
+                    <span class="text-muted fw-normal ms-2" t-esc="transaction.when"/>
+                </div>
+                <div t-foreach="transaction.rows" t-as="row" t-key="row.id" class="o_oteny_audit_row ms-3">
+                    <t t-out="row.caption"/>
+                </div>
+            </div>
+            <div t-if="state.count" class="text-muted pt-2 o_oteny_audit_more">
+                <t t-if="state.count > state.rowCount"><t t-esc="state.rowCount"/> of <t t-esc="state.count"/> rows; </t>
+                <button type="button" class="btn btn-link p-0 align-baseline o_oteny_audit_full_screen" t-on-click="openFullScreen">Full Screen</button>
+                <t t-if="state.count > state.rowCount"> shows all.</t>
+            </div>
+        </div>
+    </t>
+</templates>

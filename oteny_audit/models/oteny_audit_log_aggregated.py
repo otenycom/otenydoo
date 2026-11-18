@@ -111,12 +111,16 @@ class OtenyAuditLogAggregated(models.Model):
         except KeyError:
             return self._DEFAULT_DATE_FORMAT
 
+    @api.depends_context("oteny_audit_caption_without_user")
     def _compute_caption(self):
         """Render one caption per virtual row; rows for the same record-event
         share a header and emit only their own field-change line, mirroring
         the legacy per-field UX."""
         log_list = list(self)
         change_type_verbs = {"i": "Insert", "u": "Update", "d": "Delete", "r": "Remark"}
+        # The Audit tab of a form shows the user and the time once per transaction, in its own
+        # header (static/src/widgets/audit_log_tab), so the record headers leave them out.
+        without_user = self.env.context.get("oteny_audit_caption_without_user")
         date_format = self._audit_datetime_format()
         for i, log in enumerate(log_list):
             caption_parts = []
@@ -146,7 +150,9 @@ class OtenyAuditLogAggregated(models.Model):
                 user_display = markupsafe.escape(log.create_uid.name if log.create_uid else "")
                 date_display = fields.Datetime.context_timestamp(self, log.create_date).strftime(date_format)
                 styled_record_display = f'<span class="oteny-audit-record-header">{record_display}</span>'
-                header_str = f"{verb} {model_display} {styled_record_display} by <b>{user_display}</b> on {date_display}"
+                header_str = f"{verb} {model_display} {styled_record_display}"
+                if not without_user:
+                    header_str += f" by <b>{user_display}</b> on {date_display}"
                 caption_parts.append(f"<div>{header_str}</div>")
 
             change_type = log.change_type

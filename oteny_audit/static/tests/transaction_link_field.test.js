@@ -1,4 +1,4 @@
-import { expect, test } from "@odoo/hoot";
+import { describe, expect, test } from "@odoo/hoot";
 import { click } from "@odoo/hoot-dom";
 import { animationFrame } from "@odoo/hoot-mock";
 import {
@@ -28,6 +28,9 @@ class AuditLog extends models.Model {
 
 defineMailModels();
 defineModels([AuditLog]);
+
+// A list view: the phone layout draws it as cards.
+describe.current.tags("desktop");
 
 const arch = `<list><field name="transaction_id" widget="audit_transaction_link"/></list>`;
 

@@ -146,6 +146,33 @@ An insert snapshot repeats the current record, except in three cases:
    `crewradar.medical.expense` and `rivercreds.document.import.job` have no audit parent, so
    their audit name is the label and the id only.
 
+10. **An Audit tab on every audited form with tabs** (asked by Ries on 18-Nov-2026, with the
+    ship form as the example; the same shape as the Services tab and its "Full Screen (N)").
+    207 audited models have a form, 76 of them with a notebook (26 ours: log entry, employee,
+    ship, service, credential, timesheet, salary timeline, plans, workflow, …). Generic, in
+    `oteny_audit`, no code per model:
+    - `models/base_audit_tab.py` extends `_get_view` on `base` (the hook Odoo's own modules use,
+      for example `partner_autocomplete`): for the form of an audited, stored model with
+      `write_date`, it appends the page "Audit" (`name="oteny_audit_log"`, `invisible="not id"`)
+      to the main notebook (under `<sheet>`, not a nested one). Odoo caches the arch per view.
+      A model opts out with `_oteny_audit_form_tab = False`. Forms without a notebook (131
+      audited models, for example `crewradar.contract`, rates, ship contacts) keep the Action
+      menu only.
+    - The view widget `oteny_audit_log` (`static/src/widgets/audit_log_tab/`) reads the newest
+      160 rows of the audit log view with the domain of the Action menu (the record's own rows
+      and its children's), only when the tab is opened (Odoo draws a page only then), and again
+      after a save (`write_date` changes). Below the rows, "160 of N rows; Full Screen shows all." holds a link that opens the Audit Log list (Ries, 19-Nov-2026: a link, no button above the rows).
+    - **Grouped per transaction** (asked by Ries on 18-Nov-2026): each database transaction is
+      one block with a header (the user and the time) and its changes below; the background
+      alternates per block. The captions leave "by <user> on <time>" out for the tab (context
+      `oteny_audit_caption_without_user`, declared with `@api.depends_context` on the caption
+      compute), so the user and the time are not repeated per record. The colours come from
+      `$border-color` and `rgba($body-color, 0.04)`, so the dark bundle gets its own.
+    - Every internal user reads the audit log today, so every internal user sees the tab; when
+      the roadmap item "Restrict who can read the audit log" is built, the page gets that group.
+    - The web client keeps views in the browser and refreshes them in the background: the first
+      form load after a deploy can show the old form; the next load shows the tab.
+
 ## 3. Build and checks
 
 - `oteny_audit/models/base_patch.py`: decisions 1 to 3.

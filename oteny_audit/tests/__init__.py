@@ -15,3 +15,4 @@ from . import test_audit_log_transaction_id_bigint
 from . import test_audit_log_remark
 from . import test_audit_coverage
 from . import test_audit_purge
+from . import test_audit_form_tab

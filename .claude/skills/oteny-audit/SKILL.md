@@ -280,6 +280,17 @@ By default only direct (parent) logs are shown. Child logs appear when viewing f
 4. Select **Audit Log**
 5. The aggregated view opens, filtered to the selected record(s), including child record changes
 
+### The Audit tab of a form
+
+Every audited form that has tabs shows **Audit** as its last tab (19.0.1.747, plan `plans/audit-insert-id-only.md`, decision 10; asked by Ries on 18-Nov-2026). It holds the newest 160 rows of the record's audit log, the same rows as the Action menu's **Audit Log for …** (the record's own changes and its children's), grouped per database transaction: a header with the user and the time, the changes of that transaction below it, and an alternating background per transaction. Below the rows, "160 of N rows; **Full Screen** shows all." links to the whole list (a record with 160 rows or fewer shows the link alone).
+
+- **When it reads:** only when the user opens the tab (Odoo draws a notebook page only then), and again after a save (the record's `write_date` changes). On log entry 8780 of the production backup (2,036 rows): 113 ms from the click to the rows.
+- **How it is built, without code per model:** `models/base_audit_tab.py` extends `_get_view` on `base` and appends the page (`name="oteny_audit_log"`, `invisible="not id"`) to the form's main notebook, for a stored, audited model with `write_date`; Odoo caches the arch per view. The page holds the view widget `oteny_audit_log` (`static/src/widgets/audit_log_tab/`). The widget asks for the captions with the context `oteny_audit_caption_without_user`, so the record headers leave out "by <user> on <time>", which the transaction header shows once.
+- **Switch it off** on a model with `_oteny_audit_form_tab = False`. A form without tabs gets no page: 131 audited models keep only the Action menu.
+- **Who sees it:** every internal user, because every internal user reads the audit log today; when the roadmap item "Restrict who can read the audit log" is built, the page gets that group.
+- **After a deploy** the web client may draw the form from its own view cache once; the next load shows the tab.
+- **Tests:** `tests/test_audit_form_tab.py` (which forms get the page, the caption without the user) and `static/tests/audit_log_tab.test.js` (Hoot, desktop only; it runs in radar's `crewradar/tests/test_hoot.py`, whose suites include `@oteny_audit` since 19.0.1.747).
+
 ## Configuration
 
 ### The cleanup cron and database restores
@@ -667,6 +678,8 @@ Virtual rows use `(log.id * 1000 + idx) * 2` for direct rows and `(ref.id * 1000
 | `oteny_audit/models/oteny_audit_log_ref.py` | Reference model linking logs to parent records |
 | `oteny_audit/models/oteny_audit_log_aggregated.py` | DB view model with HTML caption generation |
 | `oteny_audit/models/oteny_audit_mixin.py` | Optional mixin adding audit_log_ids to models |
+| `oteny_audit/models/base_audit_tab.py` | The Audit tab: appends the page to the form of every audited model with tabs (`_get_view` on `base`) |
+| `oteny_audit/static/src/widgets/audit_log_tab/` | The view widget of the Audit tab: the newest 160 rows grouped per transaction, and the Full Screen link |
 | `oteny_audit/models/mail_thread_override.py` | Disables Odoo's MailThread tracking |
 | `oteny_audit/models/mail_message_override.py` | `mail.message`: HTML strip on `body`, the per-record skip for a message in an audit-ignored container, the ignored delivery fields, the audit name (`_oteny_audit_display_name`) |
 | `oteny_audit/models/ir_attachment_override.py` | `ir.attachment`: the per-record skip of generated images and asset bundles, the ignored technical fields, the audit name (`_oteny_audit_display_name`) |
@@ -703,7 +716,7 @@ Virtual rows use `(log.id * 1000 + idx) * 2` for direct rows and `(ref.id * 1000
 
 ### Completed
 
-- [x] 2026-11-18: an insert writes only the record's id, and the first page of the audit log opens at once (19.0.1.747, plan `plans/audit-insert-id-only.md`; built on `feat/audit-insert-id-only`, not merged yet). The rows of a database cascade (delete and SET NULL) are written; the view sorts by time and reads by id through an index; the purge phase `inserts` turns the stored insert snapshots into id rows, and `VACUUM FULL` runs in a job of its own. Every audit row names its record as "<what> on <where>" (messages, attachments, models without a name field). On the production backup of 18-Nov-2026: `oteny_audit_log` 212 MB → 110 MB, the first page of a busy log entry 1,339 ms → 79 ms.
+- [x] 2026-11-18: an insert writes only the record's id, and the first page of the audit log opens at once (19.0.1.747, plan `plans/audit-insert-id-only.md`; built on `feat/audit-insert-id-only`, not merged yet). The rows of a database cascade (delete and SET NULL) are written; the view sorts by time and reads by id through an index; the purge phase `inserts` turns the stored insert snapshots into id rows, and `VACUUM FULL` runs in a job of its own. Every audit row names its record as "<what> on <where>" (messages, attachments, models without a name field). Every audited form with tabs has an Audit tab: the newest 160 rows grouped per transaction, and a Full Screen link. On the production backup of 18-Nov-2026: `oteny_audit_log` 212 MB → 110 MB, the first page of a busy log entry 1,339 ms → 79 ms.
 - [x] 2026-11-07: fewer audit rows, the same clarity (19.0.1.723, plan `plans/audit-storage-reduction.md`). Cuts A to I and rules N1 to N4: credential plan items, the calendar end date, generated images and asset bundles, cron triggers, the fold of changes in the transaction of the create, no direct refs, the error log and reconciliation salary timelines leave the log; fields that code writes but users cannot edit (invoice links, salary links, the invoice state, the timeline type) enter it. A selection shows its label, and the fields of an insert read in label order. The one-shot night purge makes the stored rows match: on the production backup of 27-Oct-2026 the audit tables went from 1,065 MB to 289 MB.
 
 - [x] Legacy residue of the already-ignored models: the retention cleanup removed it. On `crmain` restored from the production backup of 27-Oct-2026, no row of a model on `_DEFAULT_IGNORED_MODEL_NAMES` remains, and the oldest row is from 29-Apr-2026 (plan `plans/audit-storage-reduction.md`).

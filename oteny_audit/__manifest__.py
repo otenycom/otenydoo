@@ -19,6 +19,7 @@
             "oteny_audit/static/src/scss/oteny_audit.scss",
             "oteny_audit/static/src/scss/oteny_audit.dark.scss",
             "oteny_audit/static/src/fields/**/*",
+            "oteny_audit/static/src/widgets/**/*",
         ],
         "web.assets_unit_tests": [
             "oteny_audit/static/tests/**/*",

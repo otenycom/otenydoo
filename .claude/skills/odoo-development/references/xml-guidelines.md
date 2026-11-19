@@ -350,6 +350,16 @@ Request/Response: a `<separator>` **outside** the group, then the field in a wra
 `<div>`. Keep compute helpers on the model for tests. Scope SCSS to that form
 (`oteny_bot` 19.0.1.18 on the Bot Activity session form).
 
+### Two sections that compare side by side
+
+When a form shows two sections next to each other for a visual compare (what a document
+says against what the record holds), both sections show the **same fields in the same
+order**, so each pair reads across on one line. A field that only one side has comes after
+the shared ones. A field that belongs to neither side, such as the link to the compared
+document, stands above both sections (Ries, 19-Nov-2026). Radar example: the service form of
+Collect Rijnvaartverklaring, "On the Credential Document" against "The Ship Version"
+(`crewradar_cuneus_sign/views/riverflow_service_views.xml`).
+
 ### Notebook Tab Toolbars (list tabs)
 
 Every notebook `<page>` that shows an embedded list of records (Services, Logbook, Credentials, Contracts, TFT, Payouts on the Employee / Ship / Log Entry forms) uses **one shared toolbar language**: solid Bootstrap buttons in a flex wrapper. Do **not** use Odoo's `oe_link` text-links for these toolbars — the mix of `oe_link` on some tabs and solid buttons on others was the exact inconsistency this convention replaced.

@@ -158,7 +158,10 @@
                                 </field>
                             </group>
                         </page>
-                        <page string="Child Services" name="services" invisible="not descendant_ids">
+                        <!-- Always visible, also without child services: the Audit tab of oteny_audit is the
+                             last page of every audited form, and a service whose only other page was hidden
+                             opened on its audit log (19-Nov-2026). -->
+                        <page string="Child Services" name="services">
                             <div>
                                 <button name="add_child_service" type="object" data-hotkey="n"
                                     icon="fa-plus">
@@ -166,6 +169,7 @@
                             </div>
                             <!-- Workaround: list view click opens a popup of the child service, instead of the form view.
                                                          To ensure the form view opens for the child service, we use riverflow_one2many -->
+                            <p class="text-muted o_riverflow_no_child_services" invisible="descendant_ids">This service has no child services.</p>
                             <field name="descendant_ids" widget="riverflow_one2many" invisible="not descendant_ids">
                                 <!-- Because there is a handle-field, we must set the default_order to prevent Odoo from taking the handle's field as the primary sort field -->
                                 <!-- All fields from default_order must be included in the list, added with column_invisible but do not change the existing column order (eg root_name must remain where it was), see state record view conventions -->

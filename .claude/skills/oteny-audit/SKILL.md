@@ -237,7 +237,7 @@ The strip applies to both raw values (`old_value` / `new_value`) and display val
 
 ### MailThread Tracking Replaced
 
-The module disables Odoo's built-in `MailThread` tracking (which logs to the chatter) by patching `MailThread.create` and `write` to set `tracking_disable=True`. This avoids duplicate logging and improves performance. A stored computed or related field is not written there: it recomputes at the flush, in the env of whoever flushes, where `MailThread._compute_field_value` prepared its tracking. So the module also patches `_compute_field_value` to skip that step (19-Nov-2026: a ship's Operator Name and Operator Email reached the chatter on a change of operator; test `test_chatter_tracking_off.py`).
+The module disables Odoo's built-in `MailThread` tracking (which logs to the chatter) by patching `MailThread.create` and `write` to set `tracking_disable=True`. This avoids duplicate logging and improves performance. A stored computed or related field is not written there: it recomputes at the flush, in the env of whoever flushes, where `MailThread._compute_field_value` prepared its tracking. So the module also patches `_compute_field_value` to skip that step (19-Nov-2026: a ship's Operator Name and Operator Email reached the chatter on a change of operator; test `test_chatter_tracking_off.py`). Migration 19.0.1.752 hard deletes every tracking message that was already in a chatter (a notification with a tracking value; its tracking values go by cascade), in SQL, so no audit tombstone per message: 41,822 messages on the production copy of 18-Nov-2026, all 67,743 tracking values; 57,602 notes, emails and other notifications stay.
 
 ### Auto-Setup of Action Menu Items
 

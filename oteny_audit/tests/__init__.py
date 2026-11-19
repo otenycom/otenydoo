@@ -16,3 +16,4 @@ from . import test_audit_log_remark
 from . import test_audit_coverage
 from . import test_audit_purge
 from . import test_audit_form_tab
+from . import test_chatter_tracking_off

@@ -291,6 +291,12 @@ The initial transition has an empty `from_state_id`:
 </record>
 ```
 
+Add Service lists every initial transition of a service workflow next to the templates. When
+the transition hides the name (`default_name_invisible`), the screen proposes the workflow's
+name, so give a workflow the name of its template (19-Nov-2026; before, the save stopped on
+"Missing required value for the field Service Name"). A service started this way gets no
+credential group: only a template or an auto-add service gives one.
+
 ### Common Transition Actions
 
 | Action ID | Purpose |

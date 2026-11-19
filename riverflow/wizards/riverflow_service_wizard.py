@@ -134,6 +134,15 @@ class ServiceWizard(models.TransientModel):
             )
             defaultValues["use_project_deadline_from_options"] = use_project_deadline_from_options
 
+            # A new service needs a name. A start transition picked on the
+            # Add Service screen (not a template) gets none, and many hide the
+            # name field (default_name_invisible), so the save stopped on
+            # "Missing required value for the field Service Name". Propose the
+            # name of the workflow, as its templates are named.
+            if not defaultValues.get("name"):
+                transition = self.env["riverflow.transition"].browse(ctx.get("transition_id"))
+                defaultValues["name"] = transition.workflow_id.name
+
         else:
             # This is not a stored field, so it is not in the defaultValues
             # but it is needed for the filterable_selection widget

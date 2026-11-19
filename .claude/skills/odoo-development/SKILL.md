@@ -212,6 +212,8 @@ from odoo.addons.website.models.website import slug
 | Variable (common) | snake_case | `partner_ids`, `total_amount` |
 | Many2one field | `_id` suffix | `partner_id`, `user_id` |
 | One2many/Many2many | `_ids` suffix | `line_ids`, `tag_ids` |
+| Field that tells code what to do | Starts with an active verb where possible (Ries, 19-Nov-2026) | `apply_credential_effect`, `require_attachment` |
+| Boolean that states a fact | `is_` or `has_` prefix (Ries, 19-Nov-2026) | `is_review_required`, `is_end_state`, `has_expiry_date` |
 
 #### Method Naming
 

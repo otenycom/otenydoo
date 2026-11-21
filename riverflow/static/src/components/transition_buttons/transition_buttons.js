@@ -83,8 +83,20 @@ export class TransitionButtons extends Component {
         return this.fieldValueState.text;
     }
 
+    /**
+     * The record that the transitions act on: the record of the form, or the linked
+     * record that the JSON names (res_model, res_id), for a form that shows the
+     * workflow of a linked record in its header (_linked_transition_buttons_json).
+     */
+    targetModel() {
+        return this.fieldValueState.res_model || this.props.record.resModel;
+    }
+    targetId() {
+        return this.fieldValueState.res_id || this.props.record.resId;
+    }
+
     datalistId() {
-        return this.props.record.resModel + this.props.record.resId + "_transition_options";
+        return this.targetModel() + this.targetId() + "_transition_options";
     }
 
     reloadOnClose() {
@@ -158,9 +170,9 @@ export class TransitionButtons extends Component {
 
         const action = {
             type: "object",
-            resId: this.props.record.resId,
+            resId: this.targetId(),
             name: button.action,
-            resModel: this.props.record.resModel,
+            resModel: this.targetModel(),
             context: button.context,
             onClose: (closeParams) => this.reloadAfterTransition(closeParams),
         }
@@ -279,9 +291,9 @@ export class TransitionButtons extends Component {
 
             const action = {
                 type: "object",
-                resId: this.props.record.resId,
+                resId: this.targetId(),
                 name: button.action,
-                resModel: this.props.record.resModel,
+                resModel: this.targetModel(),
                 context: context,
                 onClose: (closeParams) => this.reloadAfterTransition(closeParams),
             };

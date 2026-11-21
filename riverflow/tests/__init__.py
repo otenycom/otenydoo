@@ -46,3 +46,4 @@ from . import test_wizard_uploads
 from . import test_chatter_send_email
 from . import test_highlight_row
 from . import test_start_transition_name
+from . import test_linked_transition_buttons

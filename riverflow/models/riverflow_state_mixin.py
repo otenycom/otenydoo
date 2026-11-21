@@ -272,6 +272,21 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
 
             record.transition_buttons_json = transition_buttons
 
+    def _linked_transition_buttons_json(self):
+        """The transition buttons of this record for the header of another form that
+        shows the workflow of a linked record (radar: a credential shows its
+        service). The JSON names this record (``res_model``, ``res_id``), so the
+        widget runs the transitions on it, and the other form loads again after
+        each transition."""
+        self.ensure_one()
+        return dict(
+            self.transition_buttons_json or {},
+            res_model=self._name,
+            res_id=self.id,
+            layout="form_header",
+            reload_on_close=True,
+        )
+
     def _compute_state_id_statusbar_json(self):
         for record in self:
             current_state_id = record.state_id

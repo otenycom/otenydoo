@@ -116,7 +116,7 @@ Regression: `oteny_knowledge_sync/tests/test_return.py`.
 
 | Source Path | Knowledge Location |
 |-------------|-------------------|
-| `.claude/skills/SKILL.MD` | Root skills article for that repository. Its first `#` heading is the root's title (`<label> Skills` when there is none). The label is the folder name (`user` on odoo.sh) or the label in the setting, and stays the tree's key (`x_skill_root`), so a new title renames the root in place and keeps its id |
+| `.claude/skills/SKILL.MD` | Root skills article for that repository. Its first `#` heading is the root's title (`<label> Skills` when there is none). The label is the declared `knowledge_root`, else the folder name, or the label in the setting, and stays the tree's key (`x_skill_root`), so a new title renames the root in place and keeps its id |
 | `.claude/skills/<skill>/SKILL.md` | Child of root |
 | `.claude/skills/<skill>/references/<file>.md` | Child of `<skill>` |
 
@@ -219,12 +219,15 @@ submodule is a further root. Roots come from the setting
 `oteny_knowledge_sync.roots` (one `Label=path` per line). With no setting,
 every addons-path entry whose parent folder holds `.claude/skills` is a root.
 
-**The default label is the folder name.** A clone of the same repository under
-another folder name (a worktree such as `~/oteny/radar-ee`) is a different root
-to the sync: an upgrade on its database publishes a second tree under the new
-label and unpublishes the tree of the old label, with new article ids. Set
-`oteny_knowledge_sync.roots` explicitly on such a database when the article ids
-matter (seen 17-Oct-2026 on a reference copy of production).
+**A root without a label takes the name its index declares.**
+`knowledge_root: <name>` in the front matter of `.claude/skills/SKILL.MD` names
+the root; the folder name is the fallback. The declaration keeps the label equal
+on odoo.sh (checked out as `user`) and on a laptop (`radar`). Without it, the
+restore of a production copy deleted the 219 articles of root `user` and
+published them again under new ids (crmain, 22-Nov-2026). A configured root that
+has no articles yet adopts the tree of a root that left the configuration when
+most of that tree's source files are in its folder, so a rename keeps the
+article ids.
 
 ```
 <business repo>/

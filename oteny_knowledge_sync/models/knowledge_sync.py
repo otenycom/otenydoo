@@ -9,8 +9,14 @@ context. The root index ``.claude/skills/SKILL.MD`` always syncs.
 
 Roots come from the setting ``oteny_knowledge_sync.roots`` (one ``Label=path``
 per line); with no setting, every addons-path entry whose parent folder holds
-``.claude/skills`` is a root, labelled by that folder's name. A root that leaves
-the list has its tree unpublished on the next sync.
+``.claude/skills`` is a root. A root without an explicit label takes the name its
+index declares (``knowledge_root:`` in the front matter of ``.claude/skills/SKILL.MD``),
+else its folder's name. The declared name keeps the label the same on every
+machine: odoo.sh checks the repository out as ``user``, a laptop as ``radar``, and
+a label that differs between a production copy and the server that restores it
+would delete the restored tree and publish it again under new ids. A root that
+leaves the list has its tree unpublished on the next sync; a renamed root keeps
+its articles (:meth:`_adopt_renamed_roots`).
 
 The sync runs after every upgrade of a module under a root, so it does as little
 as possible when nothing changed: internal ``.md`` links are resolved to
@@ -58,10 +64,11 @@ class KnowledgeSync(models.AbstractModel):
     def _skill_roots(self):
         """``[(label, path)]`` of the configured roots, or the addons-path default.
 
-        The setting holds one root per line as ``Label=path`` (``path`` alone
-        labels the root by its folder name). A relative path is resolved against
-        every addons-path entry's parent. Roots without a ``.claude/skills`` folder
-        are logged and skipped.
+        The setting holds one root per line as ``Label=path``. A root without a
+        label (``path`` alone, or the addons-path default) takes the name its index
+        declares, else its folder's name (:meth:`_declared_root_name`). A relative
+        path is resolved against every addons-path entry's parent. Roots without a
+        ``.claude/skills`` folder are logged and skipped.
         """
         raw = (self.env["ir.config_parameter"].sudo().get_param("oteny_knowledge_sync.roots") or "").strip()
         raw_addons = config.get("addons_path") or ""
@@ -84,7 +91,7 @@ class KnowledgeSync(models.AbstractModel):
                         if (candidate / ".claude" / "skills").is_dir():
                             path = candidate
                             break
-                label = (label.strip() or path.name)
+                label = label.strip() or self._declared_root_name(path) or path.name
                 roots.append((label, path))
         else:
             # An addons-path entry is a repository root: its direct children are the
@@ -96,7 +103,7 @@ class KnowledgeSync(models.AbstractModel):
                     continue
                 seen.add(entry)
                 if (entry / ".claude" / "skills").is_dir():
-                    roots.append((entry.name, entry))
+                    roots.append((self._declared_root_name(entry) or entry.name, entry))
         out = []
         for label, path in roots:
             if (Path(path) / ".claude" / "skills").is_dir():
@@ -104,6 +111,19 @@ class KnowledgeSync(models.AbstractModel):
             else:
                 _logger.warning("Knowledge sync root %r has no .claude/skills at %s; skipped", label, path)
         return out
+
+    @staticmethod
+    def _declared_root_name(path):
+        """The ``knowledge_root`` that ``<path>/.claude/skills/SKILL.MD`` declares
+        in its front matter, or None."""
+        index = Path(path) / ".claude" / "skills" / "SKILL.MD"
+        if not index.is_file():
+            return None
+        metadata = markdown_utils.parse_frontmatter(index.read_text(encoding="utf-8"))["metadata"]
+        name = metadata.get("knowledge_root") if isinstance(metadata, dict) else None
+        if not name:
+            return None
+        return str(name).strip() or None
 
     # ------------------------------------------------------------------ entry
 
@@ -121,6 +141,7 @@ class KnowledgeSync(models.AbstractModel):
         total = 0
         per_root = {}
         excluded_paths = set()
+        self._adopt_renamed_roots(roots)
         for label, path in roots:
             count, excluded = self._sync_root(label, path / ".claude" / "skills")
             excluded_paths |= excluded
@@ -177,6 +198,43 @@ class KnowledgeSync(models.AbstractModel):
         if adopted:
             adopted.write({"x_skill_root": label})
             _logger.info("Knowledge sync root %r adopted %d legacy article(s)", label, len(adopted))
+
+    def _adopt_renamed_roots(self, roots):
+        """A configured root that has no articles yet takes over the tree of a root
+        that left the configuration, when that tree's source files are mostly in
+        this root's folder. Its articles then update in place and keep their ids
+        and URLs; without this, a new label (the folder name ``user`` on odoo.sh
+        before the index declared ``knowledge_root``) deletes the tree and
+        publishes it again."""
+        Article = self.env["oteny.article"]
+        labels = [label for label, _p in roots]
+        gone = Article.search([
+            ("x_skill_is_managed", "=", True),
+            ("x_skill_root", "not in", labels),
+            ("x_skill_root", "!=", False),
+        ])
+        if not gone:
+            return
+        has_tree = set(Article.search([
+            ("x_skill_is_managed", "=", True), ("x_skill_root", "in", labels),
+        ]).mapped("x_skill_root"))
+        trees = {}
+        for article in gone:
+            trees.setdefault(article.x_skill_root, Article)
+            trees[article.x_skill_root] |= article
+        for label, path in roots:
+            if label in has_tree or not trees:
+                continue
+            claude_dir = path / ".claude"
+            best_label, best_hits = None, 0
+            for old_label, tree in trees.items():
+                paths = [a.x_skill_file_path for a in tree if a.x_skill_file_path]
+                hits = sum(1 for p in paths if (claude_dir / p).is_file())
+                if hits * 2 > len(paths) and hits > best_hits:
+                    best_label, best_hits = old_label, hits
+            if best_label:
+                trees.pop(best_label).write({"x_skill_root": label})
+                _logger.info("Knowledge sync root %r adopted the tree of root %r", label, best_label)
 
     def _unpublish_roots_not_in(self, labels):
         """Delete the managed trees of roots that left the configuration."""
@@ -436,8 +494,8 @@ class KnowledgeSync(models.AbstractModel):
 
         The title is the first heading of the root's ``SKILL.MD``, as for every
         other article; ``<label> Skills`` only when the index has none. The label
-        is a folder name ("user" on odoo.sh) and stays the tree's key
-        (``x_skill_root``), so a new title renames the root in place.
+        stays the tree's key (``x_skill_root``), so a new title renames the root
+        in place.
         """
         Article = self.env["oteny.article"]
         root_name = f"{label} Skills"

@@ -102,6 +102,49 @@ class TestRoots(TransactionCase):
         self.assertEqual([(l, str(p)) for l, p in roots],
                          [("alpha", str(self.root_a.resolve())), ("beta", str(self.root_b.resolve()))])
 
+    def test_a_declared_knowledge_root_names_the_root_on_every_machine(self):
+        """odoo.sh checks the repository out as ``user``, a laptop as ``radar``: the
+        name the index declares wins over the folder name, in the addons-path
+        default and on a configured line without a label."""
+        from unittest.mock import patch
+        from odoo.tools import config
+        index = self.root_a / ".claude" / "skills" / "SKILL.MD"
+        index.write_text("---\nknowledge_root: radar\n---\n" + index.read_text())
+        self.Param.set_param("oteny_knowledge_sync.roots", "")
+        with patch.dict(config.options, {"addons_path": [str(self.root_a), str(self.root_b)]}):
+            labels = [label for label, _p in self.Sync._skill_roots()]
+        self.assertEqual(labels, ["radar", "beta"], "No declaration: the folder name stays the fallback")
+        self.Param.set_param("oteny_knowledge_sync.roots", f"{self.root_a}\nExplicit={self.root_b}")
+        self.assertEqual([label for label, _p in self.Sync._skill_roots()], ["radar", "Explicit"])
+        self._configure(("Explicit", self.root_a))
+        self.assertEqual([label for label, _p in self.Sync._skill_roots()], ["Explicit"],
+                         "An explicit label wins over the declaration")
+
+    def test_a_restored_tree_under_another_label_is_adopted_not_recreated(self):
+        """A production copy names the tree ``user``; the server that restores it
+        names the same root ``radar``. The tree keeps its ids, and the restored
+        labels of other roots stay apart."""
+        self._configure(("user", self.root_a), ("beta", self.root_b))
+        self.Sync.sync_skills_to_knowledge()
+        ids = set(self._tree("user").ids)
+        beta_ids = set(self._tree("beta").ids)
+        self._configure(("radar", self.root_a), ("beta", self.root_b))
+        self.Sync.sync_skills_to_knowledge()
+        self.assertFalse(self._tree("user"))
+        self.assertEqual(set(self._tree("radar").ids), ids, "adopted, not recreated")
+        self.assertEqual(set(self._tree("beta").ids), beta_ids)
+
+    def test_a_gone_tree_from_another_repository_is_not_adopted(self):
+        """A new root adopts a gone tree only when that tree's files are mostly its
+        own; the shared ``skills/SKILL.MD`` alone is not enough."""
+        self._configure(("Beta", self.root_b))
+        self.Sync.sync_skills_to_knowledge()
+        old_ids = set(self._tree("Beta").ids)
+        self._configure(("Alpha", self.root_a))
+        self.Sync.sync_skills_to_knowledge()
+        self.assertFalse(self._tree("Beta"))
+        self.assertFalse(set(self._tree("Alpha").ids) & old_ids, "Beta's tree was unpublished, not adopted")
+
     def test_legacy_articles_without_a_root_are_adopted_in_place(self):
         self._configure(("Alpha", self.root_a))
         self.Sync.sync_skills_to_knowledge()

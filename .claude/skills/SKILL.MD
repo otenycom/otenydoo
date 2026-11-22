@@ -1,3 +1,6 @@
+---
+knowledge_root: otenydoo
+---
 # Otenydoo skills
 
 > The skills our developers and AI agents read to work on the generic Oteny

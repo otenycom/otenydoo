@@ -9,8 +9,9 @@ class ResConfigSettings(models.TransientModel):
         config_parameter="oteny_knowledge_sync.roots",
         help="One root per line as Label=path. The path is a repository folder that "
         "holds .claude/skills, absolute or relative to an addons-path entry. Empty "
-        "means every addons-path entry whose parent folder holds .claude/skills, "
-        "labelled by that folder's name.",
+        "means every addons-path entry whose parent folder holds .claude/skills. "
+        "A root without a label takes the knowledge_root that its "
+        ".claude/skills/SKILL.MD declares, else the folder's name.",
     )
 
     def action_oteny_knowledge_sync_now(self):

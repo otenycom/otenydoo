@@ -2,5 +2,32 @@
     .o_field_transition_buttons {
         // this moves the transition buttons to the left, normally they are centered between the buttons on the left and the statusbar on the right
         flex-grow: 1;
+        // let the field shrink below the width of its buttons, so that they fold
+        // into the dropdown button instead of pushing the statusbar off the line
+        min-width: 0;
+    }
+
+    // caption_field: the buttons stand on one line with the states, below the caption
+    // (Odoo's form styles set align-self: flex-start on each header field)
+    &:has(> .o_field_riverflow_statusbar > .o_riverflow_statusbar_caption) > .o_field_transition_buttons {
+        align-self: flex-end;
+    }
+
+    // caption_field: the name of the linked record stands above the states,
+    // right-aligned, and is cut with an ellipsis when the line is short
+    .o_field_riverflow_statusbar:has(> .o_riverflow_statusbar_caption) {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        min-width: 0;
+
+        > .o_riverflow_statusbar_caption {
+            max-width: 100%;
+            font-size: $font-size-sm;
+        }
+
+        > .o_statusbar_status {
+            align-self: flex-end;
+        }
     }
 }

@@ -96,7 +96,7 @@
             <t t-if="this.fieldValueState.working_note">
                 <div class="text-muted me-2" t-esc="this.fieldValueState.working_note"/>
             </t>
-            <div class="button-separator-group">
+            <div t-ref="headerButtons" class="button-separator-group riverflow_header_buttons">
                 <t t-foreach="this.buttonDefs()" t-as="button" t-key="button.index">
                     <button
                         t-att-name="button.action"
@@ -110,6 +110,22 @@
                     </t>
                 </t>
             </div>
+            <!-- Shown instead of the buttons when they do not fit (adjustHeaderButtons) -->
+            <span t-ref="headerDropdown" class="d-none">
+                <Dropdown t-if="this.buttonDefs().length">
+                    <button class="btn btn-secondary" data-tooltip="Transitions" aria-label="Transitions menu">
+                        <i class="fa fa-fw fa-play"/>
+                    </button>
+                    <t t-set-slot="content">
+                        <DropdownItem
+                            t-foreach="this.buttonDefs()" t-as="button" t-key="button.index"
+                            class="button.primary ? 'fw-bold' : ''"
+                            onSelected="() => this.executeTransition(button)">
+                            <t t-esc="button.caption"/>
+                        </DropdownItem>
+                    </t>
+                </Dropdown>
+            </span>
             <!-- <div class="d-flex align-items-center">
                 <t t-if="this.iconClass()">
                     <span t-att-class="this.iconClass()"></span>

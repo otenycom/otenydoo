@@ -12,6 +12,17 @@
     margin-right: 0px;
 }
 
+// Form header: the buttons stay on one line, and the group is as wide as they are,
+// so that its scrollWidth is the width they need (adjustHeaderButtons folds them
+// into the dropdown when it is too much).
+.riverflow_header_buttons {
+    display: inline-block;
+    vertical-align: top;
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
 .button-separator {
     margin-left: 0px;
     margin-right: 4px;

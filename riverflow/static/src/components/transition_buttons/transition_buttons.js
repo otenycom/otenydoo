@@ -2,13 +2,16 @@
 
 import { registry } from "@web/core/registry";
 import { standardFieldProps } from "@web/views/fields/standard_field_props";
-import { Component, onWillRender, useRef, useState } from "@odoo/owl";
+import { Component, onWillRender, useEffect, useExternalListener, useRef, useState } from "@odoo/owl";
 import { useService } from "@web/core/utils/hooks";
+import { throttleForAnimation } from "@web/core/utils/timing";
 import { DateTimeInput } from "@web/core/datetime/datetime_input";
+import { Dropdown } from "@web/core/dropdown/dropdown";
+import { DropdownItem } from "@web/core/dropdown/dropdown_item";
 
 export class TransitionButtons extends Component {
     static template = "riverflow.TransitionButtons";
-    static components = { DateTimeInput };
+    static components = { DateTimeInput, Dropdown, DropdownItem };
     static props = {
         ...standardFieldProps,
         maxButtons: { type: String, optional: true },
@@ -21,6 +24,8 @@ export class TransitionButtons extends Component {
         this.notification = useService("notification");
         this.inputRef = useRef("inputElement");
         this.projectDeadlineInput = useRef("projectDeadlineInput");
+        this.headerButtonsRef = useRef("headerButtons");
+        this.headerDropdownRef = useRef("headerDropdown");
         this.expandedTemplates = new Set();
         this.state = useState({
             projectDeadline: null,
@@ -31,6 +36,120 @@ export class TransitionButtons extends Component {
         onWillRender(() => {
             this.fieldValueState = this.fieldValue(this.props);
         });
+
+        // Form header: fold the transition buttons into one dropdown button when they
+        // do not fit next to the statusbar. Adjust after every render and on a window
+        // resize, as Odoo's statusbar does (statusbar_field.js).
+        useEffect(() => this.adjustHeaderButtons());
+        useExternalListener(
+            window,
+            "resize",
+            throttleForAnimation(() => this.adjustHeaderButtons())
+        );
+    }
+
+    /**
+     * Show the header buttons when they fit on one line, else the dropdown button
+     * that lists the same transitions; also for a single button.
+     *
+     * The buttons share the line with Odoo's statusbar, which folds its states to
+     * fit the space it gets. The buttons have priority: they show when they fit
+     * next to the statusbar at its narrowest, its single dropdown.
+     * The rule does not depend on how far the statusbar is folded now, so the
+     * result is the same on a load and on a resize in either direction.
+     *
+     * The statusbar folds its states again only on a render of its own or on a
+     * window resize, and it can run before this field. So when the buttons fold
+     * or unfold, the space of the statusbar changes after it measured: send a
+     * resize event, so that it folds again into the space that is left. That
+     * event runs this method again, which then changes nothing.
+     */
+    adjustHeaderButtons() {
+        const buttonsEl = this.headerButtonsRef.el;
+        const dropdownEl = this.headerDropdownRef.el;
+        if (!buttonsEl || !dropdownEl) {
+            return;
+        }
+        const wasFolded = buttonsEl.classList.contains("d-none");
+        // Measure the other items while this field shows nothing, so that their
+        // widths do not depend on the fold of the buttons (an item can shrink when
+        // the line is full); else the fold could flip on each resize event.
+        buttonsEl.classList.add("d-none");
+        dropdownEl.classList.add("d-none");
+        const space = this.headerSpaceForButtons(buttonsEl.parentElement);
+        buttonsEl.classList.remove("d-none");
+        const fold = buttonsEl.scrollWidth > space;
+        if (fold) {
+            buttonsEl.classList.add("d-none");
+            dropdownEl.classList.remove("d-none");
+        }
+        if (fold !== wasFolded) {
+            window.dispatchEvent(new Event("resize"));
+        }
+    }
+
+    /**
+     * The width that the header line leaves for this field: the width of the line
+     * less the other items on it, with the statusbar at its narrowest.
+     */
+    headerSpaceForButtons(fieldEl) {
+        const lineEl = fieldEl.parentElement;
+        const lineStyle = getComputedStyle(lineEl);
+        let space =
+            lineEl.clientWidth -
+            parseFloat(lineStyle.paddingLeft) -
+            parseFloat(lineStyle.paddingRight);
+        for (const itemEl of lineEl.children) {
+            if (itemEl === fieldEl) {
+                continue;
+            }
+            const itemStyle = getComputedStyle(itemEl);
+            space -=
+                this.narrowestItemWidth(itemEl) +
+                parseFloat(itemStyle.marginLeft) +
+                parseFloat(itemStyle.marginRight);
+        }
+        return space;
+    }
+
+    /**
+     * The width of an item on the header line. A statusbar counts at its narrowest,
+     * or as wide as the name above its states (riverflow_statusbar, caption_field),
+     * when that name is wider.
+     */
+    narrowestItemWidth(itemEl) {
+        const statusEl = itemEl.querySelector(":scope > .o_statusbar_status");
+        if (!statusEl) {
+            return itemEl.getBoundingClientRect().width;
+        }
+        let width = this.narrowestStatusbarWidth(statusEl);
+        for (const childEl of itemEl.children) {
+            if (childEl !== statusEl) {
+                width = Math.max(width, childEl.scrollWidth);
+            }
+        }
+        return width;
+    }
+
+    /**
+     * The width of Odoo's statusbar when it is folded into its single dropdown,
+     * which shows the current state: its narrowest form. The statusbar template
+     * always renders that dropdown as its last button (statusbar_field.xml) and
+     * hides it with d-none when it shows more. Show it for the measure only and
+     * hide it again, before the browser paints.
+     */
+    narrowestStatusbarWidth(statusEl) {
+        const singleDropdownEl = statusEl.lastElementChild;
+        if (!singleDropdownEl) {
+            return 0;
+        }
+        const hidden = singleDropdownEl.classList.contains("d-none");
+        singleDropdownEl.classList.remove("d-none");
+        const width = singleDropdownEl.getBoundingClientRect().width;
+        if (hidden) {
+            singleDropdownEl.classList.add("d-none");
+        }
+        return width;
     }
 
     fieldValue(props) {

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <!-- Odoo's statusbar, with the name of the linked record above the states
+         (option caption_field). -->
+    <t t-name="riverflow.RiverflowStatusBar">
+        <a t-if="captionRecord" href="#" class="o_riverflow_statusbar_caption text-truncate"
+            t-att-title="captionRecord.display_name"
+            t-on-click.prevent="openCaptionRecord"
+            t-esc="captionRecord.display_name"/>
+        <t t-call="web.StatusBarField"/>
+    </t>
+</templates>

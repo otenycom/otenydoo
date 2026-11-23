@@ -1,6 +1,6 @@
 {
     "name": "Oteny Business Bot",
-    "version": "19.0.1.227",
+    "version": "19.0.1.228",
     "depends": ["base", "mail", "web"],
     "external_dependencies": {"python": ["mistune"]},
     "author": "Oteny",

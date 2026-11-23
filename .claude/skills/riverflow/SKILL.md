@@ -848,6 +848,42 @@ Setting a deadline through this wizard switches each service to manual deadline 
 
 **Technical reference**: The wizard model is `crewradar.service.deadline.wizard` (TransientModel in `crewradar/wizards/crewradar_service_deadline_wizard.py`). Server actions bind to both `riverflow.service` and `riverflow.state.record` list views.
 
+### Run a Transition on Many Records
+
+When the same transition must run on many services, **Run Transition** runs it on all of them at
+once, with the same screen as the button of one service.
+
+**How to use it:**
+
+1. Open the **Services** list or the **Radar** list, and select the services or rows.
+2. Open the action (gear) menu and choose **Run Transition**.
+3. Radar lists the transitions that can run on the selection, each with the number of records it
+   runs on, for example "Close (Waiting → Done): 2 of 3". Click **Choose**. When only one
+   transition fits, its screen opens at once.
+4. The transition's own screen opens, for the records that can take the transition. When all
+   records share one Responsible, the screen proposes it. Fill in the screen and click **OK**.
+   When records are left out, a warning box names each one by its subject and why (for example
+   "Left out: it is in Waiting, not in Done"); tick the confirmation and click **OK** again.
+5. Radar runs the transition on every record, or on none when one fails, and opens the list of
+   the records it moved.
+
+Only a transition with **Run on Many Records** is offered: many screens are made for one record
+(an upload, an e-mail with attachments, a ticket). A workflow designer turns the flag on per
+transition.
+
+**Technical reference:** the flag is `riverflow.transition.allow_bulk`. The chooser is
+`riverflow.bulk.transition.wizard` (`_open_for(records, note=False)`); it opens the transition
+through `_prepare_transition_action`, which passes all records in `active_ids` when more than one
+is selected, proposes the `responsible_team_id` that they share, and sets the context keys
+`riverflow_bulk` and `riverflow_bulk_skipped`. The screen's `_save_check` turns
+`riverflow_bulk_skipped` into warnings; `action_save` runs in one transaction and returns the list
+of the records, with both keys cleared so the next screen shows no stale warnings. A module binds
+the server action to its own workflow model with `code`
+`action = env["riverflow.bulk.transition.wizard"]._open_for(records)`; riverflow binds it to
+`riverflow.service` and to `riverflow.state.record` (a Radar row stands for its service). Tests:
+`riverflow/tests/test_bulk_transition.py`. First user: radar's Collect Newer, also from a
+selection of credentials (radar plan `rivercreds/plans/credential-end-follow-up.md`, D9).
+
 ### Radar View Shortcuts
 
 The radar screen (list and calendar views of `riverflow.state.record`) supports a shortcut banner — a row of quick-access buttons above the view that activate saved Favorites and optionally switch between list and calendar views. This is powered by the `oteny_shortcut` module.

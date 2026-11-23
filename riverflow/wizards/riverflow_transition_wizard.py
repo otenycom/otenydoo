@@ -82,6 +82,17 @@ class TransitionWizard(models.AbstractModel):
         transition = self.transition_id or self.env["riverflow.transition"].browse(
             self.env.context.get("transition_id")
         )
+        # Run Transition on many records (D9a): the records that the transition
+        # leaves out, with the reason. A warning, so the user confirms them.
+        for skipped in self.env.context.get("riverflow_bulk_skipped") or []:
+            findings.append(
+                {
+                    "level": "warning",
+                    "kind": "bulk_skipped",
+                    "subject": skipped.get("subject") or "",
+                    "message": skipped.get("message") or "",
+                }
+            )
         if not transition.refuse_with_open_services:
             return findings
         for record in self.records_to_transition_ids:
@@ -306,7 +317,29 @@ class TransitionWizard(models.AbstractModel):
                     new_record._audit_log_remark("transition", _("Transition"), transition.name)
                     self.create_related_records(new_record)
 
-        return self._next_transition_action() or action
+        return self._next_transition_action() or self._bulk_result_action() or action
+
+    def _bulk_result_action(self):
+        """After Run Transition on many records (D9a): the list of the records that
+        it moved, so the user sees the result at once."""
+        if len(self) != 1 or not self.env.context.get("riverflow_bulk"):
+            return False
+        records = self.records_to_transition_ids
+        if len(records) < 2:
+            return False
+        return {
+            "type": "ir.actions.act_window",
+            "name": _("%(transition)s: %(count)s records", transition=self.transition_id.name, count=len(records)),
+            "res_model": records._name,
+            "view_mode": "list,form",
+            "views": [(False, "list"), (False, "form")],
+            "domain": [("id", "in", records.ids)],
+            "target": "current",
+            # The web client passes this screen's context keys on to the returned
+            # action; clear the bulk keys, so the next screen opened from the list
+            # shows no stale warnings.
+            "context": {"riverflow_bulk": False, "riverflow_bulk_skipped": []},
+        }
 
     def _next_transition_action(self):
         """The screen of the transition that this one offers next, or False.

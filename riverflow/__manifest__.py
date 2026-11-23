@@ -1,6 +1,6 @@
 {
     "name": "Riverflow",
-    "version": "19.0.1.1456",
+    "version": "19.0.1.1457",
     "depends": ["base", "mail", "oteny_shortcut", "oteny_bot"],
     "author": "Vriend Studio",
     "category": "Workflow",
@@ -25,6 +25,7 @@
         "wizards/riverflow_enter_distance_wizard_view.xml",
         "wizards/riverflow_set_deadline_tomorrow_wizard_view.xml",
         "wizards/riverflow_verify_trip_locations_wizard_view.xml",
+        "wizards/riverflow_bulk_transition_wizard_view.xml",
         "views/riverflow_service_views.xml",
         "views/riverflow_workflow_views.xml",
         "views/riverflow_state_views.xml",

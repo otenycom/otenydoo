@@ -179,6 +179,16 @@ class RiverflowTransition(models.Model):
         "for a service its child services, for another record the services whose subject it is, with their "
         "child services. Services that this transition closes by itself do not count.",
     )
+    # Run Transition on many records (radar plan credential-end-follow-up, D9a). Off
+    # by default: many transition screens are made for one record (an upload, an
+    # e-mail with attachments, a ticket), so each workflow opts in per transition.
+    allow_bulk = fields.Boolean(
+        string="Run on Many Records",
+        copy=True,
+        help="The action Run Transition in a list offers this transition for a selection of records. "
+        "Its screen opens once for all of them, names the records that are left out, and OK runs it "
+        "on every record or on none.",
+    )
     display_name = fields.Char("Display Name", compute="_compute_display_name", store=True, index="trigram")
 
     # Per-transition email template override. When set, the Send Email wizard

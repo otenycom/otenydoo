@@ -13,3 +13,4 @@ from . import riverflow_set_deadline_tomorrow_wizard
 from . import riverflow_verify_trip_locations_wizard
 from . import riverflow_mail_reply_wizard
 from . import riverflow_send_email_choice
+from . import riverflow_bulk_transition_wizard

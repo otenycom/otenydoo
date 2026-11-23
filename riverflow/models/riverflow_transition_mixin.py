@@ -75,6 +75,20 @@ class RiverflowTransitionMixin(models.AbstractModel):
             for key, value in self.env.context.items():
                 if key.startswith("default_"):
                     defaults_context[key] = value
+        elif len(self.ids) > 1:
+            # Run Transition on many records (D9a): the screen holds them all. It
+            # gets no defaults from one record: the values of the screen apply to
+            # each of them.
+            action_context["active_model"] = self._name
+            action_context["active_id"] = self.ids[0]
+            action_context["active_ids"] = self.ids
+            # The responsible that all records share is the proposal, as one
+            # record proposes its own; the screen requires it for a state that
+            # is not an end state.
+            if "responsible_team_id" in self._fields and "responsible_team_id" in self.env[res_model]._fields:
+                teams = self.mapped("responsible_team_id")
+                if len(teams) == 1:
+                    defaults_context["default_responsible_team_id"] = teams.id
         elif len(self.ids) == 1:
             action_context["active_model"] = self._name
             action_context["active_id"] = self.id

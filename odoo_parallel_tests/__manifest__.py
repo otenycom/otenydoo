@@ -1,6 +1,6 @@
 {
     "name": "Parallel Test Runner",
-    "version": "19.0.1.149",
+    "version": "19.0.1.150",
     "author": "Oteny",
     "category": "Technical",
     "summary": "Parallelizes Odoo test execution by cloning the test database and running batches in worker subprocesses",

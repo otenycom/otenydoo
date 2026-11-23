@@ -77,6 +77,28 @@ class TestBulkTransition(TransactionCase):
         self.assertEqual(result["domain"], [("id", "in", (a | b).ids)])
         self.assertFalse(result["context"]["riverflow_bulk_skipped"], "no stale warnings on the next screen")
 
+    def test_ok_keeps_the_values_that_the_records_do_not_share(self):
+        """The screen proposes what the records share and hides a field whose values
+        differ, so OK keeps each record's own tags (radar walk of 23-Nov-2026: an
+        empty Tags field cleared them)."""
+        Tag = self.env["riverflow.service.tag"]
+        red, blue = Tag.create({"name": "Bulk Red"}), Tag.create({"name": "Bulk Blue"})
+        a, b = self._task("A", self.waiting), self._task("B", self.waiting)
+        a.tag_ids = red
+        b.tag_ids = blue
+        action = self.Chooser._open_for(a | b)
+        self.assertTrue(action["context"]["default_tag_ids_invisible"])
+        screen = self.env[action["res_model"]].with_context(**action["context"]).create({})
+        screen.with_context(**action["context"]).action_save()
+        self.assertEqual((a.tag_ids, b.tag_ids), (red, blue))
+        c, d = self._task("C", self.waiting), self._task("D", self.waiting)
+        (c | d).tag_ids = red
+        action = self.Chooser._open_for(c | d)
+        self.assertEqual(action["context"]["default_tag_ids"], (red.id,), "a shared value is the proposal")
+        screen = self.env[action["res_model"]].with_context(**action["context"]).create({})
+        screen.with_context(**action["context"]).action_save()
+        self.assertEqual((c | d).mapped("tag_ids"), red)
+
     def test_no_flagged_transition_refuses(self):
         self.close.allow_bulk = False
         with self.assertRaises(UserError):

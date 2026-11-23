@@ -861,7 +861,9 @@ once, with the same screen as the button of one service.
    runs on, for example "Close (Waiting → Done): 2 of 3". Click **Choose**. When only one
    transition fits, its screen opens at once.
 4. The transition's own screen opens, for the records that can take the transition. When all
-   records share one Responsible, the screen proposes it. Fill in the screen and click **OK**.
+   records share a value (the Responsible, the tags), the screen proposes it; a value that the
+   records do not share is hidden, so each record keeps its own. Fill in the screen and click
+   **OK**.
    When records are left out, a warning box names each one by its subject and why (for example
    "Left out: it is in Waiting, not in Done"); tick the confirmation and click **OK** again.
 5. Radar runs the transition on every record, or on none when one fails, and opens the list of
@@ -874,15 +876,19 @@ transition.
 **Technical reference:** the flag is `riverflow.transition.allow_bulk`. The chooser is
 `riverflow.bulk.transition.wizard` (`_open_for(records, note=False)`); it opens the transition
 through `_prepare_transition_action`, which passes all records in `active_ids` when more than one
-is selected, proposes the `responsible_team_id` that they share, and sets the context keys
+is selected. `_bulk_transition_defaults` proposes each screen input (a wizard field with a flag
+`<field>_invisible`) that all records share, and sets the flag for an input whose values differ,
+so OK does not write it: an empty Tags field cleared the tags of every record before (radar walk
+of 23-Nov-2026). It sets the context keys
 `riverflow_bulk` and `riverflow_bulk_skipped`. The screen's `_save_check` turns
 `riverflow_bulk_skipped` into warnings; `action_save` runs in one transaction and returns the list
 of the records, with both keys cleared so the next screen shows no stale warnings. A module binds
 the server action to its own workflow model with `code`
 `action = env["riverflow.bulk.transition.wizard"]._open_for(records)`; riverflow binds it to
 `riverflow.service` and to `riverflow.state.record` (a Radar row stands for its service). Tests:
-`riverflow/tests/test_bulk_transition.py`. First user: radar's Collect Newer, also from a
-selection of credentials (radar plan `rivercreds/plans/credential-end-follow-up.md`, D9).
+`riverflow/tests/test_bulk_transition.py`. First user: radar's Collect Newer on many Done
+services, which puts their credentials To Renew (radar plan
+`rivercreds/plans/credential-end-follow-up.md`, D9).
 
 ### Radar View Shortcuts
 

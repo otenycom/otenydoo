@@ -76,19 +76,16 @@ class RiverflowTransitionMixin(models.AbstractModel):
                 if key.startswith("default_"):
                     defaults_context[key] = value
         elif len(self.ids) > 1:
-            # Run Transition on many records (D9a): the screen holds them all. It
-            # gets no defaults from one record: the values of the screen apply to
-            # each of them.
+            # Run Transition on many records (D9a): the screen holds them all, and
+            # its values apply to each of them. A value that all records share is
+            # the proposal, as one record proposes its own. A field whose values
+            # differ is hidden when the screen has a "<field>_invisible" flag, so
+            # OK keeps the value of each record: an empty Tags field cleared the
+            # tags of every record (radar walk of 23-Nov-2026).
             action_context["active_model"] = self._name
             action_context["active_id"] = self.ids[0]
             action_context["active_ids"] = self.ids
-            # The responsible that all records share is the proposal, as one
-            # record proposes its own; the screen requires it for a state that
-            # is not an end state.
-            if "responsible_team_id" in self._fields and "responsible_team_id" in self.env[res_model]._fields:
-                teams = self.mapped("responsible_team_id")
-                if len(teams) == 1:
-                    defaults_context["default_responsible_team_id"] = teams.id
+            defaults_context.update(self._bulk_transition_defaults(res_model))
         elif len(self.ids) == 1:
             action_context["active_model"] = self._name
             action_context["active_id"] = self.id
@@ -125,6 +122,26 @@ class RiverflowTransitionMixin(models.AbstractModel):
         }
 
         return action
+
+    def _bulk_transition_defaults(self, res_model):
+        """The default_* values of the screen of a transition on these records. A
+        screen input has a flag "<field>_invisible" on the wizard: when all records
+        share its value, that value is the proposal; when they differ, the input is
+        hidden, so OK keeps the value of each record (see the caller)."""
+        wizard_fields = set(self.env[res_model]._fields)
+        source = self.sudo()
+        defaults = {}
+        for field_name, field in source._fields.items():
+            if field_name not in wizard_fields or field_name + "_invisible" not in wizard_fields:
+                continue
+            values = [field.convert_to_cache(record[field_name], record) for record in source]
+            if all(value == values[0] for value in values[1:]):
+                # An empty value needs no proposal: the screen starts empty.
+                if values[0] not in (None, False, (), ""):
+                    defaults["default_" + field_name] = values[0]
+            else:
+                defaults["default_" + field_name + "_invisible"] = True
+        return defaults
 
     def _prepare_action_context(self, transition):
         action_context = {}

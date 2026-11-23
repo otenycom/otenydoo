@@ -202,6 +202,25 @@ def _check_number(self):
 
 Guard it with a test in the module that owns the base constraint: assert the method name is in `env[model]._constraint_methods` and compare its `_constrains` set. The test database installs every module, so the guard also catches an override in a module that sits higher in the tree. Real case: a client module overrode three `rivercreds.credential` checks without the decorator; for five months no credential of any type was checked for a number, expiry date or issuing country (the consuming business's skill bundle has the full record).
 
+### A unique index with a readable refusal: check before the write
+
+A `models.UniqueIndex` (or `models.Constraint`) holds a rule for every write, also SQL, a
+migration and two users at the same time, but its message is fixed: it cannot name the other
+record. A Python check that names it must run **before** the database sees the value, in
+`create()` and `write()`, with the values the record will have. An `@api.constrains` method is
+too late when it searches: `search()` flushes the pending writes of the fields in its domain, the
+`INSERT`/`UPDATE` reaches PostgreSQL, and the index raises `UniqueViolation` with its fixed text
+before the check can raise its own. Keep both: the pre-check for the text, the index for the
+guarantee.
+
+A new partial unique index on a table whose rows still break it: Odoo logs `could not create
+unique index ... is duplicated` (INFO, `odoo.schema`) when it updates the tables, and tries again
+in `finalize_constraints`, after the `end-migrate` scripts. So an end-migrate that repairs the
+rows lets the index come in the same upgrade; a release check confirms it in `pg_indexes`, because
+a failure there is only a warning and the upgrade does not stop. Example: radar
+`crewradar.site._eni_one_current_ship_version` and migration `crewradar/19.0.13.16`
+(23-Nov-2026).
+
 ### An `_order` needs a unique tie-breaker, and a queue loop sets its own order
 
 An `_order` on a field that is not unique (`create_date`, `date`, `sequence`, `name`) leaves the

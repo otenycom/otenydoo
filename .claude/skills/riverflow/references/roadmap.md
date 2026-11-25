@@ -8,6 +8,7 @@ Development items for the Riverflow workflow engine module.
 
 ## Pending
 
+- [ ] **Run Transition on every model with workflow states and on all Radar row types.** `riverflow.bulk.transition.wizard` currently binds only to `riverflow.service` and `riverflow.state.record` and resolves Radar rows through `service_id` only. Bind **Actions > Run Transition** to the list view of every model carrying `riverflow.state.mixin`, resolve all `riverflow.state.record` rows via `(master_model, master_res_id)` (deduplicating `start`/`end` pairs), make derived transition wizards bulk-safe in `default_get_using_records`, and enable `allow_bulk` on the built-in Task and Review transitions. · [BC 9429383457](https://3.basecamp.com/5527227/buckets/38887735/todos/9429383457)
 - [ ] **Save check, phase 3: three more radar wizards, one at a time** *(plan `radar/plans/save-check.md`)*. Move `cuneus.weekly.bulk.upload.wizard` (findings per file, as the credential wizard), `crewradar_sign.document.wizard` (its issues stay acknowledgeable, so all are warnings) and `mfnl.ask.barney.wizard` (errors hold in the gate; the informing notes stay) to `_save_check()`. A move changes the UI and the field names only; what blocks today keeps blocking. Out of scope: the billing and salary month wizards and DATEV.
 - [ ] **The 19.0.1.1266 pre-migrate fails on a database where crewradar already declares `team_cuneus_yangon`** *(found 2026-09-29 on a copy of `cr-test`)*. It moves the XML id from riverflow to crewradar with one `UPDATE ir_model_data SET module = 'crewradar'`; when both rows exist (crewradar was updated before riverflow, a partial-update drift), the unique index on (module, name) stops the whole upgrade. Production is not affected (riverflow is past 1266 there). Fix if another database meets it: drop the riverflow row when the crewradar row exists, move it otherwise.
 - [ ] **Move the hard-coded moves of child service states to `execute_child_transitions`** (Ries, 10-Oct-2026). Since 19.0.1.1321 the best practice for "a parent service's state moves its child services" is the pair `riverflow.state.execute_child_transitions` / `riverflow.transition.execute_on_parent_transitions` ([SKILL.md § Execute Child Transitions](../SKILL.md#execute-child-transitions-the-parent-ends-the-case-1901321)): the child service executes its own transition, so its wizard, deadline setting and note run. The places below predate it and write the child's state directly. Each needs its own design question, named with it; the values are named so a second meaning ("cancel everything", "complete") can sit beside `cancel` ("only what is not started").
@@ -36,7 +37,6 @@ Development items for the Riverflow workflow engine module.
 
 ## Future Ideas
 
-- [ ] Batch service selection by state and execution of transitions in batch
 - [ ] Workflow visualization diagram generator
 - [ ] Batch-select many cards and run one transition on all of them (UI). The per-card bot door is already built — see Completed.
 

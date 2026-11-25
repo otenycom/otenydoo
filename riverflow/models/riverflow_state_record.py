@@ -75,6 +75,14 @@ class RiverflowStateRecord(models.Model):
         compute="_compute_display_name",
         store=True,
     )
+    search_text = fields.Char(
+        string="Search Text",
+        compute="_compute_search_text",
+        store=True,
+        index="trigram",
+        help="Combined searchable text (subject, display name, and any extension terms) "
+        "for the Radar Name search box.",
+    )
     master_model = fields.Char(string="Master Model", required=True, index=True)
     master_res_id = fields.Integer(string="Master Record ID", required=True, index=True)
     master_record_id_computed = fields.Integer(
@@ -568,6 +576,30 @@ class RiverflowStateRecord(models.Model):
         if record.service_id:
             return record.service_id.display_name
         return record.name
+
+    def _get_search_text_parts(self):
+        """Return non-empty searchable text parts for this Radar row.
+
+        Subclasses append extra terms (for example credential numbers) without
+        rewriting the Radar search view's Name field.
+        """
+        self.ensure_one()
+        parts = []
+        if self.res_name:
+            parts.append(self.res_name)
+        if self.display_name and self.display_name != self.res_name:
+            parts.append(self.display_name)
+        return parts
+
+    @api.model
+    def _search_text_depends(self):
+        return ["res_name", "display_name"]
+
+    @api.depends(lambda self: self._search_text_depends())
+    def _compute_search_text(self):
+        for record in self:
+            parts = record._get_search_text_parts()
+            record.search_text = " ".join(parts) if parts else False
 
     @api.depends("service_id.active")
     def _compute_active(self):

@@ -129,8 +129,7 @@
         <field name="model">riverflow.state.record</field>
         <field name="arch" type="xml">
             <search>
-                <field name="name" string="Name"
-                    filter_domain="['|', ('res_name', 'ilike', self), ('display_name', 'ilike', self)]" />
+                <field name="search_text" string="Name" />
                 <field name="master_model" />
                 <field name="res_model" />
                 <field name="res_name" />

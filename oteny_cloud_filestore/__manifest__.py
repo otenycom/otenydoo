@@ -1,6 +1,6 @@
 {
     "name": "Cloud Filestore",
-    "version": "19.0.1.104",
+    "version": "19.0.1.105",
     "category": "Tools",
     "summary": "Keep the contents of user files in an S3 bucket",
     "description": """

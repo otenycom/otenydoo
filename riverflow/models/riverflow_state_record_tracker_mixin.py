@@ -75,21 +75,16 @@ class RiverflowWorkflowStateRecordTrackerMixin(models.AbstractModel):
             if record.id not in state_records_by_master and self._add_state_record(record):
                 records_needing_creation |= record
 
-        # Batch create missing state records
+        # Batch create missing state records and reuse the returned recordset
+        # directly instead of re-querying what we just created.
         if records_needing_creation:
-            self._create_state_records(records_needing_creation)
+            new_state_records = self._create_state_records(records_needing_creation)
 
-            # Re-query the newly created state records in batch
-            new_state_records = StateRecord.search(
-                [
-                    ("master_model", "=", self._name),
-                    ("master_res_id", "in", records_needing_creation.ids),
-                ],
-                order="master_res_id, record_type, id",
-            )
-
-            # Add newly created state records to lookup dict
-            for state_record in new_state_records:
+            # Match the original SQL order ("master_res_id, record_type, id")
+            for state_record in sorted(
+                new_state_records,
+                key=lambda sr: (sr.master_res_id, sr.record_type or "", sr.id),
+            ):
                 master_id = state_record.master_res_id
                 if master_id not in state_records_by_master:
                     state_records_by_master[master_id] = []

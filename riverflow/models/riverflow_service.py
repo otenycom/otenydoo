@@ -404,7 +404,6 @@ class Service(models.Model):
         index=True,
         required=True,
         store=True,
-        recursive=True,
     )
 
     daily_prio = fields.Integer(
@@ -1118,98 +1117,84 @@ class Service(models.Model):
         self.env["riverflow.service"].flush_model(["root_id", "parent_path", "to_be_deleted"])
 
         Service = self.env["riverflow.service"].with_context(active_test=False).sudo()
-
         order_field = self._fields["display_order"]
+        self_ids = set(self.ids)
 
+        # Group by root_id so a multi-service batch touches each tree once
+        # with one batched SQL query and one ORM prefetch instead of N scans.
+        records_by_root = {}
         for record in self:
+            records_by_root.setdefault(record.root_id.id or False, []).append(record)
 
-            # Retrieve all service records with the same root_id as the current record:
-            # display_order numbers one tree, root first, so the Child Services list
-            # shows the tree as it is. A tree can hold services of more than one subject
-            # (a work permit on the employee with a travel service on a log entry);
-            # numbering per subject left the services whose parent has another subject
-            # out of the walk, so they kept a stale number and sat apart in the list.
-
-            # we use direct sql to avoid recalculation of root_id, which means 'search' would decide
-            # to recursively recalculate all records in the table, this overflows the stack
+        valid_root_ids = [rid for rid in records_by_root if rid]
+        ids_by_root = {}
+        all_tree_ids = set()
+        if valid_root_ids:
+            # Direct SQL avoids triggering recursive root_id recomputation via search()
             self.env.cr.execute(
                 """
-                SELECT id FROM riverflow_service
-                WHERE root_id = %s AND id != %s AND NOT to_be_deleted
+                SELECT root_id, id FROM riverflow_service
+                WHERE root_id IN %s AND NOT to_be_deleted
                 """,
-                (record.root_id.id, record.id),
+                (tuple(valid_root_ids),),
             )
-            service_ids = [row[0] for row in self.env.cr.fetchall()]
-            services = set(Service.browse(service_ids))
-            # current record is not included in the search as it can lead to recursive stack overflow
-            # as search also recalculates the display_order field
-            services.add(record)
-            # finally:
-            #     self = self.with_context(computing_sequence=False)
+            for root_id, sid in self.env.cr.fetchall():
+                ids_by_root.setdefault(root_id, []).append(sid)
+                all_tree_ids.add(sid)
 
-            # Dictionary to map service IDs to their corresponding service objects
-            service_dict = {service.id: service for service in services}
+        # Single prefetch batch across all trees in this compute call
+        prefetched = Service.browse(list(all_tree_ids))
+        prefetched_by_id = {s.id: s for s in prefetched}
 
-            # Dictionary to hold the tree structure of services
+        for root_id, root_records in records_by_root.items():
+            # Include all DB services in this root's tree plus the records in
+            # self (even if a record in self is marked to_be_deleted).
+            service_dict = {
+                sid: prefetched_by_id[sid]
+                for sid in ids_by_root.get(root_id, ())
+            }
+            for rec in root_records:
+                service_dict.setdefault(rec.id, rec)
+
             service_tree = {}
-            # Build the tree structure
-            for service in services:
-                # Determine the parent ID of the current service
+            for service in service_dict.values():
                 parent_id = service.parent_id.id if service.parent_id else None
+                service_tree.setdefault(parent_id, []).append(service.id)
 
-                # Initialize the parent node list if it doesn't exist
-                if parent_id not in service_tree:
-                    service_tree[parent_id] = []
-
-                # Add the current service to its parent's list of children
-                service_tree[parent_id].append(service.id)
-
-            # Initialize the display_order counter
             display_order = 0
 
             def assign_sequence(service_id, visited):
-                nonlocal display_order  # Use the nonlocal keyword to modify the outer scope 'display_order' variable
+                nonlocal display_order
 
-                # Check for circular references in the hierarchy
                 if service_id in visited:
                     raise ValueError(
                         f"Circular reference detected in service hierarchy involving service ID {service_id}"
                     )
 
-                # Add the current service ID to the set of visited nodes
                 visited.add(service_id)
-
-                # Retrieve the service object using its ID
                 service = service_dict[service_id]
 
                 # Never READ display_order on a record whose recompute is still
-                # pending: display_order is recursive=True, so the ORM computes
-                # it record by record, and the read would re-enter this compute
-                # for `service`, nesting one Python stack level per dirty
-                # sibling. A root deadline change dirties the whole tree at
-                # once, so large trees overflow the stack (RecursionError).
-                # Assigning without reading is safe: Field.write() first calls
-                # env.remove_to_compute(), clearing the pending computation.
-                # For settled records, keep the read-and-compare to avoid
-                # unnecessary database writes and ORM overhead.
-                if self.env.is_to_compute(order_field, service):
-                    # Pending: store the value as its own compute would. Its
-                    # dependents were marked when it was marked, so no write()
-                    # and no dependency search per sibling is needed (one per
-                    # sibling cost thousands of queries on a billing month move).
+                # pending: reading it would re-enter this compute for `service`.
+                # For records in `self`, compute_value() already removed them
+                # from tocompute and protects the field. For pending siblings
+                # outside `self`, remove_to_compute + protecting stores the
+                # value once so they are not recomputed again; for settled
+                # siblings, read-and-compare skips no-op writes.
+                if service_id in self_ids:
+                    service.display_order = display_order
+                elif self.env.is_to_compute(order_field, service):
+                    self.env.remove_to_compute(order_field, service)
                     with self.env.protecting([order_field], service):
                         service.display_order = display_order
                 elif service.display_order != display_order:
                     service.display_order = display_order
 
-                # Increment the display_order number for the next service
                 display_order += 1
 
                 if service_id in service_tree:
-                    children_ids = service_tree[service_id]
-                    # Sort children based on `deadline`, then `name`, then `id`
                     sorted_children_ids = sorted(
-                        children_ids,
+                        service_tree[service_id],
                         key=lambda child_id: (
                             service_dict[child_id].deadline or date.max,
                             service_dict[child_id].daily_prio,
@@ -1220,24 +1205,19 @@ class Service(models.Model):
                     for child_id in sorted_children_ids:
                         assign_sequence(child_id, visited)
 
-            # Assign display_order numbers to root services (those without parents) and their children
             if None in service_tree:
                 visited = set()
-
-                root_ids = service_tree[None]
-
-                # Sort the root services
                 root_ids = sorted(
                     service_tree[None],
-                    key=lambda root_id: (
-                        service_dict[root_id].deadline or date.max,
-                        service_dict[root_id].daily_prio,
-                        service_dict[root_id].name,
-                        service_dict[root_id].id,
+                    key=lambda rid: (
+                        service_dict[rid].deadline or date.max,
+                        service_dict[rid].daily_prio,
+                        service_dict[rid].name,
+                        service_dict[rid].id,
                     ),
                 )
-                for root_id in root_ids:
-                    assign_sequence(root_id, visited)
+                for rid in root_ids:
+                    assign_sequence(rid, visited)
 
     def action_view_parent_service(self):
         return {
@@ -1555,16 +1535,8 @@ class Service(models.Model):
         return vals
 
     @api.model
-    def _create_service_member_from_template(self, template_service, parent_id=False, deadline=False):
-        """Create a new service based on a template service.
-
-        Args:
-            template_service: The template service record to clone from
-            parent_id: Optional parent service ID for the new service
-
-        Returns:
-            The newly created service record
-        """
+    def _prepare_template_member_vals(self, template_service, parent_id=False, deadline=False):
+        """Build the create() vals dict for one service cloned from ``template_service``."""
         self._check_template_placement(template_service, parent_id=parent_id)
 
         vals = {
@@ -1615,84 +1587,136 @@ class Service(models.Model):
             vals["parent_id"] = parent_id
 
         vals.update(self._get_template_clone_vals(template_service))
+        return vals
 
-        new_service = self.env["riverflow.service"].with_context(mail_create_nosubscribe=True).create(vals)
+    @api.model
+    def _fetch_template_extras(self, template_ids):
+        """Batch-fetch legs, direct attachments, and template notes for ``template_ids``."""
+        template_id_list = list(template_ids)
+        if not template_id_list:
+            return {}, {}, {}
 
-        # Copy the legs from the template
-        for leg in template_service.leg_ids:
-            self.env["riverflow.service.leg"].create(
-                {
-                    "service_id": new_service.id,
-                    "sequence": leg.sequence,
-                    "supply_from": leg.supply_from,
-                    "supply_to": leg.supply_to,
-                    "supply_cost_amount": leg.supply_cost_amount,
-                    "supply_instructions": leg.supply_instructions,
-                }
-            )
+        legs_by_tpl = {}
+        for leg in self.env["riverflow.service.leg"].search([("service_id", "in", template_id_list)]):
+            legs_by_tpl.setdefault(leg.service_id.id, []).append(leg)
 
-        # Clone direct attachments from the template service
-        template_attachments = self.env["ir.attachment"].search(
+        attachments_by_tpl = {}
+        for attachment in self.env["ir.attachment"].search(
             [
                 ("res_model", "=", "riverflow.service"),
-                ("res_id", "=", template_service.id),
+                ("res_id", "in", template_id_list),
             ]
-        )
+        ):
+            attachments_by_tpl.setdefault(attachment.res_id, []).append(attachment)
 
-        for attachment in template_attachments:
-            attachment.copy(
-                {
-                    "res_id": new_service.id,
-                    "res_model": "riverflow.service",
-                }
-            )
-
-        # Clone notes (comments) from template
-        template_notes = self.env["mail.message"].search(
+        notes_by_tpl = {}
+        mt_note_id = self.env.ref("mail.mt_note").id
+        for note in self.env["mail.message"].search(
             [
                 ("model", "=", "riverflow.service"),
-                ("res_id", "=", template_service.id),
+                ("res_id", "in", template_id_list),
                 ("message_type", "=", "comment"),
-                ("subtype_id", "=", self.env.ref("mail.mt_note").id),
+                ("subtype_id", "=", mt_note_id),
             ]
-        )
+        ):
+            notes_by_tpl.setdefault(note.res_id, []).append(note)
 
-        for note in template_notes:
-            # First clone the attachments
-            new_attachment_ids = []
-            if note.attachment_ids:
-                for attachment in note.attachment_ids:
-                    new_attachment = attachment.copy(
+        return legs_by_tpl, attachments_by_tpl, notes_by_tpl
+
+    @api.model
+    def _copy_template_extras(self, service_template_pairs, extras):
+        """Copy legs, attachments, and template notes onto created services in batch."""
+        legs_by_tpl, attachments_by_tpl, notes_by_tpl = extras
+
+        leg_vals_list = []
+        note_vals_list = []
+        odoobot = None
+        note_prefix = None
+
+        for new_service, template_service in service_template_pairs:
+            tpl_id = template_service.id
+
+            for leg in legs_by_tpl.get(tpl_id, ()):
+                leg_vals_list.append(
+                    {
+                        "service_id": new_service.id,
+                        "sequence": leg.sequence,
+                        "supply_from": leg.supply_from,
+                        "supply_to": leg.supply_to,
+                        "supply_cost_amount": leg.supply_cost_amount,
+                        "supply_instructions": leg.supply_instructions,
+                    }
+                )
+
+            for attachment in attachments_by_tpl.get(tpl_id, ()):
+                attachment.copy(
+                    {
+                        "res_id": new_service.id,
+                        "res_model": "riverflow.service",
+                    }
+                )
+
+            tpl_notes = notes_by_tpl.get(tpl_id)
+            if tpl_notes:
+                if odoobot is None:
+                    odoobot = self.env.ref("base.partner_root")
+                    note_prefix = Markup("<p><em>%s</em></p>") % self.env._("From the service template")
+                for note in tpl_notes:
+                    new_attachment_ids = []
+                    if note.attachment_ids:
+                        for attachment in note.attachment_ids:
+                            new_attachment = attachment.copy(
+                                {
+                                    "res_id": new_service.id,
+                                    "res_model": "riverflow.service",
+                                }
+                            )
+                            new_attachment_ids.append(new_attachment.id)
+
+                    # The copy is dated at the copy, by OdooBot, and says where it comes
+                    # from (radar pipeline applicants plan, decision 160). It kept the
+                    # template note's author and date, so a service made today showed
+                    # "Ries, 6-Oct-2025" and read as an old note of that person.
+                    note_vals_list.append(
                         {
+                            "subject": note.subject,
+                            "body": note_prefix + (note.body or Markup()),
+                            # We convert template-notes to auto-comments, because we don't want to see them in the top-3 internal notes
+                            # they are just for documentation purposes
+                            "message_type": "auto_comment" if note.message_type == "comment" else note.message_type,
+                            "subtype_id": note.subtype_id.id,
+                            "model": "riverflow.service",
                             "res_id": new_service.id,
-                            "res_model": "riverflow.service",
+                            "author_id": odoobot.id,
+                            "email_from": odoobot.email_formatted,
+                            "parent_id": note.parent_id.id,
+                            "starred_partner_ids": [(6, 0, note.starred_partner_ids.ids)],
+                            "attachment_ids": [(6, 0, new_attachment_ids)],
                         }
                     )
-                    new_attachment_ids.append(new_attachment.id)
 
-            # The copy is dated at the copy, by OdooBot, and says where it comes
-            # from (radar pipeline applicants plan, decision 160). It kept the
-            # template note's author and date, so a service made today showed
-            # "Ries, 6-Oct-2025" and read as an old note of that person.
-            odoobot = self.env.ref("base.partner_root")
-            self.env["mail.message"].sudo().create(
-                {
-                    "subject": note.subject,
-                    "body": Markup("<p><em>%s</em></p>") % self.env._("From the service template") + (note.body or Markup()),
-                    # We convert template-notes to auto-comments, because we don't want to see them in the top-3 internal notes
-                    # they are just for documentation purposes
-                    "message_type": "auto_comment" if note.message_type == "comment" else note.message_type,
-                    "subtype_id": note.subtype_id.id,
-                    "model": "riverflow.service",
-                    "res_id": new_service.id,
-                    "author_id": odoobot.id,
-                    "email_from": odoobot.email_formatted,
-                    "parent_id": note.parent_id.id,
-                    "starred_partner_ids": [(6, 0, note.starred_partner_ids.ids)],
-                    "attachment_ids": [(6, 0, new_attachment_ids)],
-                }
-            )
+        if leg_vals_list:
+            self.env["riverflow.service.leg"].create(leg_vals_list)
+        if note_vals_list:
+            self.env["mail.message"].sudo().create(note_vals_list)
 
+    @api.model
+    def _create_service_member_from_template(self, template_service, parent_id=False, deadline=False):
+        """Create a new service based on a template service.
+
+        Args:
+            template_service: The template service record to clone from
+            parent_id: Optional parent service ID for the new service
+
+        Returns:
+            The newly created service record
+        """
+        vals = self._prepare_template_member_vals(
+            template_service, parent_id=parent_id, deadline=deadline
+        )
+        new_service = self.env["riverflow.service"].with_context(mail_create_nosubscribe=True).create(vals)
+        extras = self._fetch_template_extras([template_service.id])
+        self._copy_template_extras([(new_service, template_service)], extras)
         return new_service
 
     @api.model
@@ -1948,6 +1972,121 @@ class Service(models.Model):
         return opened
 
     @api.model
+    def _create_services_from_templates_batch(self, specs):
+        """Batch-create service trees for a list of ``(template_id, ctx_dict, deadline)`` specs.
+
+        Creates services level by level (all roots in one ``create()``, then
+        depth-1 children, etc.), pre-fetches template legs/attachments/notes
+        once for the entire batch, and defers ``display_order`` until all
+        descendants exist so each tree is numbered once.
+
+        Returns the created root services in spec order.
+        """
+        if not specs:
+            return self.env["riverflow.service"]
+
+        Service = self.env["riverflow.service"]
+        root_entries = []
+        all_template_ids = set()
+
+        def _collect_descendant_templates(tpl):
+            all_template_ids.add(tpl.id)
+            for child in tpl.child_ids:
+                if child.create_on_state_id:
+                    continue
+                _collect_descendant_templates(child)
+
+        # Resolve root templates first (preserving UserError when a template ID is invalid)
+        template_by_id = {
+            t.id: t for t in Service.browse({tpl_id for tpl_id, _ctx, _dl in specs if tpl_id})
+        }
+        for template_service_id, ctx_dict, project_deadline in specs:
+            template_service = template_by_id.get(template_service_id)
+            if not template_service:
+                raise UserError(_("No template service selected."))
+            ctx_dict = ctx_dict or {}
+            if template_service.only_add_children:
+                for child_template in template_service.child_ids:
+                    root_entries.append((child_template, False, ctx_dict, project_deadline))
+                    _collect_descendant_templates(child_template)
+            else:
+                root_entries.append((template_service, False, ctx_dict, project_deadline))
+                _collect_descendant_templates(template_service)
+
+        if not root_entries:
+            return Service
+
+        # Prefetch all reachable templates and fetch their extras in 3 queries total
+        Service.browse(list(all_template_ids))
+        extras = self._fetch_template_extras(all_template_ids)
+
+        caller_deferred = bool(self.env.context.get("defer_display_order"))
+        service_fields = self._fields
+        created_roots = Service
+        all_pairs = []
+        current_level = root_entries
+        is_root_level = True
+
+        while current_level:
+            # Group by non-default context keys (default_* keys are injected
+            # per record into vals so different specs share one create() call).
+            groups = []
+            group_map = {}
+            for tpl, parent_id, ctx_dict, deadline in current_level:
+                scoped = self.with_context(**ctx_dict) if ctx_dict else self
+                vals = scoped._prepare_template_member_vals(
+                    tpl, parent_id=parent_id, deadline=deadline
+                )
+                extra_ctx_items = []
+                for key, val in ctx_dict.items():
+                    if key.startswith("default_"):
+                        fname = key[8:]
+                        if fname in service_fields and fname not in vals:
+                            vals[fname] = val
+                    else:
+                        extra_ctx_items.append((key, val))
+                group_key = tuple(sorted(extra_ctx_items))
+                if group_key not in group_map:
+                    group_map[group_key] = []
+                    groups.append((group_key, group_map[group_key]))
+                group_map[group_key].append((tpl, ctx_dict, vals))
+
+            next_level = []
+            for group_key, items in groups:
+                create_ctx = {
+                    "mail_create_nosubscribe": True,
+                    "defer_display_order": True,
+                }
+                for k, v in group_key:
+                    create_ctx[k] = v
+                created_batch = self.with_context(**create_ctx).create(
+                    [vals for _tpl, _ctx, vals in items]
+                )
+                if is_root_level:
+                    created_roots += created_batch
+                for new_service, (tpl, ctx_dict, _vals) in zip(created_batch, items):
+                    all_pairs.append((new_service, tpl))
+                    for child in tpl.child_ids:
+                        if child.create_on_state_id:
+                            continue
+                        next_level.append((child, new_service.id, ctx_dict, False))
+
+            current_level = next_level
+            is_root_level = False
+
+        self._copy_template_extras(all_pairs, extras)
+
+        if not caller_deferred and all_pairs:
+            # Compute display_order once across all created trees (grouped by root_id).
+            order_field = self._fields["display_order"]
+            all_created = Service.union(*(pair[0] for pair in all_pairs))
+            self.env.remove_to_compute(order_field, all_created)
+            with self.env.protecting([order_field], all_created):
+                all_created.with_context(defer_display_order=False)._compute_display_order()
+
+        return created_roots
+
+    @api.model
     def _create_services_from_template(self, template_service_id, project_deadline=False):
         """Create a new service from a template, including all child services recursively.
 
@@ -1957,27 +2096,9 @@ class Service(models.Model):
         Returns:
             The newly created root service record(s)
         """
-        template_service = self.env["riverflow.service"].browse(template_service_id)
-        if not template_service:
-            raise UserError(_("No template service selected."))
-
-        newly_created_services = self.env["riverflow.service"]
-        if template_service.only_add_children:
-            for child_template in template_service.child_ids:
-                new_service = self._create_service_member_from_template(
-                    child_template, deadline=project_deadline
-                )
-                self._clone_template_children(child_template, new_service)
-                newly_created_services += new_service
-        else:
-            # Create main service from template
-            new_service = self._create_service_member_from_template(
-                template_service, deadline=project_deadline
-            )
-            self._clone_template_children(template_service, new_service)
-            newly_created_services += new_service
-
-        return newly_created_services
+        return self._create_services_from_templates_batch(
+            [(template_service_id, {}, project_deadline)]
+        )
 
     def _clone_template_children(self, template, parent, include_deferred=False):
         """Recursively clone the children of `template` under `parent`.

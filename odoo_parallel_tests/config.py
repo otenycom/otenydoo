@@ -10,18 +10,19 @@ import os
 
 def get_worker_count():
     """
-    Number of parallel test workers. Defaults to the CPU core count, with a
-    minimum of 2 and a maximum of 32.
+    Number of parallel test workers. Defaults to ~80% of CPU cores (14 on an
+    18-core Apple Silicon machine), clamped to [2, 32].
 
-    With the work queue every worker stays busy until the queue is empty,
-    so more workers than cores only add contention: on a 16-core machine
-    the full suite took 108.8 s with 19 workers (120% of cores, the old
-    default) and 69.7 s with 16, because the biggest class ran 92 s under
-    19 workers and 52 s under 16. Static batches used to hide this: the
-    early finishers thinned the load over the last third of the run.
+    Each test worker drives both a Python odoo-bin process and a PostgreSQL
+    backend (plus headless Chrome during HttpCase tests). With the shared work
+    queue keeping every worker busy until the end, running 100% of cores
+    oversubscribes the CPU and PostgreSQL shared buffers: on an 18-core M5 Max
+    (6 P-cores + 12 E-cores), the 6,302-test suite ran in 91.8 s (1,236 s
+    summed worker time) at 14 workers versus 105.8 s (1,825 s summed, +48%
+    contention) at 18 workers, and 97.6 s at 12 workers.
     """
     cores = multiprocessing.cpu_count()
-    default = min(32, max(2, cores))
+    default = min(32, max(2, round(cores * 0.8)))
     return int(os.environ.get("ODOO_TEST_WORKERS", default))
 
 

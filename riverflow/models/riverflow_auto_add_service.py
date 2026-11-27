@@ -87,6 +87,191 @@ class AutoAddService(models.Model):
         """
         return new_services
 
+    @staticmethod
+    def _split_top_and_leaves(tokens):
+        """Extract top-level implicit/explicit AND leaves from normalized Domain tokens.
+
+        Returns ``(leaves, has_complex, mentions_active)``. Any OR (``|``) or
+        NOT (``!``) sub-expression sets ``has_complex = True`` while top-level
+        AND siblings are still collected for safe pre-filtering.
+        """
+        leaves = []
+        has_complex = False
+        mentions_active = any(
+            isinstance(t, (tuple, list)) and len(t) == 3 and t[0] == "active"
+            for t in tokens
+        )
+        n = len(tokens)
+
+        def _skip(idx):
+            if idx >= n:
+                return n
+            tok = tokens[idx]
+            if tok in ("&", "|"):
+                return _skip(_skip(idx + 1))
+            if tok == "!":
+                return _skip(idx + 1)
+            return idx + 1
+
+        def _consume(idx):
+            nonlocal has_complex
+            if idx >= n:
+                return n
+            tok = tokens[idx]
+            if tok == "&":
+                return _consume(_consume(idx + 1))
+            if tok == "|":
+                has_complex = True
+                return _skip(_skip(idx + 1))
+            if tok == "!":
+                has_complex = True
+                return _skip(idx + 1)
+            if isinstance(tok, (tuple, list)) and len(tok) == 3:
+                leaves.append(tok)
+            else:
+                has_complex = True
+            return idx + 1
+
+        idx = 0
+        while idx < n:
+            idx = _consume(idx)
+        return leaves, has_complex, mentions_active
+
+    @staticmethod
+    def _compile_simple_leaf(model_fields, leaf):
+        """Compile a simple stored scalar/Many2one domain leaf into a Python predicate.
+
+        Returns a callable ``predicate(record) -> bool``, or ``None`` if the leaf
+        should be left to SQL (relational dotted paths, unstored computes,
+        display_name string searches, NULL-ambiguous operators, etc.).
+        """
+        field_name, op, value = leaf
+        if leaf in ((1, "=", 1), [1, "=", 1]):
+            return lambda _rec: True
+        if leaf in ((0, "=", 1), [0, "=", 1]):
+            return lambda _rec: False
+        if not isinstance(field_name, str) or "." in field_name:
+            return None
+        field = model_fields.get(field_name)
+        if not field or not field.store:
+            return None
+
+        ftype = field.type
+        if ftype == "boolean":
+            if op == "=" and (isinstance(value, bool) or value is None):
+                target = bool(value)
+                return lambda rec, f=field_name, t=target: bool(rec[f]) is t
+            if op == "!=" and (isinstance(value, bool) or value is None):
+                target = bool(value)
+                return lambda rec, f=field_name, t=target: bool(rec[f]) is not t
+            return None
+
+        if ftype == "many2one":
+            if op in ("=", "!="):
+                if value is False or value is None:
+                    if op == "=":
+                        return lambda rec, f=field_name: not rec[f].id
+                    return lambda rec, f=field_name: bool(rec[f].id)
+                if isinstance(value, int) and not isinstance(value, bool):
+                    if op == "=":
+                        return lambda rec, f=field_name, v=value: rec[f].id == v
+                    return lambda rec, f=field_name, v=value: rec[f].id != v
+                return None
+            if op == "in" and isinstance(value, (list, tuple, set)):
+                ids = set()
+                allow_false = False
+                for item in value:
+                    if item is False or item is None:
+                        allow_false = True
+                    elif isinstance(item, int) and not isinstance(item, bool):
+                        ids.add(item)
+                    else:
+                        return None
+                if allow_false:
+                    return lambda rec, f=field_name, s=ids: (not rec[f].id) or (rec[f].id in s)
+                return lambda rec, f=field_name, s=ids: bool(rec[f].id) and (rec[f].id in s)
+            return None
+
+        if ftype in ("char", "selection"):
+            if op == "=" and isinstance(value, str) and value:
+                return lambda rec, f=field_name, v=value: rec[f] == v
+            if op == "in" and isinstance(value, (list, tuple, set)) and value:
+                if all(isinstance(v, str) and v for v in value):
+                    val_set = set(value)
+                    return lambda rec, f=field_name, s=val_set: rec[f] in s
+            return None
+
+        if ftype in ("date", "datetime"):
+            if op in ("=", "!=") and (value is False or value is None):
+                if op == "=":
+                    return lambda rec, f=field_name: not rec[f]
+                return lambda rec, f=field_name: bool(rec[f])
+            if op in ("=", "<", "<=", ">", ">=") and value:
+                try:
+                    target = (
+                        fields.Date.to_date(value)
+                        if ftype == "date"
+                        else fields.Datetime.to_datetime(value)
+                    )
+                except Exception:
+                    return None
+                if target is None:
+                    return None
+                if op == "=":
+                    return lambda rec, f=field_name, t=target: bool(rec[f]) and rec[f] == t
+                if op == "<":
+                    return lambda rec, f=field_name, t=target: bool(rec[f]) and rec[f] < t
+                if op == "<=":
+                    return lambda rec, f=field_name, t=target: bool(rec[f]) and rec[f] <= t
+                if op == ">":
+                    return lambda rec, f=field_name, t=target: bool(rec[f]) and rec[f] > t
+                if op == ">=":
+                    return lambda rec, f=field_name, t=target: bool(rec[f]) and rec[f] >= t
+            return None
+
+        return None
+
+    def _match_subjects_for_domain(self, model_name, subjects_sudo, domain):
+        """Return set of subject IDs matching ``domain`` on ``model_name``.
+
+        Evaluates top-level AND simple stored predicates in Python from the ORM
+        cache first:
+        - If all leaves are simple, returns immediately with zero SQL queries.
+        - If pre-filtering leaves zero candidates, short-circuits with zero SQL.
+        - Otherwise falls back to a single SQL search limited to the surviving
+          candidate IDs.
+        """
+        Model = self.env[model_name].sudo()
+        tokens = list(domain)
+        leaves, has_complex, mentions_active = self._split_top_and_leaves(tokens)
+
+        predicates = []
+        if (
+            not mentions_active
+            and "active" in Model._fields
+            and self.env.context.get("active_test", True)
+        ):
+            predicates.append(lambda rec: bool(rec["active"]))
+
+        for leaf in leaves:
+            pred = self._compile_simple_leaf(Model._fields, leaf)
+            if pred is None:
+                has_complex = True
+            else:
+                predicates.append(pred)
+
+        candidates = subjects_sudo
+        for pred in predicates:
+            candidates = candidates.filtered(pred)
+            if not candidates:
+                return set()
+
+        if not has_complex:
+            return set(candidates.ids)
+
+        combined_domain = tokens + [("id", "in", candidates.ids)]
+        return set(Model.search(combined_domain).ids)
+
     @api.model
     def auto_add_services(self, subjects):
         if subjects and isinstance(subjects[0].id, api.NewId):
@@ -113,47 +298,56 @@ class AutoAddService(models.Model):
                 ("applies_to_model", "=", model),
             ]
         )
+        if not auto_add_rules:
+            return
 
         eval_context = self._eval_context()
-        new_services = []
-        # Prefetch the records to avoid multiple database hits
-        self.env[model].browse(subjects.ids)
+        # Prefetch subjects once as sudo for cached predicate checks
+        subjects_sudo = self.env[model].sudo().browse(subjects.ids)
 
-        # Pre-process domains for all auto_add_rules
+        # Parse and deduplicate rule domains: many rules share identical domain
+        # strings (e.g. 27 log-entry rules share ~10 distinct domains), so
+        # evaluating each unique domain once avoids redundant SQL queries.
         rule_domains = {}
+        unique_domains = {}
         for auto_add_rule in auto_add_rules:
+            domain_str = auto_add_rule.domain
+            if domain_str in unique_domains:
+                rule_domains[auto_add_rule] = domain_str
+                continue
             try:
-                domain = safe_eval(auto_add_rule.domain, eval_context)
-                rule_domains[auto_add_rule] = Domain(domain)
+                domain = safe_eval(domain_str, eval_context)
+                unique_domains[domain_str] = Domain(domain)
+                rule_domains[auto_add_rule] = domain_str
             except Exception as e:
                 raise ValidationError(f"Error evaluating domain for rule {auto_add_rule.name}: {e}")
 
-        # Performance optimization: batch-evaluate all subjects per rule using search()
-        # instead of filtered_domain() per subject. This reduces O(subjects x rules) Python
-        # domain evaluations to O(rules) database queries, dramatically improving performance.
-        rule_matching_ids = {}
-        for auto_add_rule, domain in rule_domains.items():
-            # Combine rule domain with subject filter - single DB query per rule
-            # Domain objects are iterable ASTs, so list() converts to traditional list format
-            combined_domain = list(domain) + [("id", "in", subjects.ids)]
-            matching = self.env[model].sudo().search(combined_domain)
-            rule_matching_ids[auto_add_rule] = set(matching.ids)
+        domain_matching_ids = {
+            domain_str: self._match_subjects_for_domain(model, subjects_sudo, domain)
+            for domain_str, domain in unique_domains.items()
+        }
 
-        # Now iterate without expensive per-record domain evaluation
-        for subject in subjects:
-            for auto_add_rule in rule_domains:
-                if subject.id in rule_matching_ids[auto_add_rule]:
+        new_services = []
+        for subject in subjects.sorted("id"):
+            sid = subject.id
+            for auto_add_rule, domain_str in rule_domains.items():
+                if sid in domain_matching_ids[domain_str]:
                     new_services.append(
                         {
-                            "res_id": subject.id,
+                            "res_id": sid,
                             "res_model": subject._name,
                             "created_by_auto_add_service_id": auto_add_rule.id,
                             "template_id": auto_add_rule.service_template_id.id,
                         }
                     )
 
+        if not new_services:
+            return
+
         # Hook for filtering candidates before dedup (e.g. credential plan-item check)
         new_services = self._filter_auto_add_candidates(new_services, model)
+        if not new_services:
+            return
 
         # Get existing auto-added services to avoid duplicates.
         # Dedup key is (rule_id, res_model, res_id, context_ref) so the same rule
@@ -222,6 +416,8 @@ class AutoAddService(models.Model):
         # This is the application layer of the invariant; a partial-unique index
         # on enforcing workflows is the structural backstop against races.
         to_create = self._filter_single_open(to_create)
+        if not to_create:
+            return
 
         # A clean context: the services are made with this rule's defaults only
         # (radar pipeline applicants plan, decision 87). The auto-add often runs
@@ -233,9 +429,11 @@ class AutoAddService(models.Model):
         # due date of the task whose step uploaded the new permit (radar service
         # 37725), two years too early.
         Service = self.env["riverflow.service"].with_context(clean_context(self.env.context))
-        for service_vals in to_create:
-            ctx = self._get_service_creation_context(service_vals)
-            Service.with_context(**ctx)._create_services_from_template(service_vals["template_id"])
+        specs = [
+            (service_vals["template_id"], self._get_service_creation_context(service_vals), False)
+            for service_vals in to_create
+        ]
+        Service._create_services_from_templates_batch(specs)
 
     def _filter_single_open(self, to_create):
         """Drop candidates that would create a second OPEN service for a

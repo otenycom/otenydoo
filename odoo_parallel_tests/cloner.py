@@ -6,17 +6,20 @@ it does a file-level copy. Requires no active connections on the
 template database during cloning.
 
 Clone reuse: after a parallel run, clones are kept as a POOL. On the next
-run three fingerprints detect whether the base DB has changed:
+run four fingerprints detect whether the base DB has changed:
 1. Schema fingerprint — md5 of all public table columns + types
 2. XML-ID fingerprint — md5 of ir_model_data rows (module.name=model:res_id)
 3. Module-version fingerprint — md5 of ir_module_module name=latest_version
-If all three match, every clone in the pool that still exists is valid: a
+4. Asset fingerprint — md5 of /web/assets/% rows in ir_attachment
+If all four match, every clone in the pool that still exists is valid: a
 run needing N clones reuses the first N and creates only the ones that are
 missing. A run with fewer classes (fewer workers) never rebuilds the pool,
 and a run with more workers adds to it. The XML-ID fingerprint catches the
 common case where noupdate=1 data records are added without schema changes.
 The module-version fingerprint catches a value-only migration: the schema
 and XML-ID set stay the same, but latest_version moves, so clones refresh.
+The asset fingerprint ensures reused clones match the pregenerated web asset
+bundles on the base DB, so workers can safely skip asset pregeneration.
 
 Copy strategy: on PostgreSQL 15+ a clone is made with
 ``CREATE DATABASE ... STRATEGY = FILE_COPY``. The default WAL_LOG strategy
@@ -36,15 +39,33 @@ replica is removed with the clone. Hardlinks are safe against Odoo's
 end-of-run filestore GC: unlinking a worker's link never touches the base.
 """
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
 import os
 import shutil
 import subprocess
+import threading
 
 _logger = logging.getLogger(__name__)
 
 CLONE_STATE_PATH = "/tmp/odoo_parallel_test_clones.json"
+
+# Empirical sweet spot for PostgreSQL STRATEGY = FILE_COPY: 3 concurrent copies
+# minimizes disk I/O contention while letting worker 0 start ~1.9s into cloning
+# instead of waiting ~11s when all 18 copies compete simultaneously.
+DEFAULT_CLONE_CONCURRENCY = 3
+
+
+def _get_clone_concurrency():
+    """Maximum number of concurrent CREATE DATABASE clone operations."""
+    raw = os.environ.get("ODOO_TEST_CLONE_CONCURRENCY")
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            pass
+    return DEFAULT_CLONE_CONCURRENCY
 
 
 # ---------------------------------------------------------------------------
@@ -224,22 +245,63 @@ def _get_module_version_fingerprint(db_name):
     return None
 
 
-def _reuse_key_matches(state, *, base_db, fingerprint, xmlid_fingerprint, version_fingerprint):
+def _get_asset_fingerprint(db_name):
+    """
+    Compute an md5 hash of pregenerated web asset bundles in ir_attachment.
+
+    Parallel workers skip _pregenerate_assets_bundles() because master already
+    pregenerated the bundles on base_db before cloning. Including this hash in
+    the reuse key ensures reused clones are rebuilt whenever asset bundles are
+    generated for the first time or regenerated after JS/SCSS changes.
+    """
+    env = _get_pg_env()
+    args = _get_pg_args()
+    sql = (
+        "SELECT COALESCE(md5(string_agg("
+        "url || '=' || COALESCE(checksum, '') || ':' || COALESCE(store_fname, ''), "
+        "',' ORDER BY url, id)), 'empty') "
+        "FROM ir_attachment "
+        "WHERE url LIKE '/web/assets/%'"
+    )
+    cmd = ["psql", "-d", db_name] + args + ["-t", "-A", "-c", sql]
+    result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    if result.returncode == 0:
+        return result.stdout.strip()
+    return None
+
+
+def _reuse_key_matches(
+    state,
+    *,
+    base_db,
+    fingerprint,
+    xmlid_fingerprint,
+    version_fingerprint,
+    asset_fingerprint,
+):
     """True when the saved pool was cloned from this base at these fingerprints.
 
     The worker count is deliberately not part of the key: the pool is reused
     whatever the count, and only missing clones are created."""
-    if not fingerprint or not xmlid_fingerprint or not version_fingerprint:
+    if (
+        not fingerprint
+        or not xmlid_fingerprint
+        or not version_fingerprint
+        or not asset_fingerprint
+    ):
         return False
     return (
         state.get("base_db") == base_db
         and state.get("fingerprint") == fingerprint
         and state.get("xmlid_fingerprint") == xmlid_fingerprint
         and state.get("version_fingerprint") == version_fingerprint
+        and state.get("asset_fingerprint") == asset_fingerprint
     )
 
 
-def _reuse_miss_reasons(state, fingerprint, xmlid_fingerprint, version_fingerprint):
+def _reuse_miss_reasons(
+    state, fingerprint, xmlid_fingerprint, version_fingerprint, asset_fingerprint
+):
     """Human-readable reasons the saved pool does not match the current key."""
     reasons = []
     if state.get("fingerprint") != fingerprint:
@@ -248,6 +310,8 @@ def _reuse_miss_reasons(state, fingerprint, xmlid_fingerprint, version_fingerpri
         reasons.append("XML IDs changed")
     if state.get("version_fingerprint") != version_fingerprint:
         reasons.append("module versions changed")
+    if state.get("asset_fingerprint") != asset_fingerprint:
+        reasons.append("assets changed")
     return reasons
 
 
@@ -263,7 +327,12 @@ def _load_clone_state():
 
 
 def _save_clone_state(
-    base_db, fingerprint, xmlid_fingerprint, version_fingerprint, clone_names
+    base_db,
+    fingerprint,
+    xmlid_fingerprint,
+    version_fingerprint,
+    clone_names,
+    asset_fingerprint=None,
 ):
     """Persist the clone state so the next run can attempt reuse."""
     try:
@@ -274,6 +343,7 @@ def _save_clone_state(
                     "fingerprint": fingerprint,
                     "xmlid_fingerprint": xmlid_fingerprint,
                     "version_fingerprint": version_fingerprint,
+                    "asset_fingerprint": asset_fingerprint,
                     "clone_names": clone_names,
                     "worker_count": len(clone_names),
                 },
@@ -381,14 +451,19 @@ def _replicate_filestore_for(base_db, clone_name, replace=True):
 # ---------------------------------------------------------------------------
 
 
-def clone_databases(base_db, count):
+def clone_databases(base_db, count, on_ready=None):
     """
     Provide ``count`` worker databases from the clone pool.
 
-    When the base DB's schema, XML IDs, and module versions are unchanged,
-    every pool clone that still exists is reused and only the missing ones
-    are created (a run needing fewer clones than the pool holds creates
-    nothing). When the base changed, the whole pool is dropped and rebuilt.
+    When the base DB's schema, XML IDs, module versions, and pregenerated
+    assets are unchanged, every pool clone that still exists is reused and only
+    the missing ones are created (a run needing fewer clones than the pool
+    holds creates nothing). When the base changed, the whole pool is dropped
+    and rebuilt.
+
+    When ``on_ready`` is provided, it is called as ``on_ready(worker_index, clone_name)``
+    as soon as each individual clone (database + filestore replica) is ready,
+    allowing workers to start before the full batch finishes cloning.
 
     Returns the list of clone db names to use, in worker order.
     Raises RuntimeError if cloning is not possible (e.g. permission issues).
@@ -397,6 +472,7 @@ def clone_databases(base_db, count):
 
     prefix = config.get_clone_prefix().replace("{db}", base_db)
     needed = [f"{prefix}{i}" for i in range(count)]
+    index_by_name = {name: i for i, name in enumerate(needed)}
 
     # Pre-flight: verify we have the permissions that createdb needs.
     # Avoids spawning N doomed processes that become zombies on failure.
@@ -405,12 +481,13 @@ def clone_databases(base_db, count):
             "Database cloning unavailable: insufficient PostgreSQL permissions"
         )
 
-    fingerprint = xmlid_fingerprint = version_fingerprint = None
+    fingerprint = xmlid_fingerprint = version_fingerprint = asset_fingerprint = None
     stale = []
     if config.reuse_clones():
         fingerprint = _get_db_fingerprint(base_db)
         xmlid_fingerprint = _get_xmlid_fingerprint(base_db)
         version_fingerprint = _get_module_version_fingerprint(base_db)
+        asset_fingerprint = _get_asset_fingerprint(base_db)
         state = _load_clone_state()
         pool = [c for c in state.get("clone_names", []) if c.startswith(prefix)]
         if _reuse_key_matches(
@@ -419,6 +496,7 @@ def clone_databases(base_db, count):
             fingerprint=fingerprint,
             xmlid_fingerprint=xmlid_fingerprint,
             version_fingerprint=version_fingerprint,
+            asset_fingerprint=asset_fingerprint,
         ):
             existing = _existing_databases()
             valid = [c for c in pool if c in existing]
@@ -426,7 +504,7 @@ def clone_databases(base_db, count):
             to_create = [c for c in needed if c not in valid]
             _logger.info(
                 "Clone pool: reusing %d of %d valid clone(s), creating %d "
-                "(schema, XML IDs, and module versions unchanged)",
+                "(schema, XML IDs, module versions, and assets unchanged)",
                 len(reuse), len(valid), len(to_create),
             )
             # A reused clone keeps its own filestore between runs. A clone
@@ -435,16 +513,29 @@ def clone_databases(base_db, count):
             for clone_name in reuse:
                 if not has_filestore_replica(_filestore_dir(clone_name)):
                     _replicate_filestore_for(base_db, clone_name, replace=False)
+                if on_ready is not None:
+                    on_ready(index_by_name[clone_name], clone_name)
             if to_create:
-                _fresh_clone(base_db, to_create)
+                if on_ready is not None:
+                    _fresh_clone(
+                        base_db,
+                        to_create,
+                        on_ready=lambda name: on_ready(index_by_name[name], name),
+                    )
+                else:
+                    _fresh_clone(base_db, to_create)
             _save_clone_state(
-                base_db, fingerprint, xmlid_fingerprint, version_fingerprint,
+                base_db,
+                fingerprint,
+                xmlid_fingerprint,
+                version_fingerprint,
                 sorted(set(valid) | set(needed)),
+                asset_fingerprint=asset_fingerprint,
             )
             return needed
         if state:
             reasons = _reuse_miss_reasons(
-                state, fingerprint, xmlid_fingerprint, version_fingerprint
+                state, fingerprint, xmlid_fingerprint, version_fingerprint, asset_fingerprint
             )
             _logger.info(
                 "Clone cache miss — %s",
@@ -458,7 +549,14 @@ def clone_databases(base_db, count):
     # it this run will not recreate, then clone fresh.
     if stale:
         drop_databases(stale)
-    _fresh_clone(base_db, needed)
+    if on_ready is not None:
+        _fresh_clone(
+            base_db,
+            needed,
+            on_ready=lambda name: on_ready(index_by_name[name], name),
+        )
+    else:
+        _fresh_clone(base_db, needed)
 
     # Save state for future reuse
     if config.reuse_clones():
@@ -468,23 +566,34 @@ def clone_databases(base_db, count):
             xmlid_fingerprint = _get_xmlid_fingerprint(base_db)
         if not version_fingerprint:
             version_fingerprint = _get_module_version_fingerprint(base_db)
-        if fingerprint and xmlid_fingerprint and version_fingerprint:
+        if not asset_fingerprint:
+            asset_fingerprint = _get_asset_fingerprint(base_db)
+        if fingerprint and xmlid_fingerprint and version_fingerprint and asset_fingerprint:
             _save_clone_state(
-                base_db, fingerprint, xmlid_fingerprint, version_fingerprint, needed
+                base_db,
+                fingerprint,
+                xmlid_fingerprint,
+                version_fingerprint,
+                needed,
+                asset_fingerprint=asset_fingerprint,
             )
 
     return needed
 
 
-def _fresh_clone(base_db, clone_names):
+def _fresh_clone(base_db, clone_names, on_ready=None):
     """
     Drop any existing clones and create fresh ones from the base database.
 
     Closes Odoo's connection pool first so the template copy can acquire
-    exclusive access to the template. Launches all operations concurrently;
-    see ``_create_database_cmd`` for the copy strategy.
+    exclusive access to the template. Runs clones with bounded concurrency
+    (see ``_get_clone_concurrency``) and replicates each clone's filestore
+    immediately so ``on_ready(clone_name)`` can start workers in a pipeline.
     """
     import odoo.sql_db
+
+    if not clone_names:
+        return
 
     odoo.sql_db.close_db(base_db)
     _terminate_connections(base_db)
@@ -492,9 +601,12 @@ def _fresh_clone(base_db, clone_names):
     env = _get_pg_env()
     pg_args = _get_pg_args()
 
-    # Phase 1: drop stale clones in parallel
+    # Phase 1: drop only clones that actually exist on the server (avoids
+    # spawning N no-op dropdb processes after a clean deploy-tool reset).
+    existing = _existing_databases()
+    to_drop = [c for c in clone_names if c in existing] if existing else list(clone_names)
     drop_procs = []
-    for clone_name in clone_names:
+    for clone_name in to_drop:
         proc = subprocess.Popen(
             ["dropdb", "--if-exists"] + pg_args + [clone_name],
             env=env,
@@ -505,38 +617,60 @@ def _fresh_clone(base_db, clone_names):
     for proc in drop_procs:
         proc.wait()
 
-    # Phase 2: clone in parallel — PostgreSQL serializes the template lock
-    # but we overlap subprocess startup and handshake overhead
-    clone_procs = []
-    for clone_name in clone_names:
+    # Phase 2: clone with bounded concurrency, hardlink each clone's filestore
+    # immediately, and notify on_ready so workers boot while cloning continues.
+    concurrency = min(len(clone_names), _get_clone_concurrency())
+    cancel_event = threading.Event()
+    state_lock = threading.Lock()
+    created = []
+    first_error = None
+    callback_error = None
+
+    def _clone_one(clone_name):
+        nonlocal first_error, callback_error
+        if cancel_event.is_set():
+            return
         proc = subprocess.Popen(
             _create_database_cmd(base_db, clone_name),
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
-        clone_procs.append((clone_name, proc))
-
-    # Collect results; on failure, wait for ALL remaining processes before
-    # raising to prevent zombie processes lingering until the test harness
-    # detects and warns about them.
-    created = []
-    first_error = None
-    for clone_name, proc in clone_procs:
         _stdout, stderr = proc.communicate()
         if proc.returncode != 0:
             err = stderr.decode().strip()
             _logger.info("Cannot clone %s -> %s: %s", base_db, clone_name, err)
-            if first_error is None:
-                first_error = err
-        else:
+            cancel_event.set()
+            with state_lock:
+                if first_error is None:
+                    first_error = err
+            return
+
+        with state_lock:
             created.append(clone_name)
-            _logger.info("Cloned database: %s", clone_name)
-            _replicate_filestore_for(base_db, clone_name)
+        _logger.info("Cloned database: %s", clone_name)
+        _replicate_filestore_for(base_db, clone_name)
+        if on_ready is not None and not cancel_event.is_set():
+            try:
+                on_ready(clone_name)
+            except Exception as exc:
+                cancel_event.set()
+                with state_lock:
+                    if callback_error is None:
+                        callback_error = exc
+
+    # Wait for all submitted clone tasks to finish before handling errors so no
+    # psql/createdb subprocesses linger as zombies.
+    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+        futures = [executor.submit(_clone_one, name) for name in clone_names]
+        for fut in futures:
+            fut.result()
 
     if first_error is not None:
         drop_databases(created)
         raise RuntimeError(f"Database cloning failed: {first_error}")
+    if callback_error is not None:
+        raise callback_error
 
 
 def drop_databases(clone_names):

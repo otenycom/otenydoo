@@ -1,4 +1,4 @@
-"""Clone pool: reuse keyed on schema + XML-ID + module version, not on count."""
+"""Clone pool: reuse keyed on schema + XML-ID + module version + assets, not on count."""
 
 import contextlib
 from unittest.mock import patch
@@ -6,7 +6,7 @@ from unittest.mock import patch
 from odoo.tests import tagged
 from odoo.tests.common import TransactionCase
 
-from .. import cloner, config as parallel_config
+from .. import cloner, config as parallel_config, patch as parallel_patch
 from ..cloner import _reuse_key_matches, _reuse_miss_reasons
 
 
@@ -16,6 +16,7 @@ def _state(**overrides):
         "fingerprint": "schema-a",
         "xmlid_fingerprint": "xmlid-a",
         "version_fingerprint": "ver-a",
+        "asset_fingerprint": "assets-a",
         "worker_count": 2,
         "clone_names": ["cr-test-worker-0", "cr-test-worker-1"],
     }
@@ -36,6 +37,7 @@ def _pool(existing, state=None):
             patch.object(cloner, "_get_db_fingerprint", return_value="schema-a"),
             patch.object(cloner, "_get_xmlid_fingerprint", return_value="xmlid-a"),
             patch.object(cloner, "_get_module_version_fingerprint", return_value="ver-a"),
+            patch.object(cloner, "_get_asset_fingerprint", return_value="assets-a"),
             patch.object(cloner, "_load_clone_state", return_value=state or _state()),
             patch.object(cloner, "_existing_databases", return_value=set(existing)),
             patch.object(cloner, "has_filestore_replica", return_value=True),
@@ -46,10 +48,10 @@ def _pool(existing, state=None):
 
 @tagged("odoo_parallel_tests", "post_install", "-at_install", "test_cloner_reuse")
 class TestCloneReuseKey(TransactionCase):
-    """A value-only migration is a version bump. That bump must miss the cache.
+    """A value-only migration or asset change must miss the cache.
     A different worker count must NOT."""
 
-    def test_reuse_when_schema_xmlid_and_version_match(self):
+    def test_reuse_when_schema_xmlid_version_and_assets_match(self):
         self.assertTrue(
             _reuse_key_matches(
                 _state(),
@@ -57,6 +59,7 @@ class TestCloneReuseKey(TransactionCase):
                 fingerprint="schema-a",
                 xmlid_fingerprint="xmlid-a",
                 version_fingerprint="ver-a",
+                asset_fingerprint="assets-a",
             )
         )
 
@@ -68,10 +71,25 @@ class TestCloneReuseKey(TransactionCase):
                 fingerprint="schema-a",
                 xmlid_fingerprint="xmlid-a",
                 version_fingerprint="ver-b",
+                asset_fingerprint="assets-a",
             )
         )
-        reasons = _reuse_miss_reasons(_state(), "schema-a", "xmlid-a", "ver-b")
+        reasons = _reuse_miss_reasons(_state(), "schema-a", "xmlid-a", "ver-b", "assets-a")
         self.assertEqual(reasons, ["module versions changed"])
+
+    def test_asset_change_invalidates_reuse(self):
+        self.assertFalse(
+            _reuse_key_matches(
+                _state(),
+                base_db="cr-test",
+                fingerprint="schema-a",
+                xmlid_fingerprint="xmlid-a",
+                version_fingerprint="ver-a",
+                asset_fingerprint="assets-b",
+            )
+        )
+        reasons = _reuse_miss_reasons(_state(), "schema-a", "xmlid-a", "ver-a", "assets-b")
+        self.assertEqual(reasons, ["assets changed"])
 
     def test_schema_or_xmlid_change_still_invalidates(self):
         self.assertFalse(
@@ -81,6 +99,7 @@ class TestCloneReuseKey(TransactionCase):
                 fingerprint="schema-b",
                 xmlid_fingerprint="xmlid-a",
                 version_fingerprint="ver-a",
+                asset_fingerprint="assets-a",
             )
         )
         self.assertFalse(
@@ -90,21 +109,24 @@ class TestCloneReuseKey(TransactionCase):
                 fingerprint="schema-a",
                 xmlid_fingerprint="xmlid-b",
                 version_fingerprint="ver-a",
+                asset_fingerprint="assets-a",
             )
         )
 
-    def test_legacy_state_without_version_does_not_reuse(self):
-        state = _state()
-        del state["version_fingerprint"]
-        self.assertFalse(
-            _reuse_key_matches(
-                state,
-                base_db="cr-test",
-                fingerprint="schema-a",
-                xmlid_fingerprint="xmlid-a",
-                version_fingerprint="ver-a",
+    def test_legacy_state_without_version_or_assets_does_not_reuse(self):
+        for missing_key in ("version_fingerprint", "asset_fingerprint"):
+            state = _state()
+            del state[missing_key]
+            self.assertFalse(
+                _reuse_key_matches(
+                    state,
+                    base_db="cr-test",
+                    fingerprint="schema-a",
+                    xmlid_fingerprint="xmlid-a",
+                    version_fingerprint="ver-a",
+                    asset_fingerprint="assets-a",
+                )
             )
-        )
 
     def test_clone_databases_reuses_when_version_unchanged(self):
         with (
@@ -171,6 +193,47 @@ class TestCloneReuseKey(TransactionCase):
         save.assert_called_once()
         self.assertEqual(save.call_args.args[3], "ver-b")
         self.assertEqual(names, ["cr-test-worker-0", "cr-test-worker-1"])
+
+
+    def test_on_ready_notifies_reused_and_created_clones_with_worker_indices(self):
+        ready = []
+
+        def fake_fresh(base_db, clone_names, on_ready=None):
+            for name in clone_names:
+                if on_ready:
+                    on_ready(name)
+
+        with (
+            _pool(["cr-test-worker-0", "cr-test-worker-1"]),
+            patch.object(cloner, "_fresh_clone", side_effect=fake_fresh),
+            patch.object(cloner, "_save_clone_state"),
+        ):
+            names = cloner.clone_databases(
+                "cr-test", 3, on_ready=lambda idx, db: ready.append((idx, db))
+            )
+        self.assertEqual(names, ["cr-test-worker-0", "cr-test-worker-1", "cr-test-worker-2"])
+        self.assertEqual(
+            ready,
+            [(0, "cr-test-worker-0"), (1, "cr-test-worker-1"), (2, "cr-test-worker-2")],
+        )
+
+
+@tagged("odoo_parallel_tests", "post_install", "-at_install", "test_cloner_reuse")
+class TestWorkerPatchGuards(TransactionCase):
+    """Worker at-install guard avoids spurious queue runs during module loading."""
+
+    def test_worker_skips_queue_during_at_install_phase(self):
+        sentinel = object()
+        with (
+            patch.dict("os.environ", {"ODOO_PARALLEL_QUEUE": "/tmp/fake-q"}),
+            patch.object(parallel_patch, "_is_post_install_phase", return_value=False),
+            patch.object(parallel_patch, "_worker_run") as worker_run,
+            patch.object(parallel_patch, "_original_run_suite", return_value=sentinel) as orig,
+        ):
+            res = parallel_patch._patched_run_suite(object(), global_report=None)
+        self.assertIs(res, sentinel)
+        worker_run.assert_not_called()
+        orig.assert_called_once()
 
 
 @tagged("odoo_parallel_tests", "post_install", "-at_install", "test_cloner_strategy")

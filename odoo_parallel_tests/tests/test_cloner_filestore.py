@@ -116,18 +116,36 @@ class TestCloneFilestore(TransactionCase):
     def _filestore_dir(self, db_name):
         return os.path.join(self.root, db_name)
 
-    def test_fresh_clone_replicates_after_createdb(self):
+    def test_fresh_clone_replicates_after_createdb_and_notifies_on_ready(self):
+        ready = []
+        popen_cmds = []
+
+        def fake_popen(cmd, *args, **kwargs):
+            popen_cmds.append(cmd)
+            return _FakeProc()
+
+        def on_ready(clone_name):
+            # Filestore replica must already be present when worker is spawned.
+            self.assertTrue(
+                os.path.exists(os.path.join(self._filestore_dir(clone_name), "ab", "abc123"))
+            )
+            ready.append(clone_name)
+
         with (
             patch.object(cloner, "_server_version_num", return_value=180003),
+            patch.object(cloner, "_existing_databases", return_value={"postgres", "cr-test"}),
             patch.object(cloner, "_filestore_dir", side_effect=self._filestore_dir),
             patch.object(cloner, "_terminate_connections"),
             patch.object(cloner, "_get_pg_env", return_value={}),
             patch.object(cloner, "_get_pg_args", return_value=[]),
-            patch.object(cloner.subprocess, "Popen", return_value=_FakeProc()),
+            patch.object(cloner.subprocess, "Popen", side_effect=fake_popen),
             patch("odoo.sql_db.close_db"),
         ):
-            cloner._fresh_clone("cr-test", ["cr-test-worker-0"])
+            cloner._fresh_clone("cr-test", ["cr-test-worker-0"], on_ready=on_ready)
         self.assertTrue(os.path.exists(os.path.join(self.clone, "ab", "abc123")))
+        self.assertEqual(ready, ["cr-test-worker-0"])
+        # Non-existent clone skips dropdb completely.
+        self.assertFalse(any(cmd[0] == "dropdb" for cmd in popen_cmds))
 
     def test_drop_databases_removes_the_replica(self):
         cloner.replicate_filestore(self.base, self.clone)
@@ -146,6 +164,7 @@ class TestCloneFilestore(TransactionCase):
             "fingerprint": "schema-a",
             "xmlid_fingerprint": "xmlid-a",
             "version_fingerprint": "ver-a",
+            "asset_fingerprint": "assets-a",
             "worker_count": 1,
             "clone_names": ["cr-test-worker-0"],
         }
@@ -158,6 +177,7 @@ class TestCloneFilestore(TransactionCase):
             patch.object(cloner, "_get_db_fingerprint", return_value="schema-a"),
             patch.object(cloner, "_get_xmlid_fingerprint", return_value="xmlid-a"),
             patch.object(cloner, "_get_module_version_fingerprint", return_value="ver-a"),
+            patch.object(cloner, "_get_asset_fingerprint", return_value="assets-a"),
             patch.object(cloner, "_load_clone_state", return_value=state),
             patch.object(cloner, "_existing_databases", return_value={"cr-test-worker-0"}),
             patch.object(cloner, "_filestore_dir", side_effect=self._filestore_dir),

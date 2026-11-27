@@ -246,3 +246,56 @@ class TestAutoAddServiceDedup(TransactionCase):
             "the open service blocks; nothing stacks on it",
         )
 
+    def test_match_subjects_for_domain_matches_sql_across_predicates(self):
+        """Python fast-path for top-level simple predicates matches SQL search()."""
+        from odoo.fields import Domain
+
+        AutoAdd = self.env["riverflow.auto.add.service"]
+        Partner = self.env["res.partner"].sudo()
+        p_active = Partner.create({"name": "DomainMatchActive", "active": True})
+        p_archived = Partner.create({"name": "DomainMatchArchived", "active": False})
+        p_other = Partner.create({"name": "DomainMatchOther", "active": True})
+        subjects = p_active | p_archived | p_other
+
+        domains = [
+            [("name", "=", "DomainMatchActive")],
+            [("name", "in", ["DomainMatchActive", "DomainMatchOther"])],
+            [("active", "=", False)],
+            [("active", "=", True), "|", ("name", "=", "DomainMatchActive"), ("name", "=", "DomainMatchOther")],
+            [("company_id", "=", False)],
+        ]
+        for raw in domains:
+            dom = Domain(raw)
+            expected = set(Partner.search(list(dom) + [("id", "in", subjects.ids)]).ids)
+            actual = AutoAdd._match_subjects_for_domain("res.partner", subjects, dom)
+            self.assertEqual(actual, expected, f"Mismatch for domain {raw}")
+
+    def test_batched_template_creation_builds_children_and_display_order(self):
+        """_create_services_from_templates_batch clones multi-level trees and numbers display_order."""
+        Service = self.env["riverflow.service"]
+        root_tpl = Service.create({"name": "Batch Root Template", "is_this_a_template": True})
+        child_tpl = Service.create(
+            {"name": "Batch Child Template", "is_this_a_template": True, "parent_id": root_tpl.id}
+        )
+        grandchild_tpl = Service.create(
+            {"name": "Batch Grandchild Template", "is_this_a_template": True, "parent_id": child_tpl.id}
+        )
+        partner_a = self.env["res.partner"].create({"name": "Batch Partner A"})
+        partner_b = self.env["res.partner"].create({"name": "Batch Partner B"})
+
+        roots = Service._create_services_from_templates_batch(
+            [
+                (root_tpl.id, {"default_res_model": "res.partner", "default_res_id": partner_a.id}, False),
+                (root_tpl.id, {"default_res_model": "res.partner", "default_res_id": partner_b.id}, False),
+            ]
+        )
+        self.assertEqual(len(roots), 2)
+        for root in roots:
+            tree = Service.search([("root_id", "=", root.id)], order="display_order")
+            self.assertEqual(
+                tree.mapped("name"),
+                ["Batch Root Template", "Batch Child Template", "Batch Grandchild Template"],
+            )
+            self.assertEqual(tree.mapped("display_order"), [0, 1, 2])
+            self.assertEqual(tree[2].template_service_id, grandchild_tpl)
+

@@ -383,24 +383,42 @@ action = {
 
     def _process_action_batch(self, actions_data, action_type):
         """Process a batch of actions, creating new ones and updating existing ones."""
+        if not actions_data:
+            return 0, 0
+
         module_name = _AUDIT_ACTION_XML_MODULE
         actions_created = 0
         actions_updated = 0
 
-        # Check which actions already exist
-        xml_ids = [data["xml_id"] for data in actions_data]
-        existing_refs = {}
-        for xml_id in xml_ids:
-            existing_ref = self.env.ref(xml_id, raise_if_not_found=False)
-            if existing_ref:
-                existing_refs[xml_id] = existing_ref
+        # Batch-resolve all existing XML IDs in one query instead of N env.ref() calls.
+        xml_names = [data["xml_id"].split(".", 1)[1] for data in actions_data]
+        imd_records = self.env["ir.model.data"].search(
+            [
+                ("module", "=", module_name),
+                ("name", "in", xml_names),
+                ("model", "=", "ir.actions.server"),
+            ]
+        )
+        res_id_by_xml_id = {f"{imd.module}.{imd.name}": imd.res_id for imd in imd_records}
+        existing_actions_by_id = {
+            act.id: act
+            for act in self.env["ir.actions.server"].browse(list(res_id_by_xml_id.values())).exists()
+        }
+        existing_refs = {
+            xml_id: existing_actions_by_id[res_id]
+            for xml_id, res_id in res_id_by_xml_id.items()
+            if res_id in existing_actions_by_id
+        }
 
-        # Process each action
         # Setting group_ids bypasses Odoo's default write access check on the bound model.
         # Without group_ids, server actions require write access to the model, which is
         # too restrictive for read-only audit log viewing. With group_ids set to
         # base.group_user, any internal user can view audit logs.
         group_user = self.env.ref("base.group_user")
+        group_cmd = [Command.set([group_user.id])]
+
+        create_entries = []
+        pending_create_by_xml_id = {}
         for action_data in actions_data:
             xml_id = action_data["xml_id"]
             action_vals = {
@@ -410,28 +428,35 @@ action = {
                 "state": "code",
                 "binding_view_types": "list,form",
                 "code": action_data["code"],
-                "group_ids": [Command.set([group_user.id])],
+                "group_ids": group_cmd,
             }
 
             if xml_id in existing_refs:
-                # Update existing action
                 _logger.debug(f"{action_type.title()} action already exists for model, updating it.")
                 existing_refs[xml_id].write(action_vals)
                 actions_updated += 1
+            elif xml_id in pending_create_by_xml_id:
+                # Duplicate xml_id within the same batch: update its queued create vals.
+                pending_create_by_xml_id[xml_id].update(action_vals)
+                actions_updated += 1
             else:
-                # Create new action
-                new_action = self.env["ir.actions.server"].create(action_vals)
-                self.env["ir.model.data"].create(
-                    {
-                        "name": xml_id.split(".")[1],
-                        "module": module_name,
-                        "res_id": new_action.id,
-                        "model": "ir.actions.server",
-                        "noupdate": True,
-                    }
-                )
-                existing_refs[xml_id] = new_action
-                actions_created += 1
+                pending_create_by_xml_id[xml_id] = action_vals
+                create_entries.append((xml_id, action_vals))
+
+        if create_entries:
+            new_actions = self.env["ir.actions.server"].create([vals for _xml_id, vals in create_entries])
+            imd_vals_list = [
+                {
+                    "name": xml_id.split(".", 1)[1],
+                    "module": module_name,
+                    "res_id": new_action.id,
+                    "model": "ir.actions.server",
+                    "noupdate": True,
+                }
+                for (xml_id, _vals), new_action in zip(create_entries, new_actions)
+            ]
+            self.env["ir.model.data"].create(imd_vals_list)
+            actions_created = len(create_entries)
 
         return actions_created, actions_updated
 

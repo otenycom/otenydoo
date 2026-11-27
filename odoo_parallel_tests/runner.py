@@ -90,7 +90,51 @@ def _build_worker_command(clone_db, port):
     return cmd
 
 
-def spawn_workers(clone_names, queue_dir, tmpdir):
+def spawn_worker(index, clone_db, queue_dir, tmpdir, extra_env=None):
+    """Spawn a single worker subprocess targeting ``clone_db``.
+
+    Returns the ``(proc, output_path, result_path, index, out_fh, thread)``
+    tuple consumed by :func:`wait_for_workers`.
+    """
+    base_port = 9000
+    output_path = os.path.join(tmpdir, f"worker_{index}.log")
+    result_path = os.path.join(tmpdir, f"worker_{index}.json")
+
+    cmd = _build_worker_command(clone_db, base_port + index)
+
+    env = os.environ.copy()
+    env["ODOO_PARALLEL_QUEUE"] = queue_dir
+    env["ODOO_PARALLEL_WORKER"] = str(index)
+    env["ODOO_PARALLEL_RESULT"] = result_path
+    env["ODOO_TEST_PARALLEL"] = "never"
+    if extra_env:
+        env.update(extra_env)
+
+    _logger.info("Starting worker %d on %s", index, clone_db)
+    _logger.debug("Worker %d command: %s", index, " ".join(cmd))
+
+    out_fh = open(output_path, "w")
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env=env,
+    )
+
+    # Stream each worker's output to both its log file and the console,
+    # prefixed with the worker index so interleaved lines stay readable.
+    thread = threading.Thread(
+        target=_stream_worker_output,
+        args=(proc, out_fh, f"[W{index}] "),
+        daemon=True,
+    )
+    thread.start()
+
+    return (proc, output_path, result_path, index, out_fh, thread)
+
+
+def spawn_workers(clone_names, queue_dir, tmpdir, extra_env=None):
     """
     Spawn worker subprocesses, one per clone database.
 
@@ -100,48 +144,13 @@ def spawn_workers(clone_names, queue_dir, tmpdir):
     - ODOO_PARALLEL_RESULT: path to write JSON test results
     - ODOO_TEST_PARALLEL=never: prevent recursive parallelization
 
-    Returns list of (process, output_path, result_path, worker_index) tuples.
+    Returns list of (process, output_path, result_path, worker_index, out_fh, thread) tuples.
     """
     _logger.info("Worker output directory: %s", tmpdir)
-    base_port = 9000
-    workers = []
-
-    for i, clone_db in enumerate(clone_names):
-        output_path = os.path.join(tmpdir, f"worker_{i}.log")
-        result_path = os.path.join(tmpdir, f"worker_{i}.json")
-
-        cmd = _build_worker_command(clone_db, base_port + i)
-
-        env = os.environ.copy()
-        env["ODOO_PARALLEL_QUEUE"] = queue_dir
-        env["ODOO_PARALLEL_WORKER"] = str(i)
-        env["ODOO_PARALLEL_RESULT"] = result_path
-        env["ODOO_TEST_PARALLEL"] = "never"
-
-        _logger.info("Starting worker %d on %s", i, clone_db)
-        _logger.debug("Worker %d command: %s", i, " ".join(cmd))
-
-        out_fh = open(output_path, "w")
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            env=env,
-        )
-
-        # Stream each worker's output to both its log file and the console,
-        # prefixed with the worker index so interleaved lines stay readable.
-        thread = threading.Thread(
-            target=_stream_worker_output,
-            args=(proc, out_fh, f"[W{i}] "),
-            daemon=True,
-        )
-        thread.start()
-
-        workers.append((proc, output_path, result_path, i, out_fh, thread))
-
-    return workers
+    return [
+        spawn_worker(i, clone_db, queue_dir, tmpdir, extra_env=extra_env)
+        for i, clone_db in enumerate(clone_names)
+    ]
 
 
 def wait_for_workers(workers):

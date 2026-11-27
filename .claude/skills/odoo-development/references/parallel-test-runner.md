@@ -32,14 +32,15 @@ An Odoo addon (`odoo_parallel_tests`) that monkey-patches `odoo.tests.loader.run
                │ parallel mode
                ▼
 ┌─────────────────────────────────────────────────────┐
-│       Database Cloning (with reuse)                  │
+│       Database Cloning (with reuse, pipelined)       │
 │                                                     │
-│  1. Compute schema + XML-ID + module-version fps     │
-│  2. If all three match the saved pool: reuse the     │
-│     first N valid clones, create only the missing    │
-│  3. Otherwise: drop the pool, CREATE DATABASE ×N     │
-│     (FILE_COPY on PG 15+), hardlink the filestore    │
-│  4. Save the pool state for next run                 │
+│  1. Compute schema + XML-ID + version + asset fps   │
+│  2. If all four match the saved pool: reuse the     │
+│     first N valid clones, create only the missing   │
+│  3. Otherwise: drop the pool, CREATE DATABASE ×N    │
+│     (FILE_COPY on PG 15+, concurrency=3), hardlink  │
+│     filestore & spawn each worker via on_ready      │
+│  4. Save the pool state for next run                │
 └──────────────┬──────────────────────────────────────┘
                │
                ▼
@@ -65,7 +66,7 @@ An Odoo addon (`odoo_parallel_tests`) that monkey-patches `odoo.tests.loader.run
 │           Result Aggregation                         │
 │                                                     │
 │  1. Wait for all workers to finish                   │
-│  2. Join reader threads (all output already printed) │
+│  2. Join reader threads; replay full log on fail     │
 │  3. Read each worker's result JSON + log output      │
 │  4. Aggregate pass/fail/error counts                 │
 │  5. Keep clones for reuse on next run                │
@@ -112,10 +113,13 @@ Each worker is a full `odoo-bin` subprocess with:
 - `ODOO_PARALLEL_QUEUE`: the shared work-queue directory (below)
 - `ODOO_PARALLEL_WORKER`: its index, which names its claim directory
 - `ODOO_PARALLEL_RESULT`: path to write JSON results
+- `ODOO_PARALLEL_SKIP_ASSET_PREGEN=1`: skips redundant `IrQweb._pregenerate_assets_bundles()` during worker boot (master already pregenerated all bundles on the base DB and the cloner replicated both the `ir_attachment` rows and hardlinked filestore files)
 - `ODOO_TEST_PARALLEL=never`: prevents recursive parallelization
 - Its own cloned database and unique HTTP port
 
-The worker's patched `run_suite` sees `ODOO_PARALLEL_QUEUE`, groups its discovered suite by class, pulls one class at a time from the queue, runs it with the original `run_suite`, and writes the summed results (plus per-class timing and the list of classes it ran) to the JSON file. Odoo calls `run_suite` exactly once for the whole post-install suite, so a worker gets one call and one loop.
+The worker's patched `run_suite` checks `_is_post_install_phase()` before entering `_worker_run` (so any at-install `run_suite` call inside a worker passes through to `_original_run_suite` without logging `0 tests from 0 classes` or overwriting its result JSON). In the post-install call it groups its discovered suite by class, pulls one class at a time from the queue, runs it with the original `run_suite`, and writes the summed results (plus per-class timing and the list of classes it ran) to the JSON file. Odoo calls post-install `run_suite` once, so a worker gets one pull loop.
+
+Live reader threads stream every worker line to master stdout with a `[W<n>]` prefix. After all workers finish, master replays full un-interleaved output only for workers that failed or crashed (avoiding a multi-MB duplicate write on green runs); set `ODOO_TEST_REPLAY_OUTPUT=1` to replay every worker.
 
 ### Work queue (since 2026-09-04; replaced static LPT batches)
 
@@ -127,21 +131,22 @@ Why a queue: with static batches the makespan depended on how good last run's pe
 
 ### Clone pool and reuse
 
-Clones are kept between runs as a **pool** and reused when the base database has not changed (the common case during development without `-u`). Staleness is detected via three fingerprints, all computed via `psql` in ~0.1s:
+Clones are kept between runs as a **pool** and reused when the base database has not changed (the common case during development without `-u`). Staleness is detected via four fingerprints, all computed via `psql` in ~0.1s:
 
 1. **Schema fingerprint** — md5 hash of all public table columns and types. Catches any `-u` that adds or modifies fields, even without a manifest version bump.
 2. **XML-ID fingerprint** — md5 hash of all `ir_model_data` rows (`module.name=model:res_id`). Catches additions or removals of XML data records (e.g., `noupdate="1"` records) that don't alter the schema.
 3. **Module-version fingerprint** — md5 hash of installed `ir_module_module.name=latest_version`. Catches a value-only migration: the schema and XML-ID set stay the same, but `-u` writes a new `latest_version`, so clones refresh.
+4. **Asset fingerprint** — md5 hash of `/web/assets/%` rows in `ir_attachment` (`url=checksum`). Ensures reused clones carry the exact web asset bundles that master pregenerated on the base DB, so workers can safely skip `IrQweb._pregenerate_assets_bundles()`.
 
 The XML-ID fingerprint was added because schema-only fingerprinting missed a common scenario: adding `noupdate="1"` data records (like Knowledge articles) during `-u` doesn't change any table columns, so stale clones were reused — causing `env.ref()` lookups in parallel workers to fail with missing records.
 
 The module-version fingerprint was added because a value-only migration (rewrite a field on an existing row, bump the manifest, `-u`) moved neither of the first two hashes. Symptom: the assertion passed standalone and failed under `--test-tags`. A version bump now misses the cache on its own. A `-u` that rewrites values **without** a version bump still needs `ODOO_TEST_REUSE_CLONES=false` (or `dropdb` the `{db}-worker-*` databases).
 
-**The worker count is not part of the key (since 2026-09-04).** A run needing N clones reuses the first N valid pool clones and creates only the missing ones; a run with fewer classes than the regular suite (fewer workers) creates nothing, and a run with more workers adds to the pool. Before, the count was in the key, so a subset run rebuilt all 19 clones (60 s under the old copy strategy) and the next regular run rebuilt them again. When the fingerprints do not match, the whole pool is dropped and rebuilt. Clone state (the three fingerprints and the pool's database names) is persisted to `/tmp/odoo_parallel_test_clones.json`; the log reports the specific reason for a miss (e.g., "Clone cache miss — module versions changed").
+**The worker count is not part of the key (since 2026-09-04).** A run needing N clones reuses the first N valid pool clones and creates only the missing ones; a run with fewer classes than the regular suite (fewer workers) creates nothing, and a run with more workers adds to the pool. Before, the count was in the key, so a subset run rebuilt all 19 clones (60 s under the old copy strategy) and the next regular run rebuilt them again. When the fingerprints do not match, the whole pool is dropped and rebuilt. Clone state (the four fingerprints and the pool's database names) is persisted to `/tmp/odoo_parallel_test_clones.json`; the log reports the specific reason for a miss (e.g., "Clone cache miss — module versions changed" or "assets changed").
 
-**Copy strategy (since 2026-09-04).** On PostgreSQL 15+ a clone is created with `CREATE DATABASE ... STRATEGY = FILE_COPY`. The default `WAL_LOG` strategy writes every block of the template through the WAL: alone a 115 MB clone took 3.1 s, six concurrent clones 9.9 s, and the 19-clone rebuild 60 s. `FILE_COPY` copies the files: 1.3 s alone, 1.5 s for six concurrent. Older servers keep `createdb -T`. Odoo.sh is unaffected either way, because the runner falls back to sequential there.
+**Copy strategy (since 2026-09-04) and pipelined bounded cloning (since 2026-11-27).** On PostgreSQL 15+ a clone is created with `CREATE DATABASE ... STRATEGY = FILE_COPY`. The default `WAL_LOG` strategy writes every block of the template through the WAL: alone a 115 MB clone took 3.1 s, six concurrent clones 9.9 s, and the 19-clone rebuild 60 s. `FILE_COPY` copies the files directly. Running all clones concurrently still saturates disk I/O and delays the first worker; `clone_databases()` therefore caps concurrent copies at `DEFAULT_CLONE_CONCURRENCY = 3` (`ODOO_TEST_CLONE_CONCURRENCY`), replicates each clone's hardlinked filestore immediately on completion, and calls `on_ready(worker_idx, clone_db)` so early workers boot and start pulling classes while later clones are still copying. On small subsets where early workers empty the queue before later clones finish, `_on_clone_ready` skips spawning idle workers (`remaining(queue_dir) == 0`). `drop_databases()` also skips `dropdb` for clone names that do not exist in `pg_database`. Older PostgreSQL servers keep `createdb -T`. Odoo.sh is unaffected either way, because the runner falls back to sequential there.
 
-**A state file written before the module-version fingerprint existed misses once, and blames the wrong thing.** An older `/tmp/odoo_parallel_test_clones.json` has no `version_fingerprint` key, so the saved value reads as `None` and can never match. The run therefore rebuilds clones one time and logs "module versions changed" even though nothing was updated. Do not go hunting a phantom `-u`: the next run writes the key and reuse resumes.
+**A state file written before a new fingerprint existed misses once.** An older `/tmp/odoo_parallel_test_clones.json` lacks the newer key (`version_fingerprint` or `asset_fingerprint`), so the saved value reads as `None` and misses once. The run rebuilds clones one time, writes the key, and reuse resumes on the next run.
 
 ### Worker filestore
 
@@ -155,15 +160,31 @@ The practical effect: `HttpCase.start_tour` browser tests and tests that render 
 
 | Env Variable | Default | Description |
 |-------------|---------|-------------|
-| `ODOO_TEST_WORKERS` | `min(32, max(2, cores))` | Number of parallel workers (capped at the number of test classes). With the queue, more workers than cores only add contention (see Performance) |
+| `ODOO_TEST_WORKERS` | `min(32, max(2, round(cores * 0.8)))` | Number of parallel workers (`14` on an 18-core laptop; capped at the number of test classes). Each worker drives both Python and PostgreSQL, so 100% of cores oversubscribes the machine (see Performance) |
 | `ODOO_TEST_PARALLEL` | `auto` | `auto` (if >1 class), `always`, `never` |
 | `ODOO_TEST_CLONE_PREFIX` | `{db}-worker-` | Clone database name pattern |
-| `ODOO_TEST_REUSE_CLONES` | `true` | Keep clone DBs between runs and reuse when schema + XML IDs + module versions unchanged |
+| `ODOO_TEST_CLONE_CONCURRENCY` | `3` | Maximum concurrent `CREATE DATABASE` copies during pipelined cloning |
+| `ODOO_TEST_REUSE_CLONES` | `true` | Keep clone DBs between runs and reuse when schema + XML IDs + module versions + assets are unchanged |
+| `ODOO_TEST_REPLAY_OUTPUT` | `false` | Set to `1`/`true` to replay full un-interleaved logs for green workers after live streaming |
 | `ODOO_TEST_STATS_FILE` | `/tmp/odoo_parallel_test_stats.json` | Path to the per-class duration stats file (queue order) |
 
 ## Performance
 
-Measured 2026-09-04 on a 16-core Apple Silicon laptop, the full regular tag set (`oteny_audit,riverflow,rivercreds,crewradar`, 4404 tests, 490 classes), clones reused from the pool (0.1 s):
+Measured 2026-11-27 on an 18-core Apple M5 Max (6 P-cores + 12 E-cores, 128 GB RAM), full offline `dev-to-test1` tag set (6,302 post-install tests across 727 classes), clones reused from the pool:
+
+| Workers | PostgreSQL `PGOPTIONS` | Parallel wall | Test work (sum over workers) | Notes |
+|--------:|------------------------|--------------:|-----------------------------:|-------|
+| 12 | `synchronous_commit=off`, `work_mem=32MB` | 97.6 s | 1,131.4 s | Under-utilizes 2 cores |
+| **14 (`round(cores * 0.8)`)** | **`synchronous_commit=off`, `work_mem=32MB`** | **91.8 s** | **1,235.7 s** | **Fastest wall time (new default)** |
+| 14 | default (`synchronous_commit=on`, `work_mem=4MB`) | 93.4 s | 1,256.9 s | +1.6 s slower |
+| 16 | `synchronous_commit=off`, `work_mem=32MB` | 105.7 s | 1,626.6 s | +32% contention inflation |
+| 18 (= cores) | `synchronous_commit=off`, `work_mem=32MB` | 105.8 s | 1,825.0 s | +48% contention inflation |
+
+Because each worker drives both a Python `odoo-bin` process and a PostgreSQL backend (plus headless Chrome on `HttpCase` tests), running one worker per core oversubscribes CPU and shared buffers once the queue keeps every worker busy until the end. Dropping the default from `cores` (18) to `round(cores * 0.8)` (14) cut wall time by 14 s and total CPU work by 32%.
+
+`FILE_COPY` clone concurrency sweep on the same laptop (18 fresh clones of a 90 MB database): concurrency 18 = 10.86 s first clone / 11.23 s total; concurrency 6 = 2.78 s / 8.09 s; **concurrency 3 (default) = 1.89 s first clone / 7.80 s total**; concurrency 1 = 0.97 s / 10.01 s. With pipelined `on_ready` worker startup and skipped worker asset pregeneration (`ODOO_PARALLEL_SKIP_ASSET_PREGEN=1`), workers boot in ~1.3 s (down from ~7 s) while later clones are still copying.
+
+Earlier measurement (2026-09-04) on a 16-core Apple Silicon laptop, the regular tag set (`oteny_audit,riverflow,rivercreds,crewradar`, 4404 tests, 490 classes), clones reused from the pool (0.1 s):
 
 | Runner | Workers | Wall | Worker finish spread | Test work (sum over workers) |
 |--------|---------|------|----------------------|------------------------------|

@@ -18,11 +18,12 @@ import os
 import re
 import sys
 import tempfile
+import threading
 import time
 
 from . import config, tasks
 from .discovery import class_key, get_test_class_key, group_tests_by_class, order_classes_longest_first
-from .queue import claim_next, create_queue
+from .queue import claim_next, create_queue, remaining
 
 _logger = logging.getLogger(__name__)
 
@@ -160,7 +161,7 @@ def _parallel_run(suite, global_report):
     """
     from .cloner import clone_databases, drop_databases
     from .locks import fit_workers
-    from .runner import spawn_workers, wait_for_workers
+    from .runner import spawn_worker, wait_for_workers
     from odoo.tests.result import OdooTestResult
     from odoo import tools
 
@@ -196,21 +197,71 @@ def _parallel_run(suite, global_report):
     tmpdir = tempfile.mkdtemp(prefix="odoo_parallel_tests_")
     queue_dir = create_queue(tmpdir, [class_key(cls) for cls, _tests in ordered])
 
-    # Clone databases
-    t_clone = time.time()
-    clone_names = clone_databases(db_name, actual_workers)
-    _logger.info("Cloning took %.1fs", time.time() - t_clone)
+    # Master already pregenerated all asset bundles on base_db before calling
+    # run_suite (preload_registries checks suite.has_http_case()), and cloner
+    # ensures every worker clone carries those exact bundles and filestore.
+    # Skipping _pregenerate_assets_bundles in workers avoids 18 redundant
+    # filesystem/view scans (~4s each).
+    extra_env = {"ODOO_PARALLEL_SKIP_ASSET_PREGEN": "1"}
+    _logger.info("Worker output directory: %s", tmpdir)
 
-    # Spawn workers
+    # Pipeline cloning and worker startup: spawn each worker as soon as its
+    # own clone and filestore replica are ready, overlapping DB cloning with
+    # worker registry boot and initial test execution.
+    workers = []
+    workers_lock = threading.Lock()
+
+    def _on_clone_ready(worker_idx, clone_db):
+        # On tiny subsets, early pipelined workers can finish the whole queue
+        # before later clones finish; skip spawning workers with nothing left.
+        if remaining(queue_dir) == 0:
+            return
+        worker = spawn_worker(worker_idx, clone_db, queue_dir, tmpdir, extra_env=extra_env)
+        with workers_lock:
+            workers.append(worker)
+
     t_run = time.time()
-    workers = spawn_workers(clone_names, queue_dir, tmpdir)
+    try:
+        clone_names = clone_databases(db_name, actual_workers, on_ready=_on_clone_ready)
+    except Exception:
+        with workers_lock:
+            spawned = list(workers)
+        for proc, _out, _res, _idx, out_fh, thread in spawned:
+            proc.kill()
+            proc.wait()
+            thread.join()
+            out_fh.close()
+        raise
+    _logger.info("Cloning took %.1fs", time.time() - t_run)
+
+    # Fallback if a mock replaced clone_databases without invoking on_ready.
+    with workers_lock:
+        spawned_indices = {w[3] for w in workers}
+    for i, clone_db in enumerate(clone_names):
+        if i not in spawned_indices:
+            _on_clone_ready(i, clone_db)
+    with workers_lock:
+        workers.sort(key=lambda w: w[3])
 
     # Wait and collect
     worker_results = wait_for_workers(workers)
     elapsed = time.time() - t_run
 
-    # Print worker output to master stdout so `| tee` captures everything
+    # Live streaming already wrote every worker line to master stdout (prefixed
+    # with [W{idx}]). Only replay full un-interleaved logs for workers that
+    # failed or crashed (or when ODOO_TEST_REPLAY_OUTPUT=1), avoiding a 6+ MB
+    # duplicate write on green runs.
+    replay_all = os.environ.get("ODOO_TEST_REPLAY_OUTPUT", "").lower() in ("1", "true", "yes")
     for wr in worker_results:
+        tr = wr["test_result"]
+        worker_failed = (
+            wr["returncode"] != 0
+            or not tr
+            or tr.get("failures_count", 0) > 0
+            or tr.get("errors_count", 0) > 0
+        )
+        if not replay_all and not worker_failed:
+            continue
         idx = wr["index"]
         output = wr["output"]
         if output.strip():
@@ -302,10 +353,14 @@ def _patched_run_suite(suite, global_report=None):
     2. Post-install phase with multiple classes: parallelize
     3. Everything else: run sequentially with the original function
     """
-    # Path 1: worker subprocess — pull classes from the shared queue
+    # Path 1: worker subprocess — pull post-install classes from the shared queue.
+    # Ignore at-install calls during module loading so workers do not log a
+    # spurious "ran 0 tests from 0 classes" or overwrite their result JSON early.
     queue_dir = os.environ.get("ODOO_PARALLEL_QUEUE")
     if queue_dir:
-        return _worker_run(suite, queue_dir, global_report)
+        if _is_post_install_phase():
+            return _worker_run(suite, queue_dir, global_report)
+        return _original_run_suite(suite, global_report=global_report)
 
     # Path 2: master, post-install, conditions met — parallelize
     if _is_post_install_phase() and _should_parallelize(suite):
@@ -323,6 +378,21 @@ def _patched_run_suite(suite, global_report=None):
 # ---------------------------------------------------------------------------
 
 
+def _patch_skip_asset_pregen():
+    """Skip redundant asset pregeneration inside parallel workers.
+
+    Master already pregenerated every bundle on base_db before cloning, and the
+    cloner replicated both ir_attachment rows and hardlinked filestore files.
+    """
+    from odoo.addons.base.models.ir_qweb import IrQweb
+
+    def _skip_pregenerate(self):
+        _logger.info("Skipping asset bundle pregeneration in parallel worker")
+        return []
+
+    IrQweb._pregenerate_assets_bundles = _skip_pregenerate
+
+
 def _apply():
     global _original_run_suite
 
@@ -330,6 +400,8 @@ def _apply():
 
     _original_run_suite = loader.run_suite
     loader.run_suite = _patched_run_suite
+    if os.environ.get("ODOO_PARALLEL_SKIP_ASSET_PREGEN") == "1":
+        _patch_skip_asset_pregen()
     _logger.info(
         "Parallel test runner patch applied (mode: %s, workers: %d)",
         config.get_parallel_mode(),

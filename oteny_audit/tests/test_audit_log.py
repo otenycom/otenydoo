@@ -688,3 +688,35 @@ class TestAuditLog(TransactionCase):
 
         self.assertEqual(len(logs), 1, "Should create exactly one snapshot log row for delete")
         self.assertEqual(logs.field_name, "__snapshot__")
+
+    def test_process_action_batch_creates_updates_and_deduplicates(self):
+        """Batched _process_action_batch creates new actions, updates existing ones,
+        and collapses duplicate xml_ids within one call."""
+        audit_log = self.env["oteny.audit.log"]
+        partner_model = self.env["ir.model"]._get("res.partner")
+        xml_id_a = "oteny_audit.action_audit_log_batch_test_a"
+        xml_id_b = "oteny_audit.action_audit_log_batch_test_b"
+
+        created, updated = audit_log._process_action_batch(
+            [
+                {"xml_id": xml_id_a, "name": "Audit A v1", "model_id": partner_model.id, "code": "pass"},
+                {"xml_id": xml_id_b, "name": "Audit B v1", "model_id": partner_model.id, "code": "pass"},
+                {"xml_id": xml_id_a, "name": "Audit A v2", "model_id": partner_model.id, "code": "pass"},
+            ],
+            "audit",
+        )
+        self.assertEqual((created, updated), (2, 1))
+        self.assertEqual(self.env.ref(xml_id_a).name, "Audit A v2")
+        self.assertEqual(self.env.ref(xml_id_b).name, "Audit B v1")
+
+        # Re-running updates both existing actions without creating duplicates.
+        created2, updated2 = audit_log._process_action_batch(
+            [
+                {"xml_id": xml_id_a, "name": "Audit A v3", "model_id": partner_model.id, "code": "pass"},
+                {"xml_id": xml_id_b, "name": "Audit B v2", "model_id": partner_model.id, "code": "pass"},
+            ],
+            "audit",
+        )
+        self.assertEqual((created2, updated2), (0, 2))
+        self.assertEqual(self.env.ref(xml_id_a).name, "Audit A v3")
+        self.assertEqual(self.env.ref(xml_id_b).name, "Audit B v2")

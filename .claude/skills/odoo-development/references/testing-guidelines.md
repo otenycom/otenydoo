@@ -82,9 +82,12 @@ cd <business-repo> && ../../odoo/venv/bin/python3 ../../odoo/odoo19/odoo-bin \
 |-------|--------|---------|
 | Single method | `.method_name` | `--test-tags=.test_site_id_required_for_actual_work` |
 | Functional area | `tag_name` | `--test-tags=test_billing` |
-| All module tests | `module_name` | `--test-tags=crewradar` |
+| Standard tests of a module | `/module_name` | `--test-tags=/crewradar` |
+| All tests of a module (incl. `-standard`) | `module_name` | `--test-tags=crewradar` |
 
 **Important**: Use `.method_name` format (with dot prefix), NOT `Class.method_name`.
+
+**Gating opt-in suites with `-standard`**: In Odoo 19's `TagsSelector`, every test class automatically carries its own module name as a tag. Passing a bare `--test-tags=<module>` matches `-standard` classes in that module too. Use `--test-tags=/<module>` when you want only standard tests of a module, and do not add bare module names to `@tagged(...)` on `-standard` opt-in classes (use `"post_install", "-at_install", "-standard", "<opt_in_tag>"`).
 
 ### Test Class Tags
 
@@ -314,6 +317,7 @@ Use `setUpClass` (runs once per class) instead of `setUp` (runs before every tes
 - A `riverflow.service` on `crewradar.log.entry` should use a **real** `res_id`. A fake `1` or `999999` no longer raises — `_compute_log_entry_id` resolves `res_id` through a batched `exists()`, so the subject degrades to "no log entry" and `employee_id` / `site_id` come back empty. That is a silent pass, not a correct test: an invented id gives the clone hooks nothing to bind to and quietly hollows out whatever the test meant to assert. Reuse the fixture entry when the test only needs a second **service**. Pin: `test_dangling_subject_reference_resolves_to_no_subject` in `crewradar/tests/test_log_entry_service.py`.
 - Combine related edge cases in single test for performance
 - Test both positive and negative scenarios
+- **Test contracts, not prompt prose or diagnostic logs.** For LLM prompts and knowledge articles, assert wiring, code-read JSON keys, and prompt-assembly invariants; do not assert exact natural-language substrings that break on copy edits. Never commit a diagnostic test method that only logs output without assertions.
 
 ```python
 @tagged("crewradar", "post_install", "-at_install", "test_logbook")

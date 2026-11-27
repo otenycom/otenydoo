@@ -320,3 +320,127 @@ class TestBotOneLiveSlotDrain(TransactionCase):
         )
         self.assertEqual(queued, waiting)
         self.assertNotIn(occupant, queued)
+
+    def test_work_exit_into_login_hold_resumes_no_park(self):
+        """Option B: a work exit into a bot_login_hold state (e.g. Needs Login)
+        proves the portal window is NOT signed in, so it must resume no park."""
+        default_action = self.env.ref("riverflow.transition_action_default")
+        hold = self._park_state("Parked Wall Exit")
+        self.env["riverflow.transition"].create({
+            "name": "Ask HR to log in",
+            "from_state_id": self.state_run.id,
+            "to_state_id": hold.id,
+            "action_id": default_action.id,
+            "bot_role": "work",
+            "sequence": 20,
+        })
+        occupant = self._make("RunWall", self.state_run)
+        self._make("ParkWaiter", hold)
+        resumed = []
+
+        def _resume(svc):
+            resumed.append(svc.id)
+            return True
+
+        with patch.object(type(self.Service), "_bot_resume_login_park", _resume):
+            occupant.with_context(bot_no_inline_dispatch=False).state_id = hold
+        self.assertEqual(resumed, [])
+
+    def test_escalate_exit_resumes_no_park_but_drains_queued_peer(self):
+        """Option B: an escalate / hand-back exit proves nothing about the
+        browser sign-in, so it resumes no park, while still draining queued peers."""
+        default_action = self.env.ref("riverflow.transition_action_default")
+        hold = self._park_state("Parked Behind Escalate")
+        esc_state = self.env["riverflow.state"].create({
+            "workflow_id": self.workflow.id,
+            "name": "Escalated",
+            "sequence": 40,
+        })
+        self.env["riverflow.transition"].create({
+            "name": "Hand Back",
+            "from_state_id": self.state_run.id,
+            "to_state_id": esc_state.id,
+            "action_id": default_action.id,
+            "bot_role": "escalate",
+            "sequence": 30,
+        })
+        occupant = self._make("RunEsc", self.state_run)
+        self._make("ParkEsc", hold)
+        resumed = []
+
+        def _resume(svc):
+            resumed.append(svc.id)
+            return True
+
+        with patch.object(type(self.Service), "_bot_resume_login_park", _resume):
+            occupant.with_context(bot_no_inline_dispatch=False).state_id = esc_state
+        self.assertEqual(resumed, [])
+
+        # Queued peer still drains on an escalate exit
+        occupant2 = self._make("RunEscQ", self.state_run)
+        queued = self._make("QueuedEsc", self.state_queue)
+        dispatched = []
+
+        def _dispatch(svc):
+            dispatched.append(svc.id)
+            return True
+
+        with patch.object(type(self.Service), "_bot_dispatch_one", _dispatch):
+            occupant2.with_context(bot_no_inline_dispatch=False).state_id = esc_state
+        self.assertEqual(dispatched, [queued.id])
+
+    def test_bot_reap_timeout_exit_resumes_no_park(self):
+        """Option B: a timeout reaper exit (bot_reap=True or is_bot_timeout=True)
+        never resumes a login park."""
+        default_action = self.env.ref("riverflow.transition_action_default")
+        hold = self._park_state("Parked Behind Reap")
+        timeout_state = self.env["riverflow.state"].create({
+            "workflow_id": self.workflow.id,
+            "name": "Timed Out",
+            "sequence": 45,
+        })
+        self.env["riverflow.transition"].create({
+            "name": "Timeout Work",
+            "from_state_id": self.state_run.id,
+            "to_state_id": timeout_state.id,
+            "action_id": default_action.id,
+            "bot_role": "work",
+            "is_bot_timeout": True,
+            "sequence": 35,
+        })
+        resumed = []
+
+        def _resume(svc):
+            resumed.append(svc.id)
+            return True
+
+        # 1. Context bot_reap=True even on a normal work target
+        occupant1 = self._make("RunReapCtx", self.state_run)
+        self._make("ParkReap", hold)
+        with patch.object(type(self.Service), "_bot_resume_login_park", _resume):
+            occupant1.with_context(
+                bot_no_inline_dispatch=False, bot_reap=True
+            ).state_id = self.state_done
+        self.assertEqual(resumed, [])
+
+        # 2. Transition marked is_bot_timeout=True
+        occupant2 = self._make("RunReapTrans", self.state_run)
+        with patch.object(type(self.Service), "_bot_resume_login_park", _resume):
+            occupant2.with_context(bot_no_inline_dispatch=False).state_id = timeout_state
+        self.assertEqual(resumed, [])
+
+    def test_leaving_login_hold_non_work_resumes_no_park(self):
+        """Option B: leaving a bot_login_hold state (e.g. human cancel) never
+        resumes another park because old_state.bot_stage != 'in_progress'."""
+        hold = self._park_state("Parked Hold Exit")
+        leaver = self._make("LeaveHold", hold)
+        self._make("OtherPark", hold)
+        resumed = []
+
+        def _resume(svc):
+            resumed.append(svc.id)
+            return True
+
+        with patch.object(type(self.Service), "_bot_resume_login_park", _resume):
+            leaver.with_context(bot_no_inline_dispatch=False).state_id = self.state_done
+        self.assertEqual(resumed, [])

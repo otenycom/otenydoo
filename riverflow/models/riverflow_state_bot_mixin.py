@@ -144,22 +144,29 @@ class RiverflowStateBotMixin(models.AbstractModel):
 
         When a record LEAVES a slot-holding state (``in_progress`` or ``bot_login_hold``),
         drain the oldest queued peer of the same workflow. If no queue peer waits,
-        resume one fresh SLA-less login park (``_bot_resume_login_park``). The 3-min
-        cron is still the correctness belt for queue; it does not promote parks.
-        Inline drain is latency sugar. Opt out with ``bot_no_inline_dispatch``
+        resume one fresh SLA-less login park (``_bot_resume_login_park``) ONLY when
+        the record left an ``in_progress`` state through a signed-in ``work`` exit
+        (``is_bot_timeout=False``, target not ``bot_login_hold``, not ``bot_reap``).
+        The 3-min cron is still the correctness belt for queue; it does not promote
+        parks. Inline drain is latency sugar. Opt out with ``bot_no_inline_dispatch``
         (same flag as inline dispatch)."""
         leaving_slot = self.browse()
+        old_states = {}
         if "state_id" in vals and not self.env.context.get("bot_no_inline_dispatch"):
+            new_state_id = vals["state_id"]
             leaving_slot = self.filtered(
-                lambda r: r.active and (
+                lambda r: r.active
+                and r.state_id.id != new_state_id
+                and (
                     r.state_id.bot_stage == "in_progress" or r.state_id.bot_login_hold
                 )
             )
+            old_states = {r.id: r.state_id for r in leaving_slot}
         res = super().write(vals)
         if "state_id" in vals:
             self._bot_dispatch_inline()
             if leaving_slot:
-                leaving_slot._bot_drain_peers()
+                leaving_slot._bot_drain_peers(old_states=old_states)
         return res
 
     @api.model_create_multi
@@ -454,21 +461,43 @@ class RiverflowStateBotMixin(models.AbstractModel):
             domain.append(("id", "!=", occupant.id))
         return self.search(domain)
 
-    def _bot_drain_peers(self):
+    def _bot_drain_peers(self, old_states=None):
         """Dispatch the oldest queued peer of the same workflow.
 
         Called after a record leaves a slot-holding state. Each peer goes through
         ``_bot_dispatch_inline`` (savepoint per record, swallow-and-log). A failed
         drain never rolls back the exit that freed the slot. The cron belt retries
         queue. One attempt is enough: the claimed peer drains the next one when
-        it exits. If no queue peer waits, resume one fresh SLA-less login park.
+        it exits. If no queue peer waits and this exit proved a signed-in run,
+        resume one fresh SLA-less login park.
         """
         if self.env.context.get("bot_no_inline_dispatch"):
             return
+        old_states = old_states or {}
         for record in self.filtered(lambda r: r.active):
-            record._bot_drain_one_peer()
+            record._bot_drain_one_peer(old_state=old_states.get(record.id))
 
-    def _bot_drain_one_peer(self):
+    def _bot_exit_signed_in(self, old_state):
+        """True only when this record left an ``in_progress`` state through an
+        active non-timeout ``work`` transition into a non-login-hold state,
+        outside a reaper context. Only such an exit proves the sibling ended on
+        the portal signed in."""
+        self.ensure_one()
+        if not old_state or old_state.bot_stage != "in_progress":
+            return False
+        if not self.state_id or self.state_id == old_state or self.state_id.bot_login_hold:
+            return False
+        if self.env.context.get("bot_reap"):
+            return False
+        return bool(self.env["riverflow.transition"].sudo().search([
+            ("from_state_id", "=", old_state.id),
+            ("to_state_id", "=", self.state_id.id),
+            ("bot_role", "=", "work"),
+            ("is_bot_timeout", "=", False),
+            ("active", "=", True),
+        ], limit=1))
+
+    def _bot_drain_one_peer(self, old_state=None):
         self.ensure_one()
         workflow = self.state_id.workflow_id
         if not workflow or not workflow.active:
@@ -487,7 +516,8 @@ class RiverflowStateBotMixin(models.AbstractModel):
             if peer:
                 peer._bot_dispatch_inline()
                 return
-        self._bot_drain_login_park()
+        if self._bot_exit_signed_in(old_state):
+            self._bot_drain_login_park()
 
     def _bot_sla_less_login_hold_states(self, workflow):
         """States that park a human without occupying the one live slot."""
@@ -547,6 +577,9 @@ class RiverflowStateBotMixin(models.AbstractModel):
     def _bot_resume_login_park(self):
         """Domain hook: advance this SLA-less login park into its resume queue.
 
+        Precondition: called by ``_bot_drain_one_peer`` only after a sibling
+        freed the slot through a signed-in ``work`` exit from an ``in_progress``
+        state (not a login-wall park, an escalation, a timeout, or a reaper).
         Base is a no-op. An app writes the park into the login-resume queue
         state so ``_bot_dispatch_inline`` claims it. Do not mint a claim here.
         """

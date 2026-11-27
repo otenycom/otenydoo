@@ -219,7 +219,11 @@ in `finalize_constraints`, after the `end-migrate` scripts. So an end-migrate th
 rows lets the index come in the same upgrade; a release check confirms it in `pg_indexes`, because
 a failure there is only a warning and the upgrade does not stop. Example: radar
 `crewradar.site._eni_one_current_ship_version` and migration `crewradar/19.0.13.16`
-(23-Nov-2026).
+(23-Nov-2026). An end-migrate that repairs named records rests on the data of its analysis: a row
+that users write on production after it breaks the index again. So repeat the release check on the
+newest production backup before the merge and the deploy. On 27-Nov-2026 the backup of 25-Nov-2026
+had a new duplicate ENI that the analysis of 23-Nov-2026 could not see, and the migration got one
+more record.
 
 ### An `_order` needs a unique tie-breaker, and a queue loop sets its own order
 

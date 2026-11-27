@@ -16,11 +16,10 @@ class OtenyAuditLogRef(models.Model):
         "oteny.audit.log",
         required=True,
         ondelete="cascade",
-        index=True,
         string="Audit Log Entry",
     )
-    target_model_name = fields.Char(required=True, index=True, string="Target Model")
-    target_record_id = fields.Integer(required=True, index=True, string="Target Record ID")
+    target_model_name = fields.Char(required=True, string="Target Model")
+    target_record_id = fields.Integer(required=True, string="Target Record ID")
     target_display_name = fields.Char(string="Target Record Name")
     parent_display_name = fields.Char(string="Parent Record Name")
     is_direct = fields.Boolean(default=True, string="Is Direct Reference")

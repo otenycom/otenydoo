@@ -148,8 +148,13 @@ patch(FormController.prototype, {
         // window. useEffect runs after OWL has patched the DOM with the
         // new className, and the rAF inside it lets the browser apply
         // layout and paint before we synthesize the resize event.
+        let wideEffectInitialized = false;
         useEffect(
             () => {
+                if (!wideEffectInitialized) {
+                    wideEffectInitialized = true;
+                    return;
+                }
                 requestAnimationFrame(() => {
                     window.dispatchEvent(new Event("resize"));
                 });

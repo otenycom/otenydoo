@@ -23,6 +23,7 @@ class RiverflowWorkflowStateRecordTrackerMixin(models.AbstractModel):
         compute="_compute_state_record_id",
         store=True,
         readonly=True,
+        index=True,
         ondelete="set null",
         help="Primary state record for this master record (used for backwards compatibility)",
     )

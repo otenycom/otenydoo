@@ -28,6 +28,7 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
         help="Used to remember the front office workflow, once the state is set to a back office workflow. The front office workflow is used to flag if the service is a supply order.",
         compute="_compute_front_office_workflow_id",
         store=True,
+        index=True,
     )
 
     state_id = fields.Many2one(
@@ -111,25 +112,38 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
 
     @api.depends("state_id", "state_id.from_transition_ids")
     def _compute_from_transition_ids(self):
+        Transition = self.env["riverflow.transition"]
+        state_ids = {s.state_id.id for s in self if s.state_id}
+        start_wf_ids = {s.workflow_id.id for s in self if not s.state_id and s.workflow_id}
+
+        by_state = {}
+        if state_ids:
+            transitions = Transition.search([("from_state_id", "in", list(state_ids))], order="sequence,id")
+            for trans in transitions:
+                by_state.setdefault(trans.from_state_id.id, []).append(trans.id)
+
+        by_workflow = {}
+        if start_wf_ids:
+            start_transitions = Transition.search(
+                [("from_state_id", "=", False), ("workflow_id", "in", list(start_wf_ids))],
+                order="workflow_name,sequence,id",
+            )
+            for trans in start_transitions:
+                by_workflow.setdefault(trans.workflow_id.id, []).append(trans.id)
+
+        all_ids = [tid for tids in by_state.values() for tid in tids] + [
+            tid for tids in by_workflow.values() for tid in tids
+        ]
+        prefetch_ids = tuple(dict.fromkeys(all_ids)) if all_ids else ()
+
         for s in self:
-            if not s.state_id:
-                if s.workflow_id:
-                    domain = [
-                        ("from_state_id", "=", False),
-                        ("workflow_id", "=", s.workflow_id.id),
-                    ]
-                    s.from_transition_ids = self.env["riverflow.transition"].search(
-                        domain, order="workflow_name,sequence,id"
-                    )
-                else:
-                    s.from_transition_ids = []
+            if s.state_id:
+                tids = by_state.get(s.state_id.id)
+            elif s.workflow_id:
+                tids = by_workflow.get(s.workflow_id.id)
             else:
-                s.from_transition_ids = self.env["riverflow.transition"].search(
-                    [
-                        ("from_state_id", "=", s.state_id.id),
-                    ],
-                    order="sequence,id",
-                )
+                tids = None
+            s.from_transition_ids = Transition.browse(tids).with_prefetch(prefetch_ids) if tids else Transition
 
     def _compute_state_json(self):
         # for rendering just the state name and workflow name
@@ -189,7 +203,7 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
             deadline=self._format_bot_working_clock(deadline),
         )
 
-    def _transition_button(self, transition, index, primary):
+    def _transition_button(self, transition, index, primary, extras_cache=None):
         """One button row for ``transition_buttons_json``. Extracted so the live-claim branch
         below can render the abort with exactly the shape every other button has — a second
         copy of this dict would drift the moment a key is added."""
@@ -208,7 +222,13 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
                 "transition_id": transition_id,
             },
         }
-        button.update(self._transition_button_extras(transition))
+        if extras_cache is not None and transition_id in extras_cache:
+            extras = extras_cache[transition_id]
+        else:
+            extras = self._transition_button_extras(transition)
+            if extras_cache is not None:
+                extras_cache[transition_id] = extras
+        button.update(extras)
         return button
 
     @api.depends(
@@ -222,10 +242,12 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
     )
     def _compute_transition_buttons_json(self):
         # for rendering the transition buttons below the state name
+        sees_bot_work = self._user_sees_bot_work_transitions()
+        hide_bot_work = not sees_bot_work
+        extras_cache = {}
         for record in self:
             transition_buttons = dict(record.state_json or {})
             transition_buttons["buttons"] = []
-            sees_bot_work = record._user_sees_bot_work_transitions()
             if (
                 hasattr(record, "_bot_claim_is_live")
                 and record._bot_claim_is_live()
@@ -241,11 +263,10 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
                 abort = record.state_id.bot_timeout_transition()
                 if abort:
                     transition_buttons["buttons"] = [
-                        record._transition_button(abort, 0, False)]
+                        record._transition_button(abort, 0, False, extras_cache=extras_cache)]
                 record.transition_buttons_json = transition_buttons
                 continue
             transition_ids = record.from_transition_ids
-            hide_bot_work = not sees_bot_work
             no_primary = bool(
                 record.state_id
                 and record.state_id.is_owned_by_bot
@@ -267,7 +288,7 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
 
                     primary = (not no_primary) and index == 0
                     transition_buttons["buttons"].append(
-                        record._transition_button(transition, index, primary))
+                        record._transition_button(transition, index, primary, extras_cache=extras_cache))
                     index += 1
 
             record.transition_buttons_json = transition_buttons
@@ -288,6 +309,18 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
         )
 
     def _compute_state_id_statusbar_json(self):
+        State = self.env["riverflow.state"]
+        wf_ids = {
+            (r.state_id.workflow_id.id if r.state_id else r.workflow_id.id)
+            for r in self
+        }
+        wf_ids.discard(False)
+        states_by_wf = {}
+        if wf_ids:
+            all_states = State.search([("workflow_id", "in", list(wf_ids))])
+            for state in all_states:
+                states_by_wf.setdefault(state.workflow_id.id, []).append(state)
+
         for record in self:
             current_state_id = record.state_id
             if current_state_id:
@@ -295,11 +328,11 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
             else:
                 workflow_id = record.workflow_id.id
 
-            state_ids = self.env["riverflow.state"].search([("workflow_id", "=", workflow_id)])
+            state_ids = states_by_wf.get(workflow_id, ())
 
-            json = {"states": []}
+            status_json = {"states": []}
             is_first = True
-            is_last = False
+            last_visible_state = None
 
             for state in state_ids:
                 if current_state_id:
@@ -309,7 +342,8 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
                     is_first = False
 
                 if not state.hide_in_statusbar or is_current_state:
-                    json["states"].append(
+                    last_visible_state = state
+                    status_json["states"].append(
                         {
                             "value": state.id,
                             "label": state.name,
@@ -318,21 +352,17 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
                         }
                     )
 
-            record.state_id_statusbar_json = json
+            record.state_id_statusbar_json = status_json
 
             # Check if last state has transition to another workflow
-            if not json["states"]:
+            if not last_visible_state or not last_visible_state.from_transition_ids:
                 continue
 
-            last_state = self.env["riverflow.state"].browse(json["states"][-1]["value"])
-            if not last_state.from_transition_ids:
-                continue
-
-            first_transition = last_state.from_transition_ids[0]
-            if first_transition.to_state_id.workflow_id != last_state.workflow_id:
+            first_transition = last_visible_state.from_transition_ids[0]
+            if first_transition.to_state_id.workflow_id != last_visible_state.workflow_id:
                 # Add the target state to next workflow (e.g 'Registered' of 'Back office' workflow)
                 target_state = first_transition.to_state_id
-                json["states"].append(
+                status_json["states"].append(
                     {
                         "value": target_state.id,
                         "label": target_state.name,
@@ -341,7 +371,7 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
                     }
                 )
 
-            record.state_id_statusbar_json = json
+            record.state_id_statusbar_json = status_json
 
     def _is_transition_offered(self, transition):
         """Whether this record shows the button of ``transition`` from its state.
@@ -356,10 +386,10 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
         """Keys the form widget ignores. A bot reads them from the same JSON."""
         keys = self._transition_action_context_keys(transition)
         parsed = {key: True for key in keys}
-        default = self.env.ref(
+        default_id = self.env["ir.model.data"]._xmlid_to_res_id(
             "riverflow.transition_action_default", raise_if_not_found=False
         )
-        if default and transition.action_id == default:
+        if default_id and transition.action_id.id == default_id:
             visible = bool(
                 parsed.get("followup_in_days") or parsed.get("snooze_deadline_days")
             )
@@ -446,6 +476,9 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
 
     @api.model_create_multi
     def create(self, vals_list):
+        state_ids = {vals["state_id"] for vals in vals_list if vals.get("state_id")}
+        if state_ids:
+            self.env["riverflow.state"].browse(list(state_ids)).fetch(["workflow_id"])
         for vals in vals_list:
             self._sync_workflow_with_state(vals)
         records = super().create(vals_list)
@@ -487,7 +520,7 @@ class RiverflowWorkflowStateMixin(RiverflowTransitionMixin):
                 "is_end_state": record.is_end_state,
             }
 
-    @api.depends("from_transition_ids", "state_id.is_end_state")
+    @api.depends("state_id.is_end_state")
     def _compute_is_end_state(self):
         for record in self:
             if record.state_id:

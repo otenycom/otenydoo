@@ -163,10 +163,16 @@ class OtenyAuditLog(models.Model):
 
     @api.depends("model_name", "record_id")
     def _compute_record_ref(self):
+        by_model = defaultdict(set)
         for log in self:
             if log.model_name and log.record_id and log.model_name in self.env:
-                record = self.env[log.model_name].browse(log.record_id).exists()
-                log.record_ref = f"{log.model_name},{record.id}" if record else False
+                by_model[log.model_name].add(log.record_id)
+        existing = {}
+        for model_name, ids in by_model.items():
+            existing[model_name] = set(self.env[model_name].browse(list(ids)).exists().ids)
+        for log in self:
+            if log.model_name and log.record_id and log.record_id in existing.get(log.model_name, ()):
+                log.record_ref = f"{log.model_name},{log.record_id}"
             else:
                 log.record_ref = False
 
@@ -205,6 +211,29 @@ class OtenyAuditLog(models.Model):
         "ir.model.constraint",
     }
 
+    _DEFAULT_IGNORED_MODEL_PREFIXES = (
+        "oteny.audit",
+        "ir.ui.view",
+        "ir.model.data",
+        "bus.",
+        "mail.push",
+        "mail.tracking",
+        "res.device.log",
+    )
+
+    @classmethod
+    def _is_model_cls_default_ignored(cls, model_cls, model_name):
+        cached = model_cls.__dict__.get("_oteny_audit_default_ignored")
+        if cached is not None:
+            return cached
+        ignored = (
+            getattr(model_cls, "_transient", False)
+            or model_name in cls._DEFAULT_IGNORED_MODEL_NAMES
+            or model_name.startswith(cls._DEFAULT_IGNORED_MODEL_PREFIXES)
+        )
+        model_cls._oteny_audit_default_ignored = ignored
+        return ignored
+
     def _is_audit_ignored(self, model_name):
         """Check if a model should be ignored by the audit log."""
         if self.env.context.get("oteny_audit_ignore", False):
@@ -212,37 +241,14 @@ class OtenyAuditLog(models.Model):
 
         # Model may exist in ir.model (database) but no longer in the registry
         # (e.g. after a module dropped a model). Can't audit what doesn't exist.
-        try:
-            model_class = self.env[model_name]
-        except KeyError:
+        model_cls = self.env.registry.get(model_name)
+        if model_cls is None:
             return True
-        if hasattr(model_class, "_oteny_audit_ignore"):
-            return model_class._oteny_audit_ignore
+        explicit = getattr(model_cls, "_oteny_audit_ignore", None)
+        if explicit is not None:
+            return bool(explicit)
 
-        # Ignore TransientModel models (wizards) by default
-        if getattr(model_class, "_transient", False):
-            return True
-
-        # Default-ignore for high-noise infrastructure models (see comment on
-        # _DEFAULT_IGNORED_MODEL_NAMES above). A model in this set can still
-        # opt back in by setting _oteny_audit_ignore = False.
-        if model_name in self._DEFAULT_IGNORED_MODEL_NAMES:
-            return True
-
-        # Ignore system models by default, can be overridden by _oteny_audit_ignore in the model
-        ignored_model_prefixes = [
-            "oteny.audit",
-            "ir.ui.view",
-            "ir.model.data",
-            "bus.",
-            "mail.push",
-            "mail.tracking",
-            "res.device.log",
-        ]
-        if any(model_name.startswith(prefix) for prefix in ignored_model_prefixes):
-            return True
-
-        return False
+        return self._is_model_cls_default_ignored(model_cls, model_name)
 
     @api.model
     def _log_remark(self, records, key, label, text):

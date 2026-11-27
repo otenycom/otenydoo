@@ -341,6 +341,139 @@ def _should_skip_audit_logging(env):
     return False
 
 
+def _is_model_audit_ignored(model):
+    """Fast model-level audit ignore check without constructing an oteny.audit.log recordset."""
+    cls = type(model)
+    explicit = getattr(cls, "_oteny_audit_ignore", None)
+    if explicit is not None:
+        return bool(explicit)
+    cached = cls.__dict__.get("_oteny_audit_default_ignored")
+    if cached is not None:
+        return cached
+    from .oteny_audit_log import OtenyAuditLog
+
+    return OtenyAuditLog._is_model_cls_default_ignored(cls, model._name)
+
+
+def _get_txid(env):
+    """Return PostgreSQL txid_current(), cached once per transaction."""
+    audit_data = env.cr.precommit.data.setdefault("oteny_audit", {})
+    txid = audit_data.get("txid")
+    if txid is None:
+        env.cr.execute("SELECT txid_current()")
+        txid = env.cr.fetchone()[0]
+        audit_data["txid"] = txid
+    return txid
+
+
+def _resolve_parent_references_batch(env, records, max_depth=3):
+    """Batch breadth-first equivalent of _resolve_parent_reference_unified(env, record, max_depth).
+
+    Returns {record.id: [parent_ref_dict, ...]} ordered immediate -> top-most,
+    using one batched exists() + prefetched display_name pass per distinct parent
+    model per depth instead of per-record singleton queries.
+    """
+    resolved = {rec.id: [] for rec in records}
+    if not records or max_depth <= 0:
+        return resolved
+
+    parent_keys = getattr(env["oteny.audit.log"], "_model_parent_keys", {})
+    frontier = [(rec.id, rec) for rec in records]
+
+    for depth in range(max_depth):
+        if not frontier:
+            break
+        # Group frontier by current record model so field reads stay prefetched.
+        by_model = defaultdict(list)
+        for orig_id, cur_rec in frontier:
+            by_model[cur_rec._name].append((orig_id, cur_rec))
+
+        # Step 1: extract (orig_id, parent_model_name, parent_record_id) for this depth.
+        pending = []  # (orig_id, parent_model_name, parent_record_id)
+        parent_ids_by_model = defaultdict(set)
+
+        for model_name, items in by_model.items():
+            sample_cls = items[0][1].__class__
+            parent_config = getattr(sample_cls, "_oteny_audit_parent_field", None) or parent_keys.get(model_name)
+            if not parent_config:
+                continue
+            fields_map = items[0][1]._fields
+            if "," in parent_config:
+                config_fields = [f.strip() for f in parent_config.split(",")]
+                if len(config_fields) != 2:
+                    continue
+                model_field, id_field = config_fields
+                if model_field not in fields_map or id_field not in fields_map:
+                    continue
+                for orig_id, cur_rec in items:
+                    try:
+                        p_model = cur_rec[model_field]
+                        p_id = cur_rec[id_field]
+                    except Exception:
+                        continue
+                    if p_model and p_id and p_model in env:
+                        pending.append((orig_id, p_model, p_id))
+                        parent_ids_by_model[p_model].add(p_id)
+            else:
+                parent_field = parent_config
+                if parent_field not in fields_map:
+                    continue
+                for orig_id, cur_rec in items:
+                    try:
+                        p_rec = cur_rec[parent_field]
+                    except Exception:
+                        continue
+                    if p_rec:
+                        p_model = p_rec._name
+                        p_id = p_rec.id
+                        pending.append((orig_id, p_model, p_id))
+                        parent_ids_by_model[p_model].add(p_id)
+
+        if not pending:
+            break
+
+        # Step 2: batch existence check and prefetched display_name lookup per parent model.
+        existing_parents = {}  # (model_name, id) -> prefetched parent record
+        parent_names = {}  # (model_name, id) -> display_name
+        for p_model, p_ids in parent_ids_by_model.items():
+            try:
+                p_records = env[p_model].sudo().browse(sorted(p_ids)).exists()
+                has_dn = hasattr(p_records, "display_name")
+                for p_rec in p_records:
+                    key = (p_model, p_rec.id)
+                    existing_parents[key] = p_rec
+                    if has_dn:
+                        try:
+                            parent_names[key] = p_rec.display_name
+                        except Exception:
+                            pass
+            except Exception:
+                continue
+
+        # Step 3: record refs and prepare next depth frontier.
+        next_frontier = []
+        for orig_id, p_model, p_id in pending:
+            key = (p_model, p_id)
+            p_rec = existing_parents.get(key)
+            if p_rec is not None and key in parent_names:
+                p_display = parent_names[key]
+            else:
+                p_display = _recover_unlinked_display_name(env, p_model, p_id) or f"ID: {p_id}"
+            resolved[orig_id].append(
+                {
+                    "parent_model_name": p_model,
+                    "parent_record_id": p_id,
+                    "parent_display_name": p_display,
+                }
+            )
+            if p_rec is not None and depth < max_depth - 1:
+                next_frontier.append((orig_id, p_rec))
+
+        frontier = next_frontier
+
+    return resolved
+
+
 def _create_audit_log_references(env, model, log_records):
     """
     Create the parent references of audit logs: a child log points to each of its parents,
@@ -356,7 +489,7 @@ def _create_audit_log_references(env, model, log_records):
         model: The model class being audited.
         log_records: A recordset of `oteny.audit.log`.
     """
-    if not log_records:
+    if not log_records or not _parent_config_fields(env, model):
         return
 
     refs = []
@@ -368,45 +501,36 @@ def _create_audit_log_references(env, model, log_records):
         logs_by_record_id[log.record_id].append(log)
 
     if logs_by_record_id:
-        # Browse all source records at once
-        records_with_logs = env[model._name].sudo().browse(list(logs_by_record_id.keys()))
+        # Batch browse and existence check once for all source records
+        records_with_logs = env[model._name].sudo().browse(list(logs_by_record_id.keys())).exists()
+        if not records_with_logs:
+            return
+
+        parent_refs_by_id = _resolve_parent_references_batch(env, records_with_logs, max_depth=3)
 
         for record in records_with_logs:
-            # Check if the record still exists before trying to access its fields
-            if not record.exists():
+            all_parent_refs = parent_refs_by_id.get(record.id)
+            if not all_parent_refs:
                 continue
+            for parent_ref_data in all_parent_refs:
+                parent_model_name = parent_ref_data["parent_model_name"]
+                parent_record_id = parent_ref_data["parent_record_id"]
+                parent_display_name = parent_ref_data["parent_display_name"]
 
-            try:
-                # Use unified parent resolution with recursion support
-                # The function will determine the appropriate config for each record individually
-                # and return all parent references found through recursion (ordered: immediate -> top-most)
-                all_parent_refs = _resolve_parent_reference_unified(env, record, max_depth=3)
-
-                # Create parent reference records for each level of recursion
-                # List order: [immediate_parent, grandparent, great-grandparent, ...]
-                if all_parent_refs:
-                    for parent_ref_data in all_parent_refs:
-                        parent_model_name = parent_ref_data["parent_model_name"]
-                        parent_record_id = parent_ref_data["parent_record_id"]
-                        parent_display_name = parent_ref_data["parent_display_name"]
-
-                        # Create parent reference for each audit log of this record
-                        for log in logs_by_record_id[record.id]:
-                            refs.append(
-                                {
-                                    "audit_log_id": log.id,
-                                    "target_model_name": parent_model_name,
-                                    "target_record_id": parent_record_id,
-                                    "target_display_name": log.record_display_name,  # Use child's display name for child logs
-                                    "parent_display_name": parent_display_name,  # Store parent display name separately
-                                    "is_direct": False,
-                                    "create_date": log.create_date,
-                                    "transaction_id": log.transaction_id,
-                                }
-                            )
-            except Exception:
-                # Failsafe for cases where parent record might be deleted or access rights issues.
-                continue
+                # Create parent reference for each audit log of this record
+                for log in logs_by_record_id[record.id]:
+                    refs.append(
+                        {
+                            "audit_log_id": log.id,
+                            "target_model_name": parent_model_name,
+                            "target_record_id": parent_record_id,
+                            "target_display_name": log.record_display_name,  # Use child's display name for child logs
+                            "parent_display_name": parent_display_name,  # Store parent display name separately
+                            "is_direct": False,
+                            "create_date": log.create_date,
+                            "transaction_id": log.transaction_id,
+                        }
+                    )
 
     # Bulk create all references
     if refs:
@@ -579,8 +703,7 @@ def _create_audit_logs(env, model, logs):
         )
         return
 
-    env.cr.execute("SELECT txid_current()")
-    txid = env.cr.fetchone()[0]
+    txid = _get_txid(env)
     for log in logs:
         log["transaction_id"] = txid
 
@@ -703,12 +826,16 @@ def _safe_convert_to_cache(field, raw_value, record):
         return str(raw_value)
 
 
-def _get_display_value(field, value, record_env):
+def _get_display_value(field, value, record_env, m2o_names=None, selection_maps=None):
     """Helper to get the display value for a field's value."""
     if value is None or value is False:
         return ""
     try:
         if field.type == "many2one" and isinstance(value, int):
+            if m2o_names is not None:
+                comodel_map = m2o_names.get(field.comodel_name)
+                if comodel_map is not None and value in comodel_map:
+                    return comodel_map[value]
             return record_env[field.comodel_name].sudo().browse(value).display_name
         if field.type in ["one2many", "many2many"] and isinstance(value, (list, tuple)):
             records = record_env[field.comodel_name].sudo().browse(list(value))
@@ -716,6 +843,12 @@ def _get_display_value(field, value, record_env):
         if field.type == "selection":
             # The label, not the technical value ("Incoming Email", not "email").
             # get_values() returns the values only, so the label never showed before 19.0.1.723.
+            if selection_maps is not None:
+                sel_map = selection_maps.get(field)
+                if sel_map is None:
+                    sel_map = dict(field._description_selection(record_env))
+                    selection_maps[field] = sel_map
+                return sel_map.get(value, str(value))
             return dict(field._description_selection(record_env)).get(value, str(value))
     except Exception:
         # Fallback to string representation in case of errors (e.g., deleted records)
@@ -731,7 +864,7 @@ def patched_create(self, vals_list):
     if (
         not self.env.registry.loaded
         or _should_skip_audit_logging(self.env)
-        or self.env["oteny.audit.log"]._is_audit_ignored(self._name)
+        or _is_model_audit_ignored(self)
     ):
         return original_create(self, vals_list)
 
@@ -789,7 +922,7 @@ def patched_unlink(self):
     if (
         not self.env.registry.loaded
         or _should_skip_audit_logging(self.env)
-        or self.env["oteny.audit.log"]._is_audit_ignored(self._name)
+        or _is_model_audit_ignored(self)
     ):
         return original_unlink(self)
 
@@ -1023,7 +1156,7 @@ def patched_write(self, vals):
     if (
         not self.env.registry.loaded
         or _should_skip_audit_logging(self.env)
-        or self.env["oteny.audit.log"]._is_audit_ignored(self._name)
+        or _is_model_audit_ignored(self)
     ):
         return original_write(self, vals)
 
@@ -1068,7 +1201,8 @@ def patched_write(self, vals):
                     logged_changes[field] -= set(self.ids)
 
         dirty_fields = self.env._field_dirty
-        # Pre-fetch scalar fields not in cache to get their old values
+        # Pre-fetch scalar fields not in cache to get their old values without
+        # _classic_read comodel display_name lookups.
         records_to_read_ids = {
             rec.id
             for rec in self
@@ -1078,7 +1212,7 @@ def patched_write(self, vals):
             and not self.env.cache.contains(rec, field)
         }
         if records_to_read_ids:
-            self.sudo().browse(list(records_to_read_ids)).read(list(scalar_fields.keys()))
+            self.sudo().browse(list(records_to_read_ids)).fetch(list(scalar_fields.keys()))
 
         for record in self:
             for name, field in scalar_fields.items():
@@ -1107,7 +1241,7 @@ def patched_write(self, vals):
                 continue
             old_rec_vals = old_values_map.get(record.id, {})
             new_rec_vals = new_values_map.get(record.id, {})
-            record_display_name = _audit_record_name(self, record)
+            record_display_name = None
 
             for name, field in relational_fields.items():
                 old_ids = old_rec_vals.get(name, [])
@@ -1122,6 +1256,8 @@ def patched_write(self, vals):
                 # Odoo's read() returns a list of IDs for m2m.
                 # To compare, we can just compare the sets of IDs.
                 if set(old_ids) != set(new_ids):
+                    if record_display_name is None:
+                        record_display_name = _audit_record_name(self, record)
                     # To get display values, we need to browse.
                     old_records = self.env[field.comodel_name].sudo().browse(old_ids)
                     new_records = self.env[field.comodel_name].sudo().browse(new_ids)
@@ -1173,7 +1309,7 @@ def patched_flush(self, fnames=None):
     if (
         not self.env.registry.loaded
         or _should_skip_audit_logging(self.env)
-        or self.env["oteny.audit.log"]._is_audit_ignored(self._name)
+        or _is_model_audit_ignored(self)
     ):
         return original_flush(self)
 
@@ -1241,22 +1377,54 @@ def patched_flush(self, fnames=None):
         }
         all_ids -= skipped_ids
 
-    # Get display names for all affected records
-    display_names = {}
-    for rec in self.sudo().browse(all_ids):
-        display_names[rec.id] = _audit_record_name(self, rec)
+    if not all_ids:
+        return original_flush(self)
 
-    # Collect old values
+    # Records created in this transaction emit no update row; only parent-field
+    # changes need processing (_parent_refs_for_insert_transaction). Fast-path
+    # all other fields of same-transaction inserts without querying DB or
+    # computing display names.
+    insert_log_ids = _live_insert_log_ids(self.env, self, all_ids)
+    parent_fields = _parent_config_fields(self.env, self) if insert_log_ids else set()
+
+    active_batches = {}
+    active_ids = set()
+    for name, rids in batches.items():
+        field = loggable_fields_dict[name]
+        keep = set()
+        for rid in rids:
+            if rid in skipped_ids:
+                continue
+            if rid in insert_log_ids and name not in parent_fields:
+                logged_changes[field].add(rid)
+                continue
+            keep.add(rid)
+        if keep:
+            active_batches[name] = keep
+            active_ids.update(keep)
+
+    if not active_ids:
+        original_flush(self)
+        if "old_values" in audit_data:
+            audit_old_values = audit_data["old_values"]
+            for name, field in loggable_fields_dict.items():
+                if field in audit_old_values:
+                    field_old_values = audit_old_values[field]
+                    for rid in batches.get(name, ()):
+                        field_old_values.pop(rid, None)
+                    if not field_old_values:
+                        del audit_old_values[field]
+        return
+
+    # Collect old values only for records/fields that still need diffing
     old_values = {}
     missing_queries = defaultdict(list)  # field: [ids needing DB query]
     audit_old_values = audit_data.get("old_values", {})
-    # Track all record IDs that need to be checked for existence
-    all_record_ids_to_check = set()
 
-    for name, field in loggable_fields_dict.items():
+    for name, rids in active_batches.items():
+        field = loggable_fields_dict[name]
         field_old_values = audit_old_values.get(field, {})
-        for rid in batches.get(name, []):
-            all_record_ids_to_check.add(rid)
+        for rid in rids:
             if rid in field_old_values:
                 old_values.setdefault(rid, {})[name] = field_old_values[rid]
             else:
@@ -1281,13 +1449,14 @@ def patched_flush(self, fnames=None):
                 self.env.cr.execute(query)
                 db_data_map = {row["id"]: row for row in self.env.cr.dictfetchall()}
 
+                missing_recs_by_id = {r.id: r for r in self.sudo().browse(all_missing_ids)}
                 for field in all_missing_fields:
                     if field.name not in field_names:
                         continue
                     for rid in missing_queries[field]:
                         row = db_data_map.get(rid)
                         if row:
-                            record = self.sudo().browse(rid)
+                            record = missing_recs_by_id[rid]
                             val = _safe_convert_to_cache(field, row[field.name], record)
                             old_values.setdefault(rid, {})[field.name] = val
                         elif rid in newly_created:
@@ -1297,36 +1466,37 @@ def patched_flush(self, fnames=None):
     # Perform original flush
     original_flush(self)
 
-    # After flush, re-read all flushed fields to get their new values
-    # Use oteny_audit_ignore context to prevent infinite recursion
-    if all_ids:
-        new_values_list = (
-            self.sudo()
-            .browse(list(all_ids))
-            .with_context(oteny_audit_ignore=True)
-            .read(list(loggable_fields_dict.keys()))
-        )
-        new_values_map = {rec["id"]: rec for rec in new_values_list}
-    else:
-        new_values_map = {}
+    # Read post-flush values directly from ORM cache (fetching only missing cache entries),
+    # avoiding _classic_read's per-Many2one comodel display_name queries.
+    active_records = self.sudo().browse(sorted(active_ids)).with_context(oteny_audit_ignore=True)
+    active_by_id = {rec.id: rec for rec in active_records}
+    cache = self.env.cache
+    need_fetch_fields = []
+    for name, rids in active_batches.items():
+        field = loggable_fields_dict[name]
+        if any(not cache.contains(active_by_id[rid], field) for rid in rids):
+            need_fetch_fields.append(name)
+    if need_fetch_fields:
+        active_records.fetch(need_fetch_fields)
 
-    # Log changes using old and new values
-    logs = []
     if "most_recent_logs" not in audit_data:
         audit_data["most_recent_logs"] = defaultdict(lambda: defaultdict(dict))
     most_recent_logs = audit_data["most_recent_logs"]
 
-    insert_log_ids = _live_insert_log_ids(self.env, self, all_ids)
     insert_changes = defaultdict(set)
-    for name, field in loggable_fields_dict.items():
-        for rid in batches.get(name, []):
-            if rid in skipped_ids:
-                continue
-            record = self.sudo().browse(rid)
-            old_val = old_values.get(rid, {}).get(name)
+    pending_updates = []  # (name, field, rid, record, old_val, new_val)
+    changed_rids = set()
+    m2o_ids_by_comodel = defaultdict(set)
 
-            new_val_raw = new_values_map.get(rid, {}).get(name)
-            new_val = _safe_convert_to_cache(field, new_val_raw, record)
+    for name, rids in active_batches.items():
+        field = loggable_fields_dict[name]
+        is_m2o = field.type == "many2one"
+        for rid in rids:
+            record = active_by_id[rid]
+            old_val = old_values.get(rid, {}).get(name)
+            new_val = cache.get(record, field) if cache.contains(record, field) else None
+            if isinstance(new_val, dict):
+                new_val = _safe_convert_to_cache(field, new_val, record)
 
             if rid in insert_log_ids:
                 # Created in this transaction: no row; the record holds the value at the
@@ -1344,43 +1514,63 @@ def patched_flush(self, fnames=None):
                     and most_recent.get("new_value") == new_val
                 ):
                     continue
+                pending_updates.append((name, field, rid, record, old_val, new_val))
+                changed_rids.add(rid)
+                if is_m2o:
+                    if isinstance(old_val, int):
+                        m2o_ids_by_comodel[field.comodel_name].add(old_val)
+                    if isinstance(new_val, int):
+                        m2o_ids_by_comodel[field.comodel_name].add(new_val)
 
-                # The insert row of the record holds its id only; a change after the
-                # transaction of the create is always an update row.
-                change_type = "u"
+    # Batch-prefetch display names only for records/comodels that actually changed
+    logs = []
+    if pending_updates:
+        display_names = {}
+        for rec in self.sudo().browse(sorted(changed_rids)):
+            display_names[rec.id] = _audit_record_name(self, rec)
 
-                old_val_display = _get_display_value(field, old_val, record.env)
-                new_val_display = _get_display_value(field, new_val, record.env)
+        m2o_names = {}
+        for comodel_name, cids in m2o_ids_by_comodel.items():
+            try:
+                comodel_recs = self.env[comodel_name].sudo().browse(sorted(cids)).exists()
+                m2o_names[comodel_name] = {r.id: r.display_name for r in comodel_recs}
+            except Exception:
+                pass
+        selection_maps = {}
 
-                old_value_raw = str(old_val) if old_val is not None else ""
-                new_value_raw = str(new_val) if new_val is not None else ""
-                # Measure 2: strip HTML to plain text for fields marked as strippable.
-                old_value_raw = _maybe_strip_html(self, name, old_value_raw)
-                new_value_raw = _maybe_strip_html(self, name, new_value_raw)
-                old_val_display = _maybe_strip_html(self, name, old_val_display)
-                new_val_display = _maybe_strip_html(self, name, new_val_display)
-                # A scalar write is the main leak path: a rotation puts BOTH the old and the
-                # new credential in one row.
-                old_value_raw = _maybe_redact(self, field, old_value_raw, record)
-                new_value_raw = _maybe_redact(self, field, new_value_raw, record)
-                old_val_display = _maybe_redact(self, field, old_val_display, record)
-                new_val_display = _maybe_redact(self, field, new_val_display, record)
+        for name, field, rid, record, old_val, new_val in pending_updates:
+            old_val_display = _get_display_value(field, old_val, record.env, m2o_names, selection_maps)
+            new_val_display = _get_display_value(field, new_val, record.env, m2o_names, selection_maps)
 
-                logs.append(
-                    {
-                        "model_name": self._name,
-                        "record_id": rid,
-                        "record_display_name": display_names.get(rid, f"ID: {rid}"),
-                        "field_name": name,
-                        "field_display_name": field.string,
-                        "old_value": old_value_raw,
-                        "new_value": new_value_raw,
-                        "old_value_display_name": old_val_display,
-                        "new_value_display_name": new_val_display,
-                        "change_type": change_type,
-                    }
-                )
-                most_recent_logs[field][rid] = {"old_value": old_val, "new_value": new_val}
+            old_value_raw = str(old_val) if old_val is not None else ""
+            new_value_raw = str(new_val) if new_val is not None else ""
+            # Measure 2: strip HTML to plain text for fields marked as strippable.
+            old_value_raw = _maybe_strip_html(self, name, old_value_raw)
+            new_value_raw = _maybe_strip_html(self, name, new_value_raw)
+            old_val_display = _maybe_strip_html(self, name, old_val_display)
+            new_val_display = _maybe_strip_html(self, name, new_val_display)
+            # A scalar write is the main leak path: a rotation puts BOTH the old and the
+            # new credential in one row.
+            old_value_raw = _maybe_redact(self, field, old_value_raw, record)
+            new_value_raw = _maybe_redact(self, field, new_value_raw, record)
+            old_val_display = _maybe_redact(self, field, old_val_display, record)
+            new_val_display = _maybe_redact(self, field, new_val_display, record)
+
+            logs.append(
+                {
+                    "model_name": self._name,
+                    "record_id": rid,
+                    "record_display_name": display_names.get(rid, f"ID: {rid}"),
+                    "field_name": name,
+                    "field_display_name": field.string,
+                    "old_value": old_value_raw,
+                    "new_value": new_value_raw,
+                    "old_value_display_name": old_val_display,
+                    "new_value_display_name": new_val_display,
+                    "change_type": "u",
+                }
+            )
+            most_recent_logs[field][rid] = {"old_value": old_val, "new_value": new_val}
 
     if insert_changes:
         _parent_refs_for_insert_transaction(self.env, self, insert_log_ids, insert_changes)

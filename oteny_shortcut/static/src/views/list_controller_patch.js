@@ -19,15 +19,19 @@ patch(ListController.prototype, {
         // Kept as long as the corresponding shortcut is active; cleared on deactivation.
         this._storedColumnWidths = null;
 
-        // After each render, apply stored column widths via requestAnimationFrame
-        // so they override the base column-width hook's computed values before paint.
-        useEffect(() => {
-            if (this._storedColumnWidths) {
-                requestAnimationFrame(() => {
-                    this._applyColumnWidthsToDOM();
-                });
-            }
-        });
+        // After renders where column widths or loaded records changed, apply stored
+        // column widths via requestAnimationFrame so they override the base
+        // column-width hook's computed values before paint.
+        useEffect(
+            () => {
+                if (this._storedColumnWidths) {
+                    requestAnimationFrame(() => {
+                        this._applyColumnWidthsToDOM();
+                    });
+                }
+            },
+            () => [this._storedColumnWidths, this.model.root.records]
+        );
 
         useSubEnv({
             shortcutLayout: {

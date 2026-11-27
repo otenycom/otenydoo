@@ -23,12 +23,17 @@ class RiverflowStateRecord(models.Model):
         "(master_model, master_res_id, record_type)",
         "This record already has a Radar row of this type.",
     )
+    _res_model_res_id_idx = models.Index("(res_model, res_id)")
+    _open_display_order_idx = models.Index(
+        "(display_order, id) WHERE active IS TRUE AND is_end_state IS FALSE"
+    )
 
     active = fields.Boolean(
         default=True,
         help="Set active to false to archive the service",
         compute="_compute_active",
         store=True,
+        index=True,
     )
     is_subject = fields.Boolean(
         string="Is Subject",
@@ -83,7 +88,7 @@ class RiverflowStateRecord(models.Model):
         help="Combined searchable text (subject, display name, and any extension terms) "
         "for the Radar Name search box.",
     )
-    master_model = fields.Char(string="Master Model", required=True, index=True)
+    master_model = fields.Char(string="Master Model", required=True)
     master_res_id = fields.Integer(string="Master Record ID", required=True, index=True)
     master_record_id_computed = fields.Integer(
         string="Master Record ID Computed",
@@ -140,7 +145,6 @@ class RiverflowStateRecord(models.Model):
         string="Subject of Service Sortable Name",
         compute="_compute_res_sortable_name",
         store=True,
-        index="trigram",
     )
     res_date = fields.Date(
         string="Subject Date",
@@ -244,6 +248,7 @@ class RiverflowStateRecord(models.Model):
         compute="_compute_workflow_id",
         readonly=True,
         store=True,
+        index=True,
     )
     current_workflow_name = fields.Char(
         "Workflow name",
@@ -318,6 +323,7 @@ class RiverflowStateRecord(models.Model):
         string="Company",
         compute="_compute_company_id",
         store=True,
+        index=True,
         required=False,
     )
 
@@ -365,7 +371,7 @@ class RiverflowStateRecord(models.Model):
                 record.master_model = False
                 record.master_res_id = False
 
-    @api.depends("service_id.indented_name", "name")
+    @api.depends("indent_level", "name")
     def _compute_indented_name(self):
         for slave in self:
             if slave.indent_level == 0:
@@ -500,7 +506,31 @@ class RiverflowStateRecord(models.Model):
         For subjects: use their own deadline
         For services: use the deadline of their subject (via res_id lookup)
         """
-        for record in self:
+        # Preload subject state records in one batch per res_model so fallback
+        # lookups in _get_subject_deadline_for_service do not N+1.
+        subject_deadlines = None
+        if len(self) > 1:
+            ids_by_model = defaultdict(set)
+            for rec in self:
+                if not rec.is_subject and rec.service_id and rec.res_model and rec.res_id:
+                    ids_by_model[rec.res_model].add(rec.res_id)
+            if ids_by_model:
+                subject_deadlines = {}
+                for model_name, res_ids in ids_by_model.items():
+                    subjects = self.search(
+                        [
+                            ("master_model", "=", model_name),
+                            ("master_res_id", "in", list(res_ids)),
+                            ("is_subject", "=", True),
+                        ]
+                    )
+                    for subj in subjects:
+                        key = (model_name, subj.master_res_id)
+                        if key not in subject_deadlines:
+                            subject_deadlines[key] = subj.deadline
+
+        ctx_self = self.with_context(_rf_subject_deadlines=subject_deadlines) if subject_deadlines is not None else self
+        for record in ctx_self:
             if record.is_subject:
                 # Subject records use their own deadline
                 record.res_date = record.deadline
@@ -508,7 +538,7 @@ class RiverflowStateRecord(models.Model):
                 # For service records, try to get the deadline from the subject
                 # First check if we can access it through service relationships
                 # (this will be overridden in inheriting modules for better performance)
-                subject_deadline = self._get_subject_deadline_for_service(record)
+                subject_deadline = ctx_self._get_subject_deadline_for_service(record)
                 record.res_date = subject_deadline if subject_deadline else record.deadline
             else:
                 record.res_date = record.deadline
@@ -518,6 +548,9 @@ class RiverflowStateRecord(models.Model):
         This method can be overridden in inheriting modules for better performance.
         """
         if record.res_model and record.res_id:
+            cached = self.env.context.get("_rf_subject_deadlines")
+            if cached is not None:
+                return cached.get((record.res_model, record.res_id), False)
             # Find the subject record (where master_model/master_res_id matches this service's res_model/res_id)
             subject_record = self.search(
                 [

@@ -163,15 +163,40 @@ patch(X2ManyField.prototype, {
      */
     get x2manyShortcuts() {
         const record = this.props.record;
+        const shortcuts = this.shortcutState.shortcuts;
+        const resModel = record.resModel;
+        const resId = record.resId || false;
+        const fieldName = this.props.name;
+        const userContext = user.context;
+        const cache = this._x2manyShortcutsCache;
+        if (
+            cache &&
+            cache.shortcuts === shortcuts &&
+            cache.resModel === resModel &&
+            cache.resId === resId &&
+            cache.fieldName === fieldName &&
+            cache.userContext === userContext
+        ) {
+            return cache.result;
+        }
         const context = showWhenContext({
-            subject: record.resModel,
-            subjectId: record.resId || false,
-            field: this.props.name,
+            subject: resModel,
+            subjectId: resId,
+            field: fieldName,
             view: "form",
         });
-        return this.shortcutState.shortcuts.filter((shortcut) =>
+        const result = shortcuts.filter((shortcut) =>
             isShortcutShown(shortcut.shortcut_show_when, context)
         );
+        this._x2manyShortcutsCache = {
+            shortcuts,
+            resModel,
+            resId,
+            fieldName,
+            userContext,
+            result,
+        };
+        return result;
     },
 
     get hasX2ManyShortcuts() {

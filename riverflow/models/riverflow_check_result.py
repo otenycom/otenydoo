@@ -27,6 +27,7 @@ class CheckResult(models.Model):
         ondelete="cascade",
         compute="_compute_state_record_id",
         store=True,
+        index="btree_not_null",
     )
 
     # A check result can hang on a service (riverflow.service.check_result_ids). An app

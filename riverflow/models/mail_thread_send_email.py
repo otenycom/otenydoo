@@ -31,8 +31,9 @@ class MailThread(models.AbstractModel):
                 mode = thread._riverflow_chatter_email_mode()
                 values = {"riverflowEmailMode": mode, "riverflowIncomingEmailIds": [], "riverflowSentEmailIds": []}
                 if mode == EMAIL_MODE_SEND_EMAIL and thread.id:
-                    values["riverflowIncomingEmailIds"] = thread._riverflow_incoming_emails().ids
-                    values["riverflowSentEmailIds"] = thread._riverflow_sent_emails().ids
+                    incoming = thread._riverflow_incoming_emails()
+                    values["riverflowIncomingEmailIds"] = incoming.ids
+                    values["riverflowSentEmailIds"] = thread._riverflow_sent_emails(incoming=incoming).ids
                 store.add(thread, values, as_thread=True)
 
     # ------------------------------------------------------------
@@ -88,7 +89,7 @@ class MailThread(models.AbstractModel):
             .sorted(lambda m: (m.date, m.id))
         )
 
-    def _riverflow_sent_emails(self):
+    def _riverflow_sent_emails(self, incoming=None):
         """The e-mails that went out from this record to an outside contact, oldest first.
 
         A message of the Discussions subtype whose recipients hold a contact that is not
@@ -99,8 +100,10 @@ class MailThread(models.AbstractModel):
         self.ensure_one()
         discussions = self.env.ref("mail.mt_comment")
         Recipients = self.env["riverflow.mail.send.mixin"]
+        if incoming is None:
+            incoming = self._riverflow_incoming_emails()
         return (
-            (self.message_ids - self._riverflow_incoming_emails())
+            (self.message_ids - incoming)
             .filtered(
                 lambda m: m.message_type in ("email", "comment")
                 and m.subtype_id == discussions

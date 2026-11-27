@@ -187,8 +187,12 @@ class MailThreadReviewMixin(models.AbstractModel):
 
     def write(self, vals):
         """Override write to send notification when responsible team changes"""
-        # Store original values before the write for comparison
-        old_teams = {record.id: record.responsible_team_id for record in self}
+        # Only read original teams when responsible_team_id is actually written
+        # and handover notifications are enabled.
+        check_team = "responsible_team_id" in vals and not self.env.context.get(
+            "skip_responsible_team_notification"
+        )
+        old_teams = {record.id: record.responsible_team_id for record in self} if check_team else None
 
         # Perform the actual write
         result = super().write(vals)
@@ -198,7 +202,7 @@ class MailThreadReviewMixin(models.AbstractModel):
         # (the bounce review copies the parent's team onto a new service) is
         # not a handover. The handover notice posts into the team channel,
         # and that post can email the channel members.
-        if "responsible_team_id" in vals and not self.env.context.get("skip_responsible_team_notification"):
+        if check_team:
             for record in self:
                 old_team = old_teams.get(record.id)
                 new_team = record.responsible_team_id
@@ -297,34 +301,11 @@ class MailThreadReviewMixin(models.AbstractModel):
         This field contains messages that have a sender who is not an internal user of the system.
         """
 
-        def _is_from_external_sender(message):
-            # Also tried this, but if a reply is made from an email address linked to a user,
-            #  it will not be considered an external message, which is not helpful for testing
-            # return not message.author_id or not any(
-            #     user.has_group("base.group_user")
-            #     for user in message.author_id.user_ids
-            # )
-
-            # the inbound message robot posts customer messages as the system user
-            is_created_by_system_user = message.create_uid.id == self._get_system_user_id()
-            return is_created_by_system_user
-
+        sys_uid = self._get_system_user_id()
         for record in self:
-            if False and is_neutralized_or_development():
-                # _logger.warning(
-                #     "Running in development or neutralized mode, skipping external sender filtering"
-                # )
-                record.message_from_external_sender_ids = record.external_message_ids
-            else:
-                # _logger.info(
-                #     "Running in production mode, filtering external sender messages"
-                # )
-                messages_from_external_senders = self.env["mail.message"]
-                for message in record.external_message_ids:
-                    if _is_from_external_sender(message):
-                        messages_from_external_senders |= message
-
-                record.message_from_external_sender_ids = messages_from_external_senders
+            record.message_from_external_sender_ids = record.external_message_ids.filtered(
+                lambda m: m.create_uid.id == sys_uid
+            )
 
     def _format_message_for_summary(self, message):
         text = message.body or message.subject or ""
@@ -346,10 +327,11 @@ class MailThreadReviewMixin(models.AbstractModel):
         formatted_messages = [self._format_message_for_summary(message) for message in sorted_messages[:3]]
         if len(formatted_messages) > 0:
             summary = "\n".join(formatted_messages)
+            changed = self[field_name] != summary
             self[field_name] = summary
             # A new message is a user change of the stored record. An onchange computes the
             # summary again on its copy of the record (a NewId): that is no change.
-            if self.id:
+            if self.id and changed:
                 self._update_user_write_date()
         else:
             self[field_name] = False  # needed for Odoo search

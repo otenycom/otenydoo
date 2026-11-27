@@ -16,6 +16,7 @@ export class TransitionButtons extends Component {
         ...standardFieldProps,
         maxButtons: { type: String, optional: true },
         layout: { type: String, optional: true },
+        viewType: { type: String, optional: true },
     };
 
     setup() {
@@ -39,13 +40,20 @@ export class TransitionButtons extends Component {
 
         // Form header: fold the transition buttons into one dropdown button when they
         // do not fit next to the statusbar. Adjust after every render and on a window
-        // resize, as Odoo's statusbar does (statusbar_field.js).
-        useEffect(() => this.adjustHeaderButtons());
-        useExternalListener(
-            window,
-            "resize",
-            throttleForAnimation(() => this.adjustHeaderButtons())
-        );
+        // resize, as Odoo's statusbar does (statusbar_field.js). Skip registering the
+        // effect and window listener on list/kanban rows where header folding never runs.
+        if (
+            this.props.layout === "form_header" ||
+            this.fieldValue(this.props).layout === "form_header" ||
+            this.props.viewType === "form"
+        ) {
+            useEffect(() => this.adjustHeaderButtons());
+            useExternalListener(
+                window,
+                "resize",
+                throttleForAnimation(() => this.adjustHeaderButtons())
+            );
+        }
     }
 
     /**
@@ -430,6 +438,7 @@ export const transitionButtons = {
     extractProps: ({ attrs, options, viewType }, dynamicInfo) => ({
         maxButtons: attrs.max_buttons || "5",
         layout: attrs.layout || "list",
+        viewType,
     }),
 };
 

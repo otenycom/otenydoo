@@ -1083,9 +1083,21 @@ class OtenyBotSession(models.Model):
 
     @api.depends("turn_ids", "turn_ids.tool_call_count")
     def _compute_turn_metrics(self):
+        if not self.ids:
+            for s in self:
+                s.turn_count = len(s.turn_ids)
+                s.tool_call_count = sum(s.turn_ids.mapped("tool_call_count"))
+            return
+        rows = self.env["oteny.bot.turn"].sudo()._read_group(
+            [("session_id", "in", self.ids)],
+            groupby=["session_id"],
+            aggregates=["__count", "tool_call_count:sum"],
+        )
+        metrics = {session.id: (cnt, tc or 0) for session, cnt, tc in rows}
         for s in self:
-            s.turn_count = len(s.turn_ids)
-            s.tool_call_count = sum(s.turn_ids.mapped("tool_call_count"))
+            cnt, tc = metrics.get(s.id, (0, 0))
+            s.turn_count = cnt
+            s.tool_call_count = tc
 
     @api.depends("response")
     def _compute_response_first_line(self):
@@ -1407,11 +1419,11 @@ class OtenyBotTurn(models.Model):
 
     session_id = fields.Many2one("oteny.bot.session", required=True, ondelete="cascade", index=True)
     sequence = fields.Integer(default=10)
-    system_prompt = fields.Text(readonly=True)
-    user_message = fields.Text(readonly=True)
-    llm_response = fields.Text(readonly=True)
+    system_prompt = fields.Text(readonly=True, prefetch=False)
+    user_message = fields.Text(readonly=True, prefetch=False)
+    llm_response = fields.Text(readonly=True, prefetch=False)
     tool_calls = fields.Json(
-        "Tool Calls", readonly=True,
+        "Tool Calls", readonly=True, prefetch=False,
         help="This turn's tool calls (name, args, result) — the exchange detail an admin reviews.")
     tool_call_count = fields.Integer(readonly=True)
     llm_model = fields.Char("LLM Model", readonly=True)

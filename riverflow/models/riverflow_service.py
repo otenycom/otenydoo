@@ -42,6 +42,11 @@ class Service(models.Model):
     # Without this index each lookup scanned the whole table (3-7 ms on 35k
     # services), which a single log-entry edit repeats dozens of times.
     _res_model_res_id_idx = models.Index("(res_model, res_id)")
+    _is_root_template_idx = models.Index("(id) WHERE is_root_a_template")
+    _is_this_template_idx = models.Index("(id) WHERE is_this_a_template")
+    _open_deadline_idx = models.Index(
+        "(deadline, id DESC) WHERE active IS TRUE AND is_end_state IS FALSE"
+    )
     # One open service per subject on a workflow that enforces it
     # (riverflow.workflow.enforce_single_open; radar pipeline applicants plan,
     # decision 66). The auto-add already drops a second candidate
@@ -74,6 +79,7 @@ class Service(models.Model):
     created_by_auto_add_service_id = fields.Many2one(
         "riverflow.auto.add.service",
         string="Created by Auto Add Rule",
+        index="btree_not_null",
         help="The auto add rule that created this service. The system can use this to determine if the rule that created the service is still applicable.",
     )
     auto_add_context_ref = fields.Char(
@@ -181,6 +187,12 @@ class Service(models.Model):
     root_id = fields.Many2one(
         "riverflow.service", compute="_compute_root_id", store=True, recursive=True, index=True
     )
+    # Reverse relations used by Odoo's _modified_triggers to resolve dependent
+    # tree services and state records from ORM cache instead of per-write SQL.
+    root_descendant_ids = fields.One2many("riverflow.service", "root_id", string="Tree Services")
+    state_record_service_ids = fields.One2many(
+        "riverflow.state.record", "service_id", string="Service State Records"
+    )
     root_name = fields.Char(
         "Top-level service name",
         compute="_compute_root_name",
@@ -207,7 +219,6 @@ class Service(models.Model):
         compute="_compute_display_name",
         store=True,
         index="trigram",
-        recursive=True,
     )
     company_id = fields.Many2one(
         "res.company",
@@ -553,6 +564,7 @@ class Service(models.Model):
         string="Supplier",
         help="The partner that is supplying the service",
         required=False,
+        index="btree_not_null",
         tracking=True,
     )
 
@@ -596,6 +608,7 @@ class Service(models.Model):
         "riverflow.service.leg",
         "Supply Order Leg",
         readonly=True,
+        index="btree_not_null",
         help="Links back to the 'taxi booking' leg that generated this leg-info service",
     )
 
@@ -717,9 +730,22 @@ class Service(models.Model):
         for service in self:
             service.is_supply_order = service.front_office_workflow_id.is_supply_order
 
+    def _get_existing_subjects_by_key(self):
+        """Batch-resolve existing subject records grouped by res_model to keep ORM prefetch."""
+        ids_by_model = {}
+        for service in self:
+            if service.res_id and service.res_model and service.res_model in self.env:
+                ids_by_model.setdefault(service.res_model, set()).add(service.res_id)
+        subjects = {}
+        for model_name, res_ids in ids_by_model.items():
+            for rec in self.env[model_name].sudo().browse(sorted(res_ids)).exists():
+                subjects[(model_name, rec.id)] = rec
+        return subjects
+
     # inheriting classes can override this method to add their own dependencies, "resource_ref.display_name"
     @api.depends("res_model", "res_id")
     def _compute_res_name(self):
+        subjects = self._get_existing_subjects_by_key()
         for service in self:
             if not service.res_id or not service.res_model:
                 service.res_name = False
@@ -729,8 +755,8 @@ class Service(models.Model):
                 # Skip if the container model is not yet loaded in the environment
                 #  (during upgrades of the module, when the container is a module dependent on riverflow)
                 continue
-            subject = self.env[service.res_model].sudo().browse(service.res_id)
-            if not subject.exists():
+            subject = subjects.get((service.res_model, service.res_id))
+            if not subject:
                 service.res_name = False
                 service.res_sortable_name = False
                 continue
@@ -775,7 +801,7 @@ class Service(models.Model):
                 service.root_id = service.id  # Or handle as appropriate
 
     @api.depends(
-        "name", "parent_id.display_name", "supply_leg_id.name", "supply_leg_id.service_id.name", "state_name"
+        "name", "parent_id.name", "supply_leg_id.name", "supply_leg_id.service_id.name"
     )
     def _compute_display_name(self):
         for service in self:
@@ -803,15 +829,42 @@ class Service(models.Model):
 
     @api.depends("child_ids")
     def _compute_descendant_ids(self):
-        for service in self:
-            descendants = self.env["riverflow.service"].search(
-                [
-                    ("parent_path", "=like", f"{service.parent_path}%"),
-                    ("id", "!=", service.id),
-                ],
+        # Every descendant shares the same indexed root_id. Querying by root_id
+        # avoids a full sequential scan from `parent_path =like` under non-C
+        # PostgreSQL collations and batches across the whole recordset.
+        Service = self.env["riverflow.service"]
+        root_ids = {s.root_id.id for s in self if s.root_id and s.parent_path}
+        by_root = {}
+        all_candidates = Service
+        if root_ids:
+            all_candidates = Service.search(
+                [("root_id", "in", list(root_ids))],
                 order="root_name,root_id,display_order",
             )
-            service.descendant_ids = descendants
+            for candidate in all_candidates:
+                by_root.setdefault(candidate.root_id.id, []).append(candidate)
+
+        prefetch_ids = all_candidates._prefetch_ids
+        for service in self:
+            if not service.parent_path:
+                service.descendant_ids = Service
+                continue
+            if service.root_id:
+                prefix = service.parent_path
+                desc_ids = [
+                    c.id
+                    for c in by_root.get(service.root_id.id, ())
+                    if c.id != service.id and c.parent_path and c.parent_path.startswith(prefix)
+                ]
+                service.descendant_ids = Service.browse(desc_ids).with_prefetch(prefetch_ids) if desc_ids else Service
+            else:
+                service.descendant_ids = Service.search(
+                    [
+                        ("parent_path", "=like", f"{service.parent_path}%"),
+                        ("id", "!=", service.id),
+                    ],
+                    order="root_name,root_id,display_order",
+                )
 
     @api.depends("parent_path")
     def _compute_indent_level(self):
@@ -1366,12 +1419,16 @@ class Service(models.Model):
         service keeps its company. Modules that know the subject's model add its company to the
         dependencies, because a compute cannot depend on the res_model/res_id pair.
         """
+        needs_subject = self.filtered(
+            lambda r: not r.supply_order_service_id.company_id and not r.parent_id.company_id
+        )
+        subjects = needs_subject._get_existing_subjects_by_key() if needs_subject else {}
         for record in self:
-            company = (
-                record.supply_order_service_id.company_id
-                or record.parent_id.company_id
-                or record._get_subject_company()
-            )
+            company = record.supply_order_service_id.company_id or record.parent_id.company_id
+            if not company and record.res_model and record.res_id:
+                subject = subjects.get((record.res_model, record.res_id))
+                if subject and "company_id" in subject._fields:
+                    company = subject.company_id
             if company:
                 record.company_id = company
             elif not record.company_id:
@@ -2481,15 +2538,13 @@ class Service(models.Model):
     @api.depends("res_model", "res_id")
     def _compute_subject_active(self):
         """Track the active state of the subject record"""
+        subjects = self._get_existing_subjects_by_key()
         for service in self:
-            if not service.res_model or not service.res_id:
+            if not service.res_model or not service.res_id or service.res_model not in self.env:
                 service.subject_active = True
                 continue
-            if service.res_model not in self.env:
-                service.subject_active = True
-                continue
-            record = self.env[service.res_model].sudo().browse(service.res_id)
-            if not record.exists():
+            record = subjects.get((service.res_model, service.res_id))
+            if not record:
                 service.subject_active = True
                 continue
             service.subject_active = record.active if "active" in record else True

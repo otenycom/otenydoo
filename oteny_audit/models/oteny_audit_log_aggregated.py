@@ -122,6 +122,7 @@ class OtenyAuditLogAggregated(models.Model):
         # header (static/src/widgets/audit_log_tab), so the record headers leave them out.
         without_user = self.env.context.get("oteny_audit_caption_without_user")
         date_format = self._audit_datetime_format()
+        selection_cache = {}
         for i, log in enumerate(log_list):
             caption_parts = []
 
@@ -158,7 +159,7 @@ class OtenyAuditLogAggregated(models.Model):
             change_type = log.change_type
             field_name = markupsafe.escape(log.field_display_name or "")
             is_html_field = self._is_html_field(log)
-            old_display, new_display = self._caption_values(log)
+            old_display, new_display = self._caption_values(log, selection_cache)
 
             if change_type == "i" and log.field_name == "id":
                 # An insert since 19.0.1.748 holds only the record's id: the header says it all.
@@ -192,14 +193,20 @@ class OtenyAuditLogAggregated(models.Model):
             if log.caption is False:
                 log.caption = ""
 
-    def _caption_values(self, log):
+    def _caption_values(self, log, selection_cache=None):
         """(old, new) display values of a row. A selection field shows its label: rows written
         before 19.0.1.723 hold the technical value ("email") as their display value."""
         old_display = log.old_value_display_name or ""
         new_display = log.new_value_display_name or ""
         field = self._audited_field(log)
         if field is not None and field.type == "selection":
-            labels = dict(field._description_selection(self.env))
+            cache_key = (log.field_model_name, log.field_name)
+            if selection_cache is not None and cache_key in selection_cache:
+                labels = selection_cache[cache_key]
+            else:
+                labels = dict(field._description_selection(self.env))
+                if selection_cache is not None:
+                    selection_cache[cache_key] = labels
             if old_display == (log.old_value or ""):
                 old_display = labels.get(old_display, old_display)
             if new_display == (log.new_value or ""):
@@ -427,6 +434,7 @@ class OtenyAuditLogAggregated(models.Model):
                 JOIN oteny_audit_log log ON ref.audit_log_id = log.id
                 LEFT JOIN ir_model im_target ON ref.target_model_name = im_target.model
                 LEFT JOIN ir_model im_child ON log.model_name = im_child.model"""
+                field_model_alias = "im_child"
                 child_filter = "NOT ref.is_direct AND "
             else:
                 row_id = "((log.id::bigint * 1000) + %s) * 2" % ("jek.idx" if snapshot else "0")
@@ -442,13 +450,14 @@ class OtenyAuditLogAggregated(models.Model):
                 source = """
                 FROM oteny_audit_log log
                 LEFT JOIN ir_model im_target ON log.model_name = im_target.model"""
+                field_model_alias = "im_target"
                 child_filter = ""
             if snapshot:
-                value_cols = """
+                value_cols = f"""
                     jek.key AS field_name,
                     COALESCE(jek.value->>'label', log.field_display_name) AS field_display_name,
                     log.model_name AS field_model_name,
-                    COALESCE(im_field.name->>'en_US', log.model_name) AS field_model_display_name,
+                    COALESCE({field_model_alias}.name->>'en_US', log.model_name) AS field_model_display_name,
                     CASE WHEN log.change_type = 'd' THEN jek.value->>'raw' ELSE '' END AS old_value,
                     CASE WHEN log.change_type = 'i' THEN jek.value->>'raw' ELSE '' END AS new_value,
                     CASE WHEN log.change_type = 'd' THEN jek.value->>'display' ELSE '' END AS old_value_display_name,
@@ -466,11 +475,11 @@ class OtenyAuditLogAggregated(models.Model):
                     AND log.snapshot <> '{}'::jsonb"""
             else:
                 # Cast to text so the column types match the snapshot branches.
-                value_cols = """
+                value_cols = f"""
                     log.field_name::text AS field_name,
                     log.field_display_name::text AS field_display_name,
                     log.model_name AS field_model_name,
-                    COALESCE(im_field.name->>'en_US', log.model_name) AS field_model_display_name,
+                    COALESCE({field_model_alias}.name->>'en_US', log.model_name) AS field_model_display_name,
                     log.old_value AS old_value,
                     log.new_value AS new_value,
                     log.old_value_display_name AS old_value_display_name,
@@ -493,8 +502,7 @@ class OtenyAuditLogAggregated(models.Model):
                     {record_name} AS record_display_name,
                     {parent_name} AS parent_record_display_name,{value_cols}
                     log.change_type,{child_cols}
-                {source}
-                LEFT JOIN ir_model im_field ON log.model_name = im_field.model{lateral}
+                {source}{lateral}
                 WHERE {child_filter}{where}"""
 
         branches = "\n                UNION ALL\n".join(

@@ -46,8 +46,11 @@ export class ArticleSidebar extends Component {
         this.searchBodies = useDebounced(this.searchBodies, 250);
         onWillStart(() => this.loadTree(this.props));
         onWillUpdateProps((nextProps) => {
-            if (nextProps.activeId !== this.props.activeId || nextProps.version !== this.props.version) {
+            if (nextProps.version !== this.props.version || (nextProps.activeId && !this.byId.has(nextProps.activeId))) {
                 return this.loadTree(nextProps);
+            }
+            if (nextProps.activeId !== this.props.activeId) {
+                this.expandTo(nextProps.activeId);
             }
         });
     }

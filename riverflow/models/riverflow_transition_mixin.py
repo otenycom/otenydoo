@@ -91,22 +91,23 @@ class RiverflowTransitionMixin(models.AbstractModel):
             action_context["active_id"] = self.id
             action_context["active_ids"] = self.ids
             # Pre-populate the wizard with current entity field values.
-            # Access ALL entity fields (getattr triggers stored computes that
-            # must fire for state_record tracker consistency), but only include
-            # fields the wizard model declares in the context defaults. Entity-
-            # only fields (is_service_with_journey, credential_ids, supply_unit_price,
-            # etc.) must not leak into context where they pollute create() calls
-            # on unrelated models during action_save.
+            # Flush pending stored computes on source (ensuring state_record
+            # tracker consistency) without evaluating unrelated non-stored
+            # computed fields, and copy only fields the wizard model declares.
             wizard_fields = set(self.env[res_model]._fields.keys())
             # A seam login often cannot read catalog rows (ir.model).
             # Read defaults as sudo. Later verbs still run as the user.
             source = self.sudo()
-            for field_name in source._fields:
-                field = source._fields[field_name]
+            source.flush_recordset()
+            if "state_record_id" in source._fields:
+                _ = source.state_record_id
+            for field_name in wizard_fields:
+                field = source._fields.get(field_name)
+                if field is None:
+                    continue
                 value = getattr(source, field_name)
                 converted_value = field.convert_to_cache(value, source)
-                if field_name in wizard_fields:
-                    defaults_context["default_" + field_name] = converted_value
+                defaults_context["default_" + field_name] = converted_value
 
         action_context.update(defaults_context)
 
